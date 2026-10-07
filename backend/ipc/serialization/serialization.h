@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 namespace nekotune {
+QJsonObject toJson(const PlaybackCapabilities &capabilities);
 QJsonObject toJson(const SongMetadata &song);
 /// Serialize both queue occurrence identity and persistent library song identity.
 /// @param position Include row state/order when nonnegative; omit them for current-song detail.

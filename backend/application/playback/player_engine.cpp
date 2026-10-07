@@ -2,6 +2,7 @@
 #include <QFileInfo>
 #include <QPointer>
 #include <cmath>
+#include <limits>
 namespace nekotune {
 PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
                            std::unique_ptr<IShuffleStrategy> strategy, PlaybackMode mode,
@@ -11,6 +12,14 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
     connect(&queue, &QueueService::changed, this, [this] {
         if (!m_navigating)
             m_order.syncQueue(m_queue.queue());
+        refreshCapabilities();
+    });
+    connect(this, &PlayerEngine::trackChanged, this, &PlayerEngine::refreshCapabilities);
+    connect(&backend, &IPlaybackBackend::seekableChanged, this, &PlayerEngine::refreshCapabilities);
+    connect(&backend, &IPlaybackBackend::seeked, this, [this](qint64 position) {
+        const auto &queue = m_queue.queue();
+        if (queue.currentIndex() >= 0)
+            emit seeked(position, queue.at(queue.currentIndex()).id);
     });
     connect(&backend, &IPlaybackBackend::stateChanged, this, &PlayerEngine::setState);
     connect(&backend, &IPlaybackBackend::audioOutputAvailabilityChanged, this, [this](bool available) {
@@ -20,11 +29,13 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
             if (intended)
                 pause();
         }
+        refreshCapabilities();
     });
     connect(&backend, &IPlaybackBackend::positionChanged, this,
-            [this](qint64 position) { emit positionChanged(position, m_backend.duration()); });
-    connect(&backend, &IPlaybackBackend::durationChanged, this, [this](qint64 duration) {
-        emit durationChanged(duration);
+            [this](qint64 position) { emit positionChanged(position, snapshot().duration); });
+    connect(&backend, &IPlaybackBackend::durationChanged, this, [this](qint64) {
+        emit durationChanged(snapshot().duration);
+        refreshCapabilities();
         m_metadataTimer.start();
     });
     connect(&backend, &IPlaybackBackend::metadataChanged, &m_metadataTimer, qOverload<>(&QTimer::start));
@@ -68,6 +79,26 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
         emit trackChanged();
         emit lyricsNeeded(true);
     });
+    refreshCapabilities();
+}
+void PlayerEngine::refreshCapabilities() {
+    const auto &queue = m_queue.queue();
+    const bool selected = queue.currentIndex() >= 0;
+    const int current = selected ? queue.at(queue.currentIndex()).id : 0;
+    PlaybackCapabilities next;
+    next.canPlay = !queue.isEmpty() && m_backend.audioOutputAvailable();
+    next.canPause = selected && m_state != PlayerState::Error;
+    next.canSeek = selected && !m_resolving && !m_backend.source().isEmpty() && m_backend.seekable() &&
+                   queue.at(queue.currentIndex()).metadata.durationMs > 0;
+    // Capability observation must not consume shuffle proposals or playback history.
+    const int forward = m_order.propose(queue, PlaybackAdvance::Next).queueId;
+    const int backward = m_order.propose(queue, PlaybackAdvance::Previous).queueId;
+    next.canGoNext = forward != 0 && forward != current;
+    next.canGoPrevious = backward != 0 && backward != current;
+    if (next == m_capabilities)
+        return;
+    m_capabilities = next;
+    emit capabilitiesChanged();
 }
 // Merge decoder tags with user-controlled library fields for display.
 // The queue occurrence supplies audio identity and the chosen path.
@@ -76,13 +107,15 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
 // This merge does not write decoder tags back into the library.
 PlaybackSnapshot PlayerEngine::snapshot() const {
     PlaybackSnapshot result{
-        m_state, m_backend.position(), m_backend.duration(), m_backend.volume(), {}, m_metadata};
+        m_state, m_backend.position(), 0, m_backend.volume(), {}, m_metadata};
     result.playbackMode = m_order.mode();
+    result.capabilities = m_capabilities;
     const auto &queue = m_queue.queue();
     if (queue.currentIndex() < 0)
         return result;
     result.song = queue.at(queue.currentIndex());
     const auto &song = *result.song;
+    result.duration = song.metadata.durationMs;
     if (!song.metadata.customTitle.isEmpty())
         result.metadata.title = song.metadata.customTitle;
     if (result.metadata.title.isEmpty())
@@ -94,6 +127,8 @@ PlaybackSnapshot PlayerEngine::snapshot() const {
     return result;
 }
 void PlayerEngine::setState(PlayerState state) {
+    if (state == PlayerState::Loading && !m_playIntent)
+        state = m_idleState;
     if (state == PlayerState::Playing && !m_playCounted && !m_backend.source().isEmpty() &&
         m_backend.audioOutputAvailable()) {
         const auto &queue = m_queue.queue();
@@ -107,8 +142,10 @@ void PlayerEngine::setState(PlayerState state) {
         return;
     m_state = state;
     emit stateChanged(state);
+    refreshCapabilities();
 }
-void PlayerEngine::loadCurrent(bool play, bool resetPlayCount) {
+void PlayerEngine::loadCurrent(bool play, bool resetPlayCount, PlayerState idleState) {
+    m_idleState = idleState;
     if (resetPlayCount)
         m_playCounted = false;
     play = play && m_backend.audioOutputAvailable();
@@ -133,7 +170,7 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount) {
     if (item.metadata.isRemote()) {
         m_backend.setSource({});
         m_resolving = true;
-        setState(play ? PlayerState::Loading : PlayerState::Paused);
+        setState(play ? PlayerState::Loading : m_idleState);
         emit trackChanged();
         if (m_reloadingExtensions.contains(item.metadata.providerId.section('/', 0, 0))) {
             m_resolving = false;
@@ -166,7 +203,7 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount) {
             if (guard->m_playIntent && guard->m_backend.audioOutputAvailable())
                 guard->m_backend.play();
             else
-                guard->setState(PlayerState::Paused);
+                guard->setState(guard->m_idleState);
         });
         return;
     }
@@ -175,7 +212,7 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount) {
     if (play)
         m_backend.play();
     else
-        setState(PlayerState::Paused);
+        setState(m_idleState);
 }
 void PlayerEngine::clearSource() {
     m_playCounted = false;
@@ -212,6 +249,7 @@ Result<void> PlayerEngine::play() {
     auto queue = m_queue.queue();
     if (queue.isEmpty())
         return failure(QStringLiteral("No song loaded"));
+    m_playIntent = true;
     if (queue.currentIndex() < 0) {
         queue.setCurrentIndex(0);
         return replaceQueue(queue);
@@ -225,6 +263,7 @@ Result<void> PlayerEngine::play() {
 Result<void> PlayerEngine::toggle() { return playing() ? pause() : play(); }
 Result<void> PlayerEngine::pause() {
     m_playIntent = false;
+    m_idleState = PlayerState::Paused;
     if (m_resolving || m_waitingForReload) {
         setState(PlayerState::Paused);
         return {};
@@ -233,6 +272,8 @@ Result<void> PlayerEngine::pause() {
     return {};
 }
 Result<void> PlayerEngine::stop() {
+    m_playIntent = false;
+    m_idleState = PlayerState::Stopped;
     m_playCounted = false;
     const auto &current = m_queue.queue();
     if (m_resolving ||
@@ -246,8 +287,10 @@ Result<void> PlayerEngine::stop() {
 Result<void> PlayerEngine::setPlaybackMode(PlaybackMode mode) {
     const auto previous = m_order.mode();
     auto result = m_order.setMode(mode, m_queue.queue());
-    if (result && previous != mode)
+    if (result && previous != mode) {
+        refreshCapabilities();
         emit playbackModeChanged(mode);
+    }
     return result;
 }
 void PlayerEngine::sourceUnavailable(const QString &provider) {
@@ -280,9 +323,11 @@ void PlayerEngine::sourcesReloading(const QStringList &extensionIds, bool active
         loadCurrent(m_playIntent, false);
     }
 }
-Result<void> PlayerEngine::next() { return advance(PlaybackAdvance::Next); }
-Result<void> PlayerEngine::previous() { return advance(PlaybackAdvance::Previous); }
-Result<void> PlayerEngine::advance(PlaybackAdvance reason) {
+Result<void> PlayerEngine::next(bool preserveState) { return advance(PlaybackAdvance::Next, preserveState); }
+Result<void> PlayerEngine::previous(bool preserveState) { return advance(PlaybackAdvance::Previous, preserveState); }
+Result<void> PlayerEngine::advance(PlaybackAdvance reason, bool preserveState) {
+    const auto previousState = m_state;
+    const bool resume = !preserveState || playing();
     auto queue = m_queue.queue();
     if (queue.isEmpty())
         return reason == PlaybackAdvance::Ended ? Result<void>{} : failure(QStringLiteral("Queue is empty"));
@@ -302,7 +347,13 @@ Result<void> PlayerEngine::advance(PlaybackAdvance reason) {
     // Only a durable selection may consume the shuffle proposal and its playback history.
     m_order.confirm(std::move(selection));
     m_backend.stop();
-    loadCurrent(true);
+    loadCurrent(resume, true, preserveState && previousState == PlayerState::Stopped
+                                  ? PlayerState::Stopped : PlayerState::Paused);
+    if (preserveState && previousState == PlayerState::Stopped) {
+        m_playIntent = false;
+        setState(PlayerState::Stopped);
+    }
+    refreshCapabilities();
     return {};
 }
 Result<void> PlayerEngine::seek(qint64 position) {
@@ -310,6 +361,23 @@ Result<void> PlayerEngine::seek(qint64 position) {
         return failure(QStringLiteral("Position must be greater than or equal to 0"));
     m_backend.seek(position);
     return {};
+}
+Result<void> PlayerEngine::seekTrack(qint64 value, bool relative, std::optional<int> queueId) {
+    const auto state = snapshot();
+    if (!state.song || (queueId && *queueId != state.song->id) || !state.capabilities.canSeek)
+        return {};
+    if (!relative) {
+        if (value < 0 || value > state.duration)
+            return {};
+        return seek(value);
+    }
+    // Saturate signed addition, including INT64_MIN, before checking track boundaries.
+    const auto position = qMax<qint64>(0, state.position);
+    const auto target = value > std::numeric_limits<qint64>::max() - position
+                            ? std::numeric_limits<qint64>::max() : position + value;
+    if (target > state.duration)
+        return next(true);
+    return seek(qMax<qint64>(0, target));
 }
 Result<void> PlayerEngine::setVolume(double volume) {
     if (!std::isfinite(volume) || volume < 0 || volume > 1)

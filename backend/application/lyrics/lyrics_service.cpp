@@ -67,10 +67,56 @@ void LyricsService::clear(quint64 revision) {
     publish(QStringLiteral("idle"));
 }
 
+LyricsProvider *LyricsService::findProviderForSource(const QString &sourceProvider,
+                                                     const QString &importSource) const {
+    if (!sourceProvider.isEmpty() && m_providers.contains(sourceProvider))
+        return m_providers.value(sourceProvider);
+
+    QString extId;
+    if (!sourceProvider.isEmpty()) {
+        extId = sourceProvider.section('/', 0, 0);
+    } else if (!importSource.isEmpty() && importSource != QStringLiteral("local")) {
+        extId = importSource;
+    }
+
+    if (!extId.isEmpty()) {
+        if (m_providers.contains(extId))
+            return m_providers.value(extId);
+
+        const QString prefix = extId + '/';
+        LyricsProvider *fallbackPrefixProvider = nullptr;
+        for (auto it = m_providers.cbegin(); it != m_providers.cend(); ++it) {
+            if (it.key().startsWith(prefix)) {
+                if (it.key().contains(QStringLiteral("lyric"), Qt::CaseInsensitive))
+                    return it.value();
+                if (!fallbackPrefixProvider)
+                    fallbackPrefixProvider = it.value();
+            }
+        }
+        if (fallbackPrefixProvider)
+            return fallbackPrefixProvider;
+    }
+
+    if (!importSource.isEmpty() && importSource != QStringLiteral("local") && importSource != extId) {
+        if (m_providers.contains(importSource))
+            return m_providers.value(importSource);
+        const QString prefix = importSource + '/';
+        for (auto it = m_providers.cbegin(); it != m_providers.cend(); ++it) {
+            if (it.key().startsWith(prefix))
+                return it.value();
+        }
+    }
+
+    return m_defaultProvider;
+}
+
 void LyricsService::load(const LyricsQuery &query, const QString &path, const QString &customLyrics,
-                         quint64 revision, bool metadataReady, bool force, const QString &managedBase) {
+                         quint64 revision, bool metadataReady, bool force, const QString &managedBase,
+                         const QString &sourceProvider, const QString &importSource) {
     cancel();
-    m_provider = m_defaultProvider;
+    m_provider = findProviderForSource(sourceProvider, importSource);
+    if (!m_provider)
+        m_provider = m_defaultProvider;
     m_revision = revision;
     m_query = query;
     m_manual = false;
@@ -268,8 +314,32 @@ void LyricsService::completed(quint64 token, const QVector<LyricsCandidate> &can
     if (m_provider && m_provider->descriptor().staged) {
         // Staged providers return song versions before lyrics; these are not ready documents to apply.
         if (m_candidates.isEmpty()) {
+            if (!m_manual && m_provider != m_defaultProvider && m_defaultProvider) {
+                m_provider = m_defaultProvider;
+                m_provider->request(m_query, ++m_token, false);
+                return;
+            }
             publish(QStringLiteral("not_found"));
             return;
+        }
+        if (!m_manual) {
+            const auto &best = m_candidates.first();
+            if (confident(m_query, m_candidates)) {
+                if (!best.songResult && (!best.document.isEmpty() || best.document.isSynced())) {
+                    apply(best.document, true);
+                    return;
+                }
+                m_snapshot.searchStage = best.songResult ? QStringLiteral("lyrics") : QStringLiteral("download");
+                publish(best.songResult ? QStringLiteral("searching") : QStringLiteral("loading"));
+                m_provider->choose(best, m_token);
+                return;
+            }
+            // Ambiguous song versions may fall back; lyric versions stay available for explicit selection.
+            if (best.songResult && m_provider != m_defaultProvider && m_defaultProvider) {
+                m_provider = m_defaultProvider;
+                m_provider->request(m_query, ++m_token, false);
+                return;
+            }
         }
         m_snapshot.searchStage =
             m_candidates.first().songResult ? QStringLiteral("songs") : QStringLiteral("lyrics");
@@ -284,6 +354,12 @@ void LyricsService::completed(quint64 token, const QVector<LyricsCandidate> &can
         m_search = true;
         m_provider->request(m_query, ++m_token, true);
     } else if (m_candidates.isEmpty()) {
+        if (!m_manual && m_provider != m_defaultProvider && m_defaultProvider) {
+            m_provider = m_defaultProvider;
+            m_search = false;
+            m_provider->request(m_query, ++m_token, false);
+            return;
+        }
         publish(QStringLiteral("not_found"));
     } else {
         m_snapshot.candidates = m_candidates;
@@ -297,6 +373,12 @@ void LyricsService::failed(quint64 token, const QString &kind) {
     if (kind == QStringLiteral("not_found") && !m_search) {
         m_search = true;
         m_provider->request(m_query, ++m_token, true);
+        return;
+    }
+    if (!m_manual && m_provider != m_defaultProvider && m_defaultProvider) {
+        m_provider = m_defaultProvider;
+        m_search = false;
+        m_provider->request(m_query, ++m_token, false);
         return;
     }
     publish(kind == QStringLiteral("not_found") ? kind : QStringLiteral("error"), kind);

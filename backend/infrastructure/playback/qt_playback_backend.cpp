@@ -10,6 +10,10 @@ namespace nekotune {
 // No automatic playlist/shuffle policy is implemented inside this adapter.
 QtPlaybackBackend::QtPlaybackBackend() {
     m_audio.setVolume(.8);
+    m_seekTimeout.setSingleShot(true);
+    m_seekTimeout.setInterval(2000);
+    connect(&m_seekTimeout, &QTimer::timeout, this, [this] { m_seekTarget.reset(); });
+    connect(&m_player, &QMediaPlayer::seekableChanged, this, &IPlaybackBackend::seekableChanged);
 #ifdef NEKOTUNE_PULSE_AUDIO_PORTS
     connect(&m_ports, &PulseAudioPorts::changed, this, [this] {
         if (!m_outputId.isEmpty()) {
@@ -53,6 +57,7 @@ QtPlaybackBackend::QtPlaybackBackend() {
             emit metadataChanged();
     });
     connect(&m_player, &QMediaPlayer::positionChanged, this, &IPlaybackBackend::positionChanged);
+    connect(&m_player, &QMediaPlayer::positionChanged, this, &QtPlaybackBackend::confirmSeek);
     connect(&m_player, &QMediaPlayer::durationChanged, this, &IPlaybackBackend::durationChanged);
     connect(&m_player, &QMediaPlayer::metaDataChanged, this, &IPlaybackBackend::metadataChanged);
     connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error error) {
@@ -66,6 +71,42 @@ QtPlaybackBackend::QtPlaybackBackend() {
         }
         emit failed(message);
     });
+}
+void QtPlaybackBackend::setSource(const QUrl &url) {
+    m_seekTarget.reset();
+    m_seekTimeout.stop();
+    m_player.setSource(url);
+    emit seekableChanged();
+}
+void QtPlaybackBackend::stop() {
+    m_seekTarget.reset();
+    m_seekTimeout.stop();
+    m_player.stop();
+}
+void QtPlaybackBackend::seek(qint64 value) {
+    if (!seekable()) {
+        // Preserve ordinary IPC/UI dispatch while Qt decides whether the unloaded
+        // or non-seekable source can accept a position; only confirmation is gated.
+        m_player.setPosition(value);
+        return;
+    }
+    m_seekTarget = qBound<qint64>(0, value, m_player.duration());
+    m_seekClock.restart();
+    m_seekTimeout.start();
+    m_player.setPosition(*m_seekTarget);
+    confirmSeek(m_player.position());
+}
+void QtPlaybackBackend::confirmSeek(qint64 position) {
+    if (!m_seekTarget)
+        return;
+    // Qt may coalesce the seek with a subsequent playback tick. Report the observed
+    // clock only after it reaches the target, allowing elapsed playback and codec rounding.
+    const auto elapsed = m_player.playbackState() == QMediaPlayer::PlayingState ? m_seekClock.elapsed() : 0;
+    if (position < *m_seekTarget - 100 || position > *m_seekTarget + elapsed + 100)
+        return;
+    m_seekTarget.reset();
+    m_seekTimeout.stop();
+    emit seeked(position);
 }
 QList<AudioOutputDevice> QtPlaybackBackend::audioOutputs() const {
     QList<AudioOutputDevice> result;

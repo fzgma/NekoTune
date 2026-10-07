@@ -7,6 +7,23 @@ endfunction()
 
 set(CMAKE_WIN32_EXECUTABLE OFF)
 set(NEKOTUNE_TEST_QPA offscreen)
+add_executable(nekotune_system_media_test system_media_test.cpp)
+target_link_libraries(nekotune_system_media_test PRIVATE nekotune_core nekotune_frontend Qt6::Test)
+nekotune_add_qt_test(NAME nekotune_system_media_test COMMAND nekotune_system_media_test)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(nekotune_mpris_test mpris_test.cpp)
+    target_link_libraries(nekotune_mpris_test PRIVATE nekotune_core nekotune_frontend Qt6::DBus Qt6::Test)
+    find_program(NEKOTUNE_DBUS_RUN_SESSION dbus-run-session REQUIRED)
+    nekotune_add_qt_test(NAME nekotune_mpris_test COMMAND ${NEKOTUNE_DBUS_RUN_SESSION} -- $<TARGET_FILE:nekotune_mpris_test>
+        metadataAndWireTypes playbackNavigationSeekAndVolume stalePositionsAndErrors
+        progressSignalsAndDeferredSeekConfirmation unavailableOutputAndMetadataClear collisionAndCleanup
+        disconnectReconnectChangesTrackIdentity raiseAndQuitRequests commandTimeoutAndLateReply
+        ipcValidationAndLegacyNavigation playerctlInteroperability backendFailureRetainsSelection
+        pendingCommandDisconnectDoesNotReplay)
+    nekotune_add_qt_test(NAME nekotune_mpris_without_bus_test COMMAND nekotune_mpris_test withoutSessionBus)
+    set_tests_properties(nekotune_mpris_without_bus_test PROPERTIES
+        ENVIRONMENT "DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/nekotune-test-bus")
+endif()
 if(WIN32)
     set(NEKOTUNE_TEST_QPA windows)
 endif()

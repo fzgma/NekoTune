@@ -2,6 +2,9 @@
 #include "i18n.h"
 #include "app_paths.h"
 #include "ipc_client.h"
+#ifdef NEKOTUNE_MPRIS
+#include "platform/linux/mpris_service.h"
+#endif
 
 #ifdef NEKOTUNE_EMBED_BACKEND
 #include "runtime/backend_runtime.h"
@@ -93,6 +96,10 @@ int main(int argc, char *argv[]) {
     IpcClient ipcClient;
     I18n i18n;
     AppControllers controllers(ipcClient);
+#ifdef NEKOTUNE_MPRIS
+    SystemMediaBridge mediaBridge(ipcClient, *controllers.playback);
+    MprisService mpris(mediaBridge);
+#endif
 
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(new CoverNetworkManagerFactory);
@@ -122,6 +129,18 @@ int main(int argc, char *argv[]) {
     if (engine.rootObjects().isEmpty()) {
         return 1;
     }
+
+#ifdef NEKOTUNE_MPRIS
+    const auto window = qobject_cast<QWindow *>(engine.rootObjects().first());
+    QObject::connect(&mediaBridge, &SystemMediaBridge::raiseRequested, window, [window] {
+        if (window->windowState() == Qt::WindowMinimized) window->showNormal();
+        else window->show();
+        window->raise();
+        window->requestActivate();
+    });
+    QObject::connect(&mediaBridge, &SystemMediaBridge::quitRequested, &app, &QCoreApplication::quit);
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &mediaBridge, &SystemMediaBridge::shutdown);
+#endif
 
     return app.exec();
 }

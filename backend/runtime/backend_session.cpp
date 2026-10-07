@@ -136,7 +136,7 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     // Duration enrichment updates every queued occurrence through library identity.
     // Playlist snapshots are also invalidated so all views share the same stored duration.
     // Neither notification selects another track or rebuilds collection membership.
-    connect(&m_library, &LibraryService::durationUpdated, &m_queue, &QueueService::updateMetadata);
+    connect(&m_library, &LibraryService::durationUpdated, &m_player, &PlayerEngine::metadataUpdated);
     connect(&m_library, &LibraryService::durationUpdated, this,
             [playlistsChanged](const SongMetadata &) { playlistsChanged(); });
     connect(&m_library, &LibraryService::metadataChanged, &m_player, &PlayerEngine::metadataUpdated);
@@ -164,6 +164,13 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     connect(&m_player, &PlayerEngine::durationChanged, this, [this](qint64 duration) {
         m_server.broadcastEvent({{"event", "player.duration_changed"}, {"duration", duration}});
     });
+    connect(&m_player, &PlayerEngine::seeked, this, [this](qint64 position, int queueId) {
+        m_server.broadcastEvent({{"event", "player.seeked"}, {"position", position}, {"queue_id", queueId}});
+    });
+    connect(&m_player, &PlayerEngine::capabilitiesChanged, this, [this] {
+        m_server.broadcastEvent({{"event", "player.capabilities_changed"},
+                                 {"capabilities", toJson(m_player.snapshot().capabilities)}});
+    });
     connect(&m_player, &PlayerEngine::playbackModeChanged, this, [this](PlaybackMode mode) {
         m_server.broadcastEvent({{"event", "player.playback_mode_changed"},
                                  {"playback_mode", toString(mode)}});
@@ -172,8 +179,10 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
         m_server.broadcastEvent({{"event", "player.volume_changed"}, {"volume", volume}});
     });
     auto trackChanged = [this] {
+        const auto state = m_api.playbackStatus();
         m_server.broadcastEvent(
-            {{"event", "player.track_changed"}, {"song", m_api.playbackStatus().value("song")}});
+            {{"event", "player.track_changed"}, {"song", state.value("song")},
+             {"duration", state.value("duration")}});
     };
     connect(&m_player, &PlayerEngine::trackChanged, this, trackChanged);
     connect(&m_player, &PlayerEngine::errorOccurred, this, [this](const QString &message) {

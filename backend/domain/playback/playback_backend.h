@@ -48,6 +48,7 @@ class IPlaybackBackend : public QObject {
     virtual void pause() = 0;
     virtual void stop() = 0;
     virtual void seek(qint64 position) = 0;
+    virtual bool seekable() const { return false; }
     virtual void setVolume(double volume) = 0;
     virtual qint64 position() const = 0;
     virtual qint64 duration() const = 0;
@@ -66,6 +67,8 @@ class IPlaybackBackend : public QObject {
   signals:
     void stateChanged(nekotune::PlayerState state);
     void positionChanged(qint64 position);
+    void seeked(qint64 position);
+    void seekableChanged();
     void durationChanged(qint64 duration);
     void metadataChanged();
     void ended();

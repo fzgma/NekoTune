@@ -14,6 +14,7 @@ NekoTune 是一款本地优先的 Linux 音乐播放器，使用 C++20、Qt6 和
 | 播放队列 | 独立抽屉，支持追加、移除、清空和重启恢复 |
 | 播放控制 | 播放／暂停、停止、上一首、下一首、跳转、音量；顺序、单曲循环、随机和列表循环 |
 | 音频输出 | 设置页和播放栏选择系统默认或指定设备；保存选择，设备断开时暂停，重连后手动恢复 |
+| Linux 系统媒体控制 | MPRIS 2：桌面媒体面板和媒体键控制播放、切歌、进度及音量，并显示歌曲资料与封面 |
 | 歌词与封面 | 本地优先，支持 LRC、KRC 词组高亮、在线候选选择和离线缓存 |
 | AI 歌曲信息 | 通过兼容 Chat Completions 的服务生成歌名、歌手和标签建议，确认后保存 |
 | 扩展 | JS/TS 独立后台、QML 页面与完整界面替换、主题、命令、歌词及在线播放音源 |
@@ -27,6 +28,7 @@ NekoTune 是一款本地优先的 Linux 音乐播放器，使用 C++20、Qt6 和
 
 - CMake 3.28+、支持 C++20 的编译器和 `pkg-config`。
 - Qt 6.6+：Core、Gui、Network、Sql、Multimedia、Quick、Qml、QuickControls2、Test、QuickTest。
+- Linux 桌面集成另需 Qt DBus 开发包；自动化总线测试需要 `dbus-run-session`，可选安装 `playerctl` 验证客户端互操作。
 - Zlib 和 FFmpeg 开发库：`libavformat`、`libavutil`。
 - QtKeychain 0.17+ 的 Qt6 开发包，CMake 包名为 `Qt6Keychain`。
 - Linux 还需 `libsecret-1` 开发库，用于读取并迁移旧版系统密钥库条目。建议安装 `libpulse` 14+ 开发库（Debian/Ubuntu：`libpulse-dev`），以便直接选择同一声卡下的耳机／扬声器端口；兼容 PulseAudio 和 PipeWire 的 Pulse 服务，未编入此支持时仍可选择 Qt 音频设备。
@@ -117,9 +119,17 @@ NEKOTUNE_SOCKET="$nekotune_profile/nekotune.sock" \
 | Ctrl+O | 向当前浏览目标导入；队列抽屉展开时追加队列 |
 | Esc | 关闭弹窗，或收起队列／退出正在播放页 |
 
+### Linux 系统媒体控制
+
+统一程序与独立 Qt/QML 前端在连接后端并收到完整状态后，自动注册 MPRIS 会话 `org.mpris.MediaPlayer2.NekoTune`；同时打开多个前端时，后续实例使用 `.instance<PID>`。后端断线或前端退出时撤销会话，重连后重新注册。独立后端本身不注册会话；退出独立前端不会关闭独立后端。
+
+系统媒体面板可读取歌曲资料、封面、时长和进度，控制播放、暂停、停止、切歌、跳转与音量，也可请求显示窗口或退出桌面程序。系统端切歌保留暂停／停止状态。窗口能否获得焦点由桌面窗口管理器决定。系统端循环／随机设置、队列编辑和 OpenUri 暂不提供；系统总线不可用时仅记录警告，不影响普通播放。
+
+可选用 `playerctl --player=NekoTune status`、`playerctl --player=NekoTune metadata`、`playerctl --player=NekoTune play-pause` 检查当前会话。发行包包含 Qt DBus 运行依赖，用户会话仍需提供 D-Bus 服务。
+
 ### 歌词与封面
 
-自动加载顺序为：同目录同名 `.krc` → `.lrc` → 自定义歌词 → 歌词缓存 → LRCLIB。损坏的 KRC 会尝试回退 LRC；「刷新」跳过自定义歌词和缓存，仍优先读取本地文件。自动在线结果只有满足可靠匹配条件才应用，其余候选由用户选择。
+自动加载顺序为：同目录同名 `.krc` → `.lrc` → 自定义歌词 → 歌词缓存 → 在线来源。在线优先匹配歌曲所属来源的已注册歌词提供方，无法匹配时使用 LRCLIB。损坏的 KRC 会尝试回退 LRC；「刷新」跳过自定义歌词和缓存，仍优先读取本地文件。自动在线结果只有满足可靠匹配条件才应用；分阶段来源返回多个同分歌词版本时保留原来源候选，由用户选择。扩展歌曲版本无法可靠匹配、无结果或获取失败时可回退到 LRCLIB。
 
 手动搜索可选 LRCLIB；启用并配置酷狗插件后也可选择酷狗音乐。酷狗先选择歌曲版本，再选择歌词，优先获取 KRC，失败时回退 LRC；歌词搜索无需登录。成功获取的配套歌词和酷狗封面保存到歌曲的编号目录，扫描不会批量获取在线资源。
 

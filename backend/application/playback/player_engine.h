@@ -32,13 +32,15 @@ class PlayerEngine final : public QObject {
     /// Explicit navigation is distinguished from natural end-of-track completion.
     /// Repeat-one therefore does not prevent moving to another occurrence here.
     /// The proposed selection consumes history only after queue persistence succeeds.
-    Result<void> next();
-    Result<void> previous();
+    Result<void> next(bool preserveState = false);
+    Result<void> previous(bool preserveState = false);
     /// @param position Nonnegative media position in milliseconds.
     /// Negative input is rejected; upper-range handling belongs to the playback adapter.
     /// Successful dispatch does not imply that the decoder has reached the requested position.
     /// Position notifications provide the authoritative result to the frontend.
     Result<void> seek(qint64 position);
+    /// Stale occurrences and out-of-range absolute targets are successful no-ops.
+    Result<void> seekTrack(qint64 value, bool relative, std::optional<int> queueId = {});
     /// @param volume Finite normalized value in [0, 1], including zero for mute.
     /// NaN and infinities are rejected before reaching the decoder.
     /// The notification contains the adapter's resulting value rather than an assumed input echo.
@@ -71,6 +73,8 @@ class PlayerEngine final : public QObject {
   signals:
     void stateChanged(nekotune::PlayerState state);
     void positionChanged(qint64 position, qint64 duration);
+    void seeked(qint64 position, int queueId);
+    void capabilitiesChanged();
     void durationChanged(qint64 duration);
     void volumeChanged(double volume);
     void trackChanged();
@@ -80,8 +84,9 @@ class PlayerEngine final : public QObject {
     void errorOccurred(const QString &message);
 
   private:
-    Result<void> advance(PlaybackAdvance reason);
-    void loadCurrent(bool play, bool resetPlayCount = true);
+    Result<void> advance(PlaybackAdvance reason, bool preserveState = false);
+    void refreshCapabilities();
+    void loadCurrent(bool play, bool resetPlayCount = true, PlayerState idleState = PlayerState::Paused);
     void clearSource();
     void setState(PlayerState state);
     IPlaybackBackend &m_backend;
@@ -99,6 +104,8 @@ class PlayerEngine final : public QObject {
     bool m_playIntent = false;
     bool m_playCounted = false;
     bool m_waitingForReload = false;
+    PlayerState m_idleState = PlayerState::Paused;
     QSet<QString> m_reloadingExtensions;
+    PlaybackCapabilities m_capabilities;
 };
 } // namespace nekotune

@@ -25,12 +25,13 @@ class LyricsService final : public QObject {
     /// @param path Local audio path used to locate adjacent authoritative sidecars.
     /// @param customLyrics User-authored library lyrics, independent of provider cache.
     /// @param revision Request identity echoed in snapshots and asset notifications.
-    /// @param metadataReady Whether automatic online matching has sufficient decoder metadata.
+    /// @param metadataReady Whether stored song data or decoder metadata is ready for online matching.
     /// @param force Bypass custom/cache content while retaining local-sidecar precedence.
     /// @param managedBase Independent numbered basename checked before source-side files.
     /// Completion is published asynchronously; callers observe changed rather than a return value.
     void load(const LyricsQuery &query, const QString &path, const QString &customLyrics, quint64 revision,
-              bool metadataReady, bool force = false, const QString &managedBase = {});
+              bool metadataReady, bool force = false, const QString &managedBase = {},
+              const QString &sourceProvider = {}, const QString &importSource = {});
     /// @param source Registered provider ID, not its localized display name.
     /// @param revision Current controller request identity for the resulting candidate list.
     /// Manual search preserves the selected document while replacing search candidates.
@@ -68,6 +69,7 @@ class LyricsService final : public QObject {
     void publish(const QString &state, const QString &error = {});
     void apply(const LyricsDocument &document, bool cache);
     void cancel();
+    LyricsProvider *findProviderForSource(const QString &sourceProvider, const QString &importSource) const;
 
     std::unique_ptr<ILyricsStorage> m_storage;
     QHash<QString, LyricsProvider *> m_providers;

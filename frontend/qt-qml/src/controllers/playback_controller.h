@@ -13,6 +13,7 @@ class PlaybackController final : public FeatureController {
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(double volume READ volume NOTIFY volumeChanged)
     Q_PROPERTY(QVariantMap song READ song NOTIFY songChanged)
+    Q_PROPERTY(QVariantMap capabilities READ capabilities NOTIFY capabilitiesChanged)
   public:
     explicit PlaybackController(IpcClient &client);
     QString playbackMode() const { return m_playbackMode; }
@@ -21,6 +22,7 @@ class PlaybackController final : public FeatureController {
     double duration() const { return m_duration; }
     double volume() const { return m_volume; }
     QVariantMap song() const { return m_song; }
+    QVariantMap capabilities() const { return m_capabilities; }
     /// Merge a partial event or complete status reply on the frontend thread.
     /// An explicit empty song object clears selection; an omitted song retains it.
     /// Each changed field emits its own notification without resetting unrelated models.
@@ -48,10 +50,13 @@ class PlaybackController final : public FeatureController {
     void durationChanged();
     void volumeChanged();
     void songChanged();
+    void capabilitiesChanged();
+    void seeked(qint64 position, int queueId);
 
   private:
     QString m_playbackMode = "sequential";
     QString m_state = "stopped";
     double m_position = 0, m_duration = 0, m_volume = .8, m_lastVolume = .8;
     QVariantMap m_song;
+    QVariantMap m_capabilities;
 };

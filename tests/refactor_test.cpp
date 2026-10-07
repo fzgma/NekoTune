@@ -124,12 +124,12 @@ class RefactorTest final : public QObject {
     QString m_audio;
     QString m_socket;
     QString m_database;
-    void writeAudio(const QString &path, char sample) {
+    void writeAudio(const QString &path, char sample, int seconds = 30) {
         QFile file(path);
         QVERIFY(file.open(QIODevice::WriteOnly));
         QDataStream stream(&file);
         stream.setByteOrder(QDataStream::LittleEndian);
-        constexpr quint32 size = 8000 * 2 * 30;
+        const quint32 size = 8000 * 2 * seconds;
         file.write("RIFF");
         stream << quint32(size + 36);
         file.write("WAVEfmt ");
@@ -304,6 +304,38 @@ class RefactorTest final : public QObject {
         QCOMPARE(restored.call("player.play").value("status").toString(), "ok");
         QCOMPARE(restored.call("player.status").value("data").toObject().value("song").toObject()
                      .value("play_count").toInteger(), count + 2);
+        runtime.stop();
+    }
+    void storedDurationReachesFrontendOnTrackChanges() {
+        const auto shortAudio = m_directory.filePath("short-duration.wav");
+        writeAudio(shortAudio, 1, 2);
+        BackendRuntime runtime(makeFakeAudio);
+        QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+        RpcPeer peer;
+        QVERIFY(peer.connect(m_socket));
+        QCOMPARE(peer.call("lyrics.set_offline", {{"offline", true}}).value("status").toString(), "ok");
+        QCOMPARE(peer.call("queue.clear").value("status").toString(), "ok");
+        IpcClient client;
+        PlaybackController playback(client);
+        QTRY_VERIFY(client.connected());
+        QTRY_COMPARE(playback.duration(), 0);
+        // This peer's responses never reach the frontend controller; only broadcast events do.
+        QCOMPARE(peer.call("player.play", {{"path", m_audio}}).value("status").toString(), "ok");
+        QTRY_COMPARE(playback.duration(), 30000);
+        QCOMPARE(peer.call("player.play", {{"path", shortAudio}}).value("status").toString(), "ok");
+        QTRY_COMPARE(playback.duration(), 2000);
+        const auto status = peer.call("player.status").value("data").toObject();
+        QCOMPARE(status.value("duration").toInteger(), 2000);
+        QCOMPARE(status.value("song").toObject().value("duration_ms").toInteger(), 2000);
+        runtime.stop();
+        QVERIFY(runtime.start());
+        RpcPeer restored;
+        QVERIFY(restored.connect(m_socket));
+        QCOMPARE(restored.call("player.status").value("data").toObject().value("duration").toInteger(), 2000);
+        QTRY_VERIFY(client.connected());
+        QTRY_COMPARE(playback.duration(), 2000);
+        QCOMPARE(restored.call("queue.clear").value("status").toString(), "ok");
+        QTRY_COMPARE(playback.duration(), 0);
         runtime.stop();
     }
     void socketCompatibilityAndConnectedShutdown() {

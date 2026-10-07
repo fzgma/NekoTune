@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QObject>
+#include <QPointer>
 #include <QTimer>
 #include <functional>
 /// Multiplexes response callbacks by request ID and forwards independent events to feature controllers.
@@ -24,9 +25,10 @@ class IpcClient final : public QObject {
     /// @param completion Optional callback consumed once on response or connection loss.
     /// @param reportError Whether failure should also update the shared transport banner.
     /// Requests are not replayed after reconnect because a lost reply may follow a committed mutation.
+    /// A positive timeoutMs discards response correlation at expiry; it cannot cancel backend work.
     /// Lifetime-sensitive callers should guard their objects through FeatureController::send.
     void request(const QString &method, const QJsonObject &params = {}, Completion completion = {},
-                 bool reportError = true);
+                 bool reportError = true, int timeoutMs = 0);
     /// Convert file URLs returned by QML dialogs into native local paths.
     /// Already-native paths are retained verbatim rather than decoded as arbitrary URLs.
     /// Filesystem validation remains the receiving backend method's responsibility.
@@ -45,6 +47,7 @@ class IpcClient final : public QObject {
         QString method;
         Completion completion;
         bool reportError = true;
+        QPointer<QTimer> timer;
     };
     void readMessages();
     void setError(const QString &message);

@@ -47,7 +47,7 @@ QString IpcClient::normalizePath(const QString &path) {
 // Disconnected calls fail immediately while connection retry continues.
 // No implicit queue of replayable mutations is kept across connections.
 // Feature-specific reportError avoids unrelated global banner changes.
-void IpcClient::request(const QString &method, const QJsonObject &params, Completion completion, bool reportError) {
+void IpcClient::request(const QString &method, const QJsonObject &params, Completion completion, bool reportError, int timeoutMs) {
     if (!connected()) {
         connectBackend();
         const QString message = "Backend is not connected";
@@ -59,7 +59,22 @@ void IpcClient::request(const QString &method, const QJsonObject &params, Comple
         return;
     }
     auto id = m_nextId++;
-    m_pending.insert(id, {method, std::move(completion), reportError});
+    QTimer *timer = nullptr;
+    if (timeoutMs > 0) {
+        timer = new QTimer(this);
+        timer->setSingleShot(true);
+        connect(timer, &QTimer::timeout, this, [this, id] {
+            if (!m_pending.contains(id)) return;
+            auto pending = m_pending.take(id);
+            pending.timer->deleteLater();
+            const QString message = "Backend command timed out";
+            if (pending.reportError) setError(message);
+            if (pending.completion) pending.completion({}, message);
+            emit requestFailed(pending.method, message);
+        });
+        timer->start(timeoutMs);
+    }
+    m_pending.insert(id, {method, std::move(completion), reportError, timer});
     m_socket.write(QJsonDocument(QJsonObject{{"id", id}, {"method", method}, {"params", params}})
                        .toJson(QJsonDocument::Compact) +
                    "\n");
@@ -70,6 +85,7 @@ void IpcClient::failPending() {
     auto pending = std::move(m_pending);
     m_pending.clear();
     for (const auto &request : pending) {
+        if (request.timer) { request.timer->stop(); request.timer->deleteLater(); }
         if (request.completion)
             request.completion({}, "Backend disconnected");
         emit requestFailed(request.method, "Backend disconnected");
@@ -105,6 +121,7 @@ void IpcClient::readMessages() {
             continue;
         // Consume before invoking user callbacks so each request can complete at most once.
         auto pending = m_pending.take(id);
+        if (pending.timer) { pending.timer->stop(); pending.timer->deleteLater(); }
         auto message = payload.value("status") == "error" ? payload.value("message").toString() : QString();
         auto data = payload.value("data").toObject();
         if (!message.isEmpty()) {

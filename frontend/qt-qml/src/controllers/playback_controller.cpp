@@ -6,6 +6,8 @@ PlaybackController::PlaybackController(IpcClient &client) : FeatureController(cl
             apply(event);
         else if (name == "server.connected")
             apply(event.value("data").toObject());
+        if (name == "player.seeked")
+            emit seeked(event.value("position").toInteger(), event.value("queue_id").toInt());
     });
     connect(&client, &IpcClient::responseReceived, this, [this](const QString &, const QJsonObject &data) {
         if (data.contains("state") && data.contains("volume"))
@@ -13,6 +15,10 @@ PlaybackController::PlaybackController(IpcClient &client) : FeatureController(cl
     });
 }
 void PlaybackController::apply(const QJsonObject &data) {
+    if (data.contains("capabilities") && m_capabilities != data.value("capabilities").toObject().toVariantMap()) {
+        m_capabilities = data.value("capabilities").toObject().toVariantMap();
+        emit capabilitiesChanged();
+    }
     // Events are partial patches, while status replies are full snapshots; omitted fields retain
     // their values, and an explicit zero volume must still be applied as mute.
     if (data.contains("playback_mode") && m_playbackMode != data.value("playback_mode").toString()) {

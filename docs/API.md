@@ -62,6 +62,18 @@ NekoTune 使用基于换行分隔的 JSON 协议，通过 Unix domain socket 进
 
 ## 方法
 
+### 系统媒体控制相关增量
+
+`player.status` 与首次 `server.connected.data` 增加 `capabilities`：`can_play`、`can_pause`、`can_seek`、`can_go_next`、`can_go_previous`，均为布尔值。能力变化广播 `player.capabilities_changed`，携带同形 `capabilities` 对象；普通进度事件不重复计算导航能力。
+
+`player.next`／`player.previous` 接受可选布尔参数 `preserve_state`，缺省为 `false`。传 `true` 时切歌保留原有暂停或停止状态；原有无参数调用继续自动开始播放。
+
+`player.seek` 保留原有非负毫秒 `position`，另支持有符号毫秒 `offset`，两者必须且只能传一个。可选正整数 `queue_id` 用于校验当前队列项。带身份的绝对跳转若已过期或超过持久化歌曲时长，无操作并返回当前快照；相对跳转在后端计算位置，负方向越界归零，越过结尾按保留播放状态的下一首处理。相对请求进入现有命令调度器，因为它可能更新队列选择；原有不带身份的绝对请求保持原校验与响应方式。
+
+适配器确认实际跳转后广播 `{"event":"player.seeked","position":5000,"queue_id":2}`，单位仍为毫秒。请求成功表示已接受操作；客户端应等待此确认或后续位置事件，不将请求目标当成实际位置。换源和停止时取消旧跳转确认。
+
+Linux MPRIS 位于桌面端的会话总线，对外进度／时长为微秒，使用后端资料与 `cover_url`。仅提供常用控制；不开放 LoopStatus、Shuffle、TrackList 或 OpenUri。系统调用的失败和超时通过 D-Bus 错误回复，不改变 IPC 的既有响应结构。
+
 ### `player.play`
 
 播放当前曲目、队列中的第一首曲目，或传入的本地文件路径。
@@ -331,7 +343,7 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 ## 歌词
 
-后端负责解析、搜索和缓存歌词，Qt/QML 客户端只通过 IPC 获取结果。播放曲目后按“同目录同名 `.krc` → `.lrc` → 歌曲自定义歌词 → 本地歌词缓存 → LRCLIB”顺序加载。`.krc` 支持酷狗二进制与已解码文本，损坏时回退 `.lrc`。缓存文件位于 `~/Music/NekoTune/config/lyrics-cache`，以音频内容 hash（或标题、歌手、专辑和时长）为键，由 `QSaveFile` 原子写入；旧版缓存仍可读取。刷新跳过缓存和自定义歌词，同名文件仍优先。
+后端负责解析、搜索和缓存歌词，Qt/QML 客户端只通过 IPC 获取结果。播放曲目后按“同目录同名 `.krc` → `.lrc` → 歌曲自定义歌词 → 本地歌词缓存 → 在线来源”顺序加载。在线来源优先匹配歌曲的音乐来源或导入来源所属的已注册歌词提供方，无法匹配时使用 LRCLIB。`.krc` 支持酷狗二进制与已解码文本，损坏时回退 `.lrc`。缓存文件位于 `~/Music/NekoTune/config/lyrics-cache`，以音频内容 hash（或标题、歌手、专辑和时长）为键，由 `QSaveFile` 原子写入；旧版缓存仍可读取。刷新跳过缓存和自定义歌词，同名文件仍优先。
 
 `lyrics.changed` 广播当前歌曲的 `track_id`、`revision`、`state` 和可选 `document`、`candidates`。`document.format` 为 `krc`、`lrc` 或 `plain`；`document.lines` 保留 `{time_ms,text}`，KRC 行另有 `duration_ms` 和 `words`，每个词组包含 `{text,offset_ms,time_ms,duration_ms}`，时间单位均为毫秒。普通歌词位于 `document.plain_text`。歌词候选及选定歌词的 `cover_url` 为可选封面地址。状态包括 `loading`、`waiting_metadata`、`searching`、`ready`、`instrumental`、`not_found`、`offline`、`error` 和 `candidates`。
 
@@ -343,6 +355,8 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 - `lyrics.set_offline`：设置离线模式；仍可读取同名 KRC/LRC、缓存和自定义歌词，不发起歌词网络请求。
 
 自动结果仅在标题、歌手、专辑和时长满足精确匹配（时长误差不超过 2 秒）且候选明显领先时直接应用；其余结果交给客户端选择。旧版数据库的 ASR 表不会被删除，但后端不再读取或写入其中的转写结果。
+
+自动加载分阶段扩展来源时，歌曲版本无法可靠匹配、返回空结果或获取失败可回退到 LRCLIB；歌词阶段的非空候选若未通过可信度校验（包括多个同分版本），保留原来源候选供用户选择，不因此回退。只有一个候选也必须通过匹配校验才能自动选择。手动搜索始终保留用户选择，不自动应用或切换来源。
 
 ### `lyrics.sources`
 
@@ -378,6 +392,8 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 - `library.assets_failed`：配套文件保存或封面下载失败事件，包含 `song_hash` 和 `message`；不会中断音频播放。
 
 歌曲对象（曲库、队列、歌单和 `song.metadata`）包含持久化的 `duration_ms`，单位为毫秒，`0` 表示未知。导入和扫描在后台读取本地音频时长；旧数据库自动新增字段，已知时长不会被读取失败的结果清空。
+
+`player.status`、`player.track_changed`、`player.duration_changed` 和 `player.position_changed` 的 `duration` 使用当前歌曲持久化的 `duration_ms`，不使用解码器时长。恢复队列后即可显示已知时长，扫描补齐当前歌曲时会更新播放状态；库内时长未知时仍返回 `0`。已有歌名、歌手和正数时长时，自动歌词匹配无需等待解码器元数据。
 
 歌曲对象还包含只读的 `import_source` 和 `play_count`，歌曲信息窗口也会显示这两项。`import_source` 为首次入库的插件 ID（不含来源子 ID）或 `local`；插件下载成文件后仍保留插件 ID，原有 `source` 字段继续描述实际播放来源。相同音频重复导入不会覆盖最初的入库来源或播放次数。旧在线曲目从 `source.provider_id` 补回插件 ID；没有来源记录的旧本地文件使用 `local`，历史播放次数从 `0` 开始。
 

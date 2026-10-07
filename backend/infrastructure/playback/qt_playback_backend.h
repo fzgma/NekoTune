@@ -3,6 +3,9 @@
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QMediaDevices>
+#include <QElapsedTimer>
+#include <QTimer>
+#include <optional>
 #ifdef NEKOTUNE_PULSE_AUDIO_PORTS
 #include "infrastructure/playback/pulse_audio_ports.h"
 #endif
@@ -11,12 +14,13 @@ class QtPlaybackBackend final : public IPlaybackBackend {
     Q_OBJECT
   public:
     QtPlaybackBackend();
-    void setSource(const QUrl &url) override { m_player.setSource(url); }
+    void setSource(const QUrl &url) override;
     QUrl source() const override { return m_player.source(); }
     void play() override;
     void pause() override { m_player.pause(); }
-    void stop() override { m_player.stop(); }
-    void seek(qint64 value) override { m_player.setPosition(value); }
+    void stop() override;
+    void seek(qint64 value) override;
+    bool seekable() const override { return m_player.isSeekable(); }
     void setVolume(double value) override { m_audio.setVolume(float(value)); }
     qint64 position() const override { return m_player.position(); }
     qint64 duration() const override { return m_player.duration(); }
@@ -36,6 +40,10 @@ class QtPlaybackBackend final : public IPlaybackBackend {
     QString m_outputId;
     QString m_outputPortId, m_lastPhysicalPort;
     bool m_switchingPort = false;
+    std::optional<qint64> m_seekTarget;
+    QElapsedTimer m_seekClock;
+    QTimer m_seekTimeout;
+    void confirmSeek(qint64 position);
 #ifdef NEKOTUNE_PULSE_AUDIO_PORTS
     PulseAudioPorts m_ports;
 #endif

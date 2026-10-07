@@ -54,8 +54,7 @@ LyricsQuery LyricsController::query() const {
     auto state = m_player.snapshot();
     if (!state.song)
         return {};
-    // The decoder may still expose the previous source's duration until metadata is ready.
-    return {state.metadata.title, state.metadata.artist, state.metadata.album, m_ready ? state.duration : 0,
+    return {state.metadata.title, state.metadata.artist, state.metadata.album, state.duration,
             state.song->metadata.resourceKey()};
 }
 // Clear the presentation snapshot immediately for the new revision.
@@ -67,6 +66,9 @@ LyricsQuery LyricsController::query() const {
 void LyricsController::load(bool ready, bool force) {
     auto request = query();
     auto current = m_player.snapshot();
+    // Stored metadata can match lyrics before the decoder loads, including after queue restoration.
+    ready = ready || (request.durationMs > 0 && !request.title.trimmed().isEmpty() &&
+                     !request.artist.trimmed().isEmpty());
     auto revision = ++m_revision;
     bool offline = m_snapshot.offline;
     m_snapshot = {};
@@ -83,7 +85,8 @@ void LyricsController::load(bool ready, bool force) {
     const auto managedBase = m_managedBase ? m_managedBase(request.trackId) : QString();
     QMetaObject::invokeMethod(
         m_service, [service = m_service, request, item = *current.song, revision, ready, force, managedBase] {
-            service->load(request, item.path, item.metadata.lyrics, revision, ready, force, managedBase);
+            service->load(request, item.path, item.metadata.lyrics, revision, ready, force, managedBase,
+                          item.metadata.providerId, item.metadata.importSource);
         });
 }
 Result<void> LyricsController::refresh(const QString &trackId) {

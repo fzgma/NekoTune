@@ -1,7 +1,10 @@
+#include "application/lyrics/lyrics_controller.h"
 #include "application/playback/queue_service.h"
 #include "infrastructure/library/audio_duration.h"
+#include "infrastructure/lyrics/lyrics_storage.h"
 #include "ipc/serialization/serialization.h"
 #include "runtime/library_scanner.h"
+#include "support/audio_backend.h"
 #include "support/store_fixture.h"
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -40,11 +43,138 @@ void write(const QString &path, const QByteArray &bytes) {
   QVERIFY(file.open(QIODevice::WriteOnly));
   QCOMPARE(file.write(bytes), bytes.size());
 }
+
+class DurationAudio final : public TestAudioBackend {
+public:
+  QUrl url;
+  qint64 decodedDuration = 9000;
+  qint64 clock = 0;
+  void setSource(const QUrl &source) override { url = source; }
+  QUrl source() const override { return url; }
+  void play() override { emit stateChanged(PlayerState::Playing); }
+  void pause() override { emit stateChanged(PlayerState::Paused); }
+  void stop() override { emit stateChanged(PlayerState::Stopped); }
+  void seek(qint64 position) override {
+    clock = position;
+    emit positionChanged(position);
+  }
+  void setVolume(double) override {}
+  qint64 position() const override { return clock; }
+  qint64 duration() const override { return decodedDuration; }
+  double volume() const override { return .8; }
+  AudioMetadata metadata() const override { return {}; }
+};
+
+class StoredDurationProvider final : public LyricsProvider {
+public:
+  void cancel() override {}
+  void request(const LyricsQuery &query, quint64 token, bool) override {
+    LyricsDocument document;
+    document.source = "lrclib";
+    document.matched = query;
+    document.plainLyrics = "Stored metadata is ready";
+    emit completed(token, {{document}});
+  }
+};
 } // namespace
 
 class AudioDurationTest final : public QObject {
   Q_OBJECT
 private slots:
+  void restoredPlaybackAndEventsUseStoredDuration() {
+    QTemporaryDir dir;
+    const auto database = dir.filePath("db.sqlite3");
+    const auto firstPath = dir.filePath("first.wav");
+    const auto secondPath = dir.filePath("second.wav");
+    write(firstPath, wav(1500));
+    write(secondPath, wav(2500));
+    {
+      StoreFixture store(database);
+      auto first = store.library.importFile({firstPath, "first", "First", 1500}, "First", "Artist");
+      auto second = store.library.importFile({secondPath, "second", "Second", 2500}, "Second", "Artist");
+      QVERIFY(first);
+      QVERIFY(second);
+      QVERIFY(store.saveQueue({{{firstPath, first.value().id}, {secondPath, second.value().id}}, 0}));
+    }
+    StoreFixture restored(database);
+    QueueService queue(restored.queueRepo, restored.songRepo, restored.db);
+    DurationAudio audio;
+    PlayerEngine player(audio, queue);
+    QVERIFY(audio.source().isEmpty());
+    QCOMPARE(toJson(player.snapshot())["duration"].toInteger(), 1500);
+    QSignalSpy progress(&player, &PlayerEngine::positionChanged);
+    QSignalSpy duration(&player, &PlayerEngine::durationChanged);
+    QVERIFY(player.play());
+    audio.seek(500);
+    QCOMPARE(progress.last().at(1).toLongLong(), 1500);
+    audio.decodedDuration = 0;
+    emit audio.durationChanged(0);
+    QCOMPARE(duration.last().first().toLongLong(), 1500);
+    QVERIFY(player.next());
+    QCOMPARE(toJson(player.snapshot())["duration"].toInteger(), 2500);
+    audio.decodedDuration = 9000;
+    emit audio.durationChanged(9000);
+    audio.seek(700);
+    QCOMPARE(duration.last().first().toLongLong(), 2500);
+    QCOMPARE(progress.last().at(1).toLongLong(), 2500);
+    QVERIFY(player.clear());
+    QCOMPARE(player.snapshot().duration, 0);
+  }
+
+  void durationBackfillUpdatesCurrentPlaybackAndLyricsWithoutDecoder() {
+    QTemporaryDir dir;
+    const auto path = dir.filePath("song.wav");
+    write(path, wav());
+    StoreFixture store(dir.filePath("db.sqlite3"));
+    auto song = store.getOrCreateSong("hash", path, "Song", "Artist");
+    QVERIFY(song);
+    QVERIFY(store.saveQueue({{{path, song->id}}, 0}));
+    QueueService queue(store.queueRepo, store.songRepo, store.db);
+    DurationAudio audio;
+    PlayerEngine player(audio, queue);
+    connect(&store.library, &LibraryService::durationUpdated, &player, &PlayerEngine::metadataUpdated);
+    auto *provider = new StoredDurationProvider;
+    auto *service = new LyricsService({provider}, std::make_unique<LyricsStorage>(dir.filePath("cache")));
+    provider->setParent(service);
+    LyricsController lyrics(player, service);
+    QTRY_COMPARE(lyrics.snapshot().state, QString("waiting_metadata"));
+    QCOMPARE(player.snapshot().duration, 0);
+    QSignalSpy progress(&player, &PlayerEngine::positionChanged);
+    audio.seek(400);
+    QCOMPARE(progress.last().at(1).toLongLong(), 0);
+    QSignalSpy tracks(&player, &PlayerEngine::trackChanged);
+    QVERIFY(store.library.backfillDuration(song->id, "hash", 1500));
+    QCOMPARE(tracks.count(), 1);
+    QCOMPARE(player.snapshot().duration, 1500);
+    QTRY_COMPARE(lyrics.snapshot().state, QString("ready"));
+    QVERIFY(lyrics.snapshot().document);
+    QCOMPARE(lyrics.snapshot().document->matched.durationMs, 1500);
+    QVERIFY(audio.source().isEmpty());
+    QCOMPARE(queue.queue().currentIndex(), 0);
+    QCOMPARE(queue.queue().size(), 1);
+  }
+
+  void restoredLyricsUseStoredMetadataWithoutDecoder() {
+    QTemporaryDir dir;
+    StoreFixture store(dir.filePath("db.sqlite3"));
+    const auto path = dir.filePath("song.wav");
+    write(path, wav());
+    auto song = store.library.importFile({path, "hash", "Song", 1500}, "Song", "Artist");
+    QVERIFY(song);
+    QVERIFY(store.saveQueue({{{path, song.value().id}}, 0}));
+    QueueService queue(store.queueRepo, store.songRepo, store.db);
+    DurationAudio audio;
+    PlayerEngine player(audio, queue);
+    auto *provider = new StoredDurationProvider;
+    auto *service = new LyricsService({provider}, std::make_unique<LyricsStorage>(dir.filePath("cache")));
+    provider->setParent(service);
+    LyricsController lyrics(player, service);
+    QTRY_COMPARE(lyrics.snapshot().state, QString("ready"));
+    QVERIFY(lyrics.snapshot().document);
+    QCOMPARE(lyrics.snapshot().document->matched.durationMs, 1500);
+    QVERIFY(audio.source().isEmpty());
+  }
+
   // The generated WAV has a known duration without depending on an external media fixture.
   // Import probes the source while the managed library records the linked audio identity.
   // Missing, cancelled and invalid probes return unknown duration rather than failing import.

@@ -82,6 +82,7 @@ backend/
 frontend/qt-qml/
 ├── src/controllers/            # 播放、曲库、队列、歌单、歌词、扩展、AI 等
 ├── src/models/                 # RecordModel
+├── src/platform/               # 系统媒体桥接及 Linux MPRIS 协议
 ├── qml/shell/                  # 导航、底栏与页面注册表
 ├── qml/pages/                  # 首页、曲库、歌单、扩展音源、歌词、设置、诊断页
 ├── qml/components/             # 可复用界面组件
@@ -113,11 +114,23 @@ tests/                          # 服务、存储、协议、QML 和依赖边界
 
 内部包含路径从 `backend` 根开始，例如 `application/playback/player_engine.h`。新增文件加入所属 CMake 目标；需要 AUTOMOC 的接口头文件应显式登记。前端控制器和模型由 CMake 收集，QML 文件仍需加入资源清单。
 
+Linux 下 `nekotune_frontend` 额外链接 Qt DBus；后端、领域和应用目标不引入 D-Bus。其他平台不查找 Qt DBus。
+
 ## 4. 核心业务模块
+
+### 系统媒体集成
+
+`SystemMediaBridge` 位于桌面前端，消费 `PlaybackController` 的后端确认状态，使用 `IpcClient` 发送命令。Linux 的 `MprisService` 用 `QDBusVirtualObject` 实现 MPRIS 根接口、Player 接口和 Properties；协议编码与平台无关桥接分离。两个桌面入口共用此装配，独立后端不注册媒体会话。
+
+收到首次完整 `server.connected` 快照后才注册会话；断线／退出时撤销，重连后更新 TrackId 的连接代次。命令异步等待 IPC，5 秒超时回复错误，不重放请求。PropertiesChanged 只发布确认后的变化，普通进度更新不发布该信号；明确的确认跳转通过 Seeked 传递。
+
+后端维护播放能力缓存，仅在队列、模式、设备和可跳转能力等变化时更新，不在每次进度事件中克隆随机策略。系统切歌通过 `preserve_state` 复用领域导航规则；跳转的队列身份和边界在后端原子校验。`IPlaybackBackend::seekable()` 默认不宣称支持跳转，Qt 实现转发解码器能力；确认跳转由适配器报告实际位置，换源和停止时取消旧确认。
 
 ### 播放与顺序
 
 `PlayerEngine` 通过 `IPlaybackBackend` 操作媒体源、播放状态、位置、音量和音频元数据，具体实现为 `QtPlaybackBackend`。播放实现不负责曲库、下载或数据库访问。
+
+播放快照及进度／时长事件统一使用队列歌曲从数据库读取的 `duration_ms`，解码器只提供实时位置与补充标签。时长补齐通过 `LibraryService::durationUpdated` 更新队列、当前播放快照和歌单；已有歌名、歌手和正数时长时，歌词匹配无需等待解码器加载。
 
 `BackendRuntime` 可接收播放后端工厂，每次启动均在后端线程创建适配器，再由 `BackendSession` 持有。正式程序默认使用 `QtPlaybackBackend`；IPC／QML 播放业务测试注入模拟后端，不依赖运行机器是否有音频设备。无设备时保持暂停的行为另外通过模拟设备和实际 Qt 适配器验证。
 
@@ -137,7 +150,7 @@ tests/                          # 服务、存储、协议、QML 和依赖边界
 
 后端 `LyricsController` 连接播放器和歌词线程，使用歌曲内容 hash 与递增 `revision` 过滤迟到结果。前端同名控制器只管理展示状态和请求，两者职责不同。
 
-`LyricsService` 通过 `ILyricsStorage` 读取本地歌词和缓存，通过 `LyricsProvider` 请求候选。普通自动加载顺序为本地 KRC → 本地 LRC → 自定义歌词 → 缓存 → LRCLIB；强制刷新跳过自定义歌词和缓存，本地文件仍优先。低置信度候选交由用户选择。
+`LyricsService` 通过 `ILyricsStorage` 读取本地歌词和缓存，通过 `LyricsProvider` 请求候选。普通自动加载顺序为本地 KRC → 本地 LRC → 自定义歌词 → 缓存 → 在线来源；在线优先按歌曲的音乐来源或导入来源匹配已注册歌词提供方，否则使用 LRCLIB。强制刷新跳过自定义歌词和缓存，本地文件仍优先。分阶段扩展的歌曲版本无法可靠匹配、无结果或获取失败可回退到 LRCLIB；歌词阶段的非空低置信度候选保留原来源供用户选择。单个候选仍须通过匹配校验才自动选择。
 
 LRCLIB 在后端装配处注册，扩展歌词来源随运行时动态注册。扩展歌词来源可支持歌曲版本、歌词候选、下载的分阶段选择。`SidecarStore` 保存接受的歌词和配套封面；`CoverService` 统一解析本地优先的封面，`ApiContext::withCover()` 在歌曲 JSON 中补充 `cover_url`，各界面消费同一字段。
 
@@ -255,7 +268,7 @@ API 默认不清理文件，界面删除确认框默认勾选清理；前端必�
 
 在 `infrastructure/lyrics` 实现 `LyricsProvider` 的 `descriptor`、`request`、`cancel`，分阶段来源声明 `staged` 并实现 `choose`。通过 `completed` 发布候选，通过 `resolved` 发布文档；提供方私有 hash、凭据与下载标识保留在适配器内部，通用候选携带不透明句柄。
 
-加入 providers 构建目标，在 `BackendSession` 的歌词装配处注册并设置父对象。`lyrics.sources` 自动暴露来源，前端据此生成菜单；新增手动来源不会自动改变默认 LRCLIB 加载策略。
+加入 providers 构建目标，在 `BackendSession` 的歌词装配处注册并设置父对象。`lyrics.sources` 自动暴露来源，前端据此生成菜单。自动加载依据歌曲的来源 ID 精确匹配或同一扩展 ID 的前缀匹配选择歌词提供方，无匹配来源时使用默认 LRCLIB。
 
 ### 新增页面或播放实现
 

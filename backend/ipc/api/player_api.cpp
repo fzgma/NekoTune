@@ -46,8 +46,18 @@ void registerPlayerApi(IpcRouter &router, ApiContext &api) {
     control("player.toggle_play_pause", &PlayerEngine::toggle, true);
     control("player.pause", &PlayerEngine::pause, false);
     control("player.stop", &PlayerEngine::stop, false);
-    control("player.next", &PlayerEngine::next, true);
-    control("player.previous", &PlayerEngine::previous, true);
+    for (bool forward : {true, false}) {
+        router.registerMethod(forward ? "player.next" : "player.previous",
+                              [&api, forward](const QJsonObject &params, auto done) {
+            if (params.contains("preserve_state") && !params.value("preserve_state").isBool()) {
+                done(error(failure("preserve_state must be a boolean")));
+                return;
+            }
+            const bool preserve = params.value("preserve_state").toBool();
+            auto result = forward ? api.player.next(preserve) : api.player.previous(preserve);
+            done(response(result, api.status()));
+        }, true);
+    }
     router.registerMethod("player.set_playback_mode", [&api](const QJsonObject &params, auto done) {
         const auto value = params.value("mode");
         const auto mode = value.isString() ? playbackModeFromString(value.toString()) : std::nullopt;
@@ -61,20 +71,44 @@ void registerPlayerApi(IpcRouter &router, ApiContext &api) {
     router.registerMethod("player.status", [&api](const auto &, auto done) { done(success(api.status())); });
     router.registerMethod("queue.status",
                           [&api](const auto &, auto done) { done(success(api.queueStatus())); });
-    router.registerMethod("player.seek", [&api](const QJsonObject &params, auto done) {
-        auto value = params.value("position");
+    router.registerMethod("player.seek", [&api, &router](const QJsonObject &params, auto done) {
+        const bool relative = params.contains("offset");
+        if (relative == params.contains("position")) {
+            done(error(failure("Exactly one of position or offset is required")));
+            return;
+        }
+        std::optional<int> queueId;
+        if (params.contains("queue_id")) {
+            auto id = requiredId(params, "queue_id");
+            if (!id) { done(error(id.error())); return; }
+            queueId = id.value();
+        }
+        auto value = params.value(relative ? "offset" : "position");
         // Validate before converting floating point to signed milliseconds.
         // Infinity, negative values and out-of-range doubles must be rejected.
         // The domain seek operation then receives a representable nonnegative value.
         // Submillisecond input is intentionally truncated to the playback clock unit.
         double number = value.toDouble(-1);
-        if (!value.isDouble() || !std::isfinite(number) || number < 0 ||
+        if (!value.isDouble() || !std::isfinite(number) || (!relative && number < 0) ||
+            number < double(std::numeric_limits<qint64>::min()) ||
             number >= double(std::numeric_limits<qint64>::max())) {
-            done(error(failure("position must be a nonnegative finite number")));
+            done(error(failure(relative ? "offset must be a finite signed number" :
+                                           "position must be a nonnegative finite number")));
             return;
         }
-        auto result = api.player.seek(qint64(number));
-        done(response(result, api.status()));
+        auto execute = [&api, number, relative, queueId, done] {
+            auto result = relative || queueId ? api.player.seekTrack(qint64(number), relative, queueId)
+                                              : api.player.seek(qint64(number));
+            done(response(result, api.status()));
+        };
+        // Relative seeks can cross a track boundary and commit a queue selection.
+        // Keep them in the existing mutation scheduler; absolute seeks stay responsive.
+        if (relative) {
+            router.commands().submit([execute](CommandScheduler::Done next) { execute(); next(); },
+                                [done] { done(error(failure("Backend is shutting down", ErrorCode::Cancelled))); });
+        } else {
+            execute();
+        }
     });
     router.registerMethod("player.set_volume", [&api](const QJsonObject &params, auto done) {
         if (!params.value("volume").isDouble()) {

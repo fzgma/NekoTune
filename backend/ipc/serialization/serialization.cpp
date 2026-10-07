@@ -1,6 +1,10 @@
 #include "ipc/serialization/serialization.h"
 #include <QFileInfo>
 namespace nekotune {
+QJsonObject toJson(const PlaybackCapabilities &value) {
+    return {{"can_play", value.canPlay}, {"can_pause", value.canPause}, {"can_seek", value.canSeek},
+            {"can_go_next", value.canGoNext}, {"can_go_previous", value.canGoPrevious}};
+}
 QJsonObject toJson(const SongMetadata &song) {
     return {{"song_id", song.id},
             {"song_hash", song.hash},
@@ -87,6 +91,7 @@ QJsonObject toJson(const PlaybackSnapshot &state) {
         song.insert("album", state.metadata.album);
     }
     return {{"playback_mode", toString(state.playbackMode)},
+            {"capabilities", toJson(state.capabilities)},
             {"state", toString(state.state)},
             {"position", state.position},
             {"duration", state.duration},

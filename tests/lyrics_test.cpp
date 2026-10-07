@@ -24,12 +24,25 @@ class MockProvider final : public LyricsProvider {
     int requests = 0;
     quint64 token = 0;
     bool search = false;
+    LyricsSource sourceDescriptor{QStringLiteral("lrclib"), QStringLiteral("LRCLIB"), true, false};
+    int chooseCalls = 0;
+    LyricsCandidate lastChosen;
+    bool resolveOnChoose = true;
+
+    LyricsSource descriptor() const override { return sourceDescriptor; }
     void request(const LyricsQuery &, quint64 value, bool searching) override {
         ++requests;
         token = value;
         search = searching;
     }
     void cancel() override {}
+    void choose(const LyricsCandidate &candidate, quint64 value) override {
+        ++chooseCalls;
+        lastChosen = candidate;
+        token = value;
+        if (resolveOnChoose)
+            emit resolved(value, candidate.document);
+    }
 };
 
 class MockReply final : public QNetworkReply {
@@ -139,6 +152,13 @@ class LyricsTest final : public QObject {
     void providerPayloadsAndRequest();
     void providerCancellationAndDestruction();
     void krcDecodeAndPriority();
+    void sourceMatchingAndPriority();
+    void sourceFallbackToDefaultOnFailure();
+    void stagedProviderAutoResolution();
+    void stagedProviderKeepsAmbiguousLyrics();
+    void stagedProviderRejectsMismatchedSingleton_data();
+    void stagedProviderRejectsMismatchedSingleton();
+    void stagedProviderFallsBackWithoutLyrics();
 };
 
 static QByteArray sampleKrc() {
@@ -695,6 +715,222 @@ void LyricsTest::providerCancellationAndDestruction() {
 }
 
 
+
+void LyricsTest::sourceMatchingAndPriority() {
+    QTemporaryDir temp;
+    MockProvider defaultProvider;
+    defaultProvider.sourceDescriptor = {QStringLiteral("lrclib"), QStringLiteral("LRCLIB"), true, false};
+
+    MockProvider kugouProvider;
+    kugouProvider.sourceDescriptor = {QStringLiteral("kugou/lyrics"), QStringLiteral("Kugou"), true, true};
+
+    MockProvider customProvider;
+    customProvider.sourceDescriptor = {QStringLiteral("custom_source"), QStringLiteral("Custom"), true, false};
+
+    LyricsService service({&defaultProvider, &kugouProvider, &customProvider},
+                          std::make_unique<LyricsStorage>(temp.path()));
+
+    // 1. Exact match on sourceProvider
+    service.load(query(), {}, {}, 1, true, false, {}, QStringLiteral("custom_source"));
+    QCOMPARE(customProvider.requests, 1);
+    QCOMPARE(kugouProvider.requests, 0);
+    QCOMPARE(defaultProvider.requests, 0);
+
+    // 2. Prefix match from sourceProvider (e.g. kugou/music -> kugou/lyrics)
+    service.load(query(), {}, {}, 2, true, false, {}, QStringLiteral("kugou/music"), QStringLiteral("kugou"));
+    QCOMPARE(kugouProvider.requests, 1);
+    QCOMPARE(defaultProvider.requests, 0);
+
+    // 3. Fallback to importSource (kugou -> kugou/lyrics)
+    service.load(query(), {}, {}, 3, true, false, {}, {}, QStringLiteral("kugou"));
+    QCOMPARE(kugouProvider.requests, 2);
+    QCOMPARE(defaultProvider.requests, 0);
+
+    // 4. Local or unknown source falls back to default provider (lrclib)
+    service.load(query(), {}, {}, 4, true, false, {}, {}, QStringLiteral("local"));
+    QCOMPARE(defaultProvider.requests, 1);
+    service.load(query(), {}, {}, 5, true, false, {}, QStringLiteral("unknown"), QStringLiteral("unknown"));
+    QCOMPARE(defaultProvider.requests, 2);
+}
+
+void LyricsTest::sourceFallbackToDefaultOnFailure() {
+    QTemporaryDir temp;
+    MockProvider defaultProvider;
+    defaultProvider.sourceDescriptor = {QStringLiteral("lrclib"), QStringLiteral("LRCLIB"), true, false};
+
+    MockProvider extProvider;
+    extProvider.sourceDescriptor = {QStringLiteral("ext/lyrics"), QStringLiteral("Extension"), true, false};
+
+    LyricsService service({&defaultProvider, &extProvider},
+                          std::make_unique<LyricsStorage>(temp.path()));
+    QJsonObject state;
+    connect(&service, &LyricsService::changed, this, [&](const auto &value) { state = toJson(value); });
+
+    // Request with source "ext/lyrics"; provider fails with network error, should fallback to default provider
+    service.load(query(), {}, {}, 1, true, false, {}, QStringLiteral("ext/lyrics"));
+    QCOMPARE(extProvider.requests, 1);
+    QCOMPARE(defaultProvider.requests, 0);
+
+    emit extProvider.failed(extProvider.token, QStringLiteral("network"));
+    // Fallback automatically requests default provider
+    QCOMPARE(defaultProvider.requests, 1);
+    emit defaultProvider.completed(defaultProvider.token, {candidate()});
+    QCOMPARE(state.value(QStringLiteral("state")).toString(), QStringLiteral("ready"));
+}
+
+void LyricsTest::stagedProviderAutoResolution() {
+    QTemporaryDir temp;
+    MockProvider defaultProvider;
+    defaultProvider.sourceDescriptor = {QStringLiteral("lrclib"), QStringLiteral("LRCLIB"), true, false};
+
+    MockProvider stagedProvider;
+    stagedProvider.sourceDescriptor = {QStringLiteral("staged/lyrics"), QStringLiteral("Staged"), true, true};
+
+    LyricsService service({&defaultProvider, &stagedProvider},
+                          std::make_unique<LyricsStorage>(temp.path()));
+    QJsonObject state;
+    connect(&service, &LyricsService::changed, this, [&](const auto &value) { state = toJson(value); });
+
+    // Automatic load (m_manual == false) with staged provider returning confident candidate with lyrics document
+    service.load(query(), {}, {}, 1, true, false, {}, QStringLiteral("staged/lyrics"));
+    QCOMPARE(stagedProvider.requests, 1);
+
+    auto item = candidate();
+    item.document.source = QStringLiteral("staged/lyrics");
+    emit stagedProvider.completed(stagedProvider.token, {item});
+
+    // Should auto-apply without requiring manual user selection
+    QCOMPARE(state.value(QStringLiteral("state")).toString(), QStringLiteral("ready"));
+    QCOMPARE(state.value(QStringLiteral("document")).toObject().value(QStringLiteral("source")).toString(),
+             QStringLiteral("staged/lyrics"));
+
+    // Next: staged provider returning candidate requiring resolution (songResult == false but empty doc)
+    service.load(query(), {}, {}, 2, true, true, {}, QStringLiteral("staged/lyrics"));
+    LyricsCandidate needsResolve;
+    needsResolve.document.matched = query();
+    needsResolve.resolverHandle = QStringLiteral("handle-42");
+    needsResolve.songResult = false;
+    emit stagedProvider.completed(stagedProvider.token, {needsResolve});
+
+    // Should have automatically called choose on provider
+    QCOMPARE(stagedProvider.chooseCalls, 1);
+    // Since MockProvider::choose emits resolved, service automatically applies
+    QCOMPARE(state.value(QStringLiteral("state")).toString(), QStringLiteral("ready"));
+}
+
+void LyricsTest::stagedProviderKeepsAmbiguousLyrics() {
+    QTemporaryDir temp;
+    MockProvider defaultProvider;
+    MockProvider stagedProvider;
+    stagedProvider.sourceDescriptor = {QStringLiteral("staged/lyrics"), QStringLiteral("Staged"), true, true};
+    stagedProvider.resolveOnChoose = false;
+    LyricsService service({&defaultProvider, &stagedProvider},
+                          std::make_unique<LyricsStorage>(temp.path()));
+    LyricsSnapshot state;
+    connect(&service, &LyricsService::changed, this, [&](const auto &value) { state = value; });
+    service.load(query(), {}, {}, 1, true, false, {}, QStringLiteral("staged/lyrics"));
+
+    LyricsCandidate song;
+    song.document.matched = query();
+    song.songResult = true;
+    song.resolverHandle = QStringLiteral("matched-song");
+    emit stagedProvider.completed(stagedProvider.token, {song});
+    QCOMPARE(stagedProvider.chooseCalls, 1);
+    QCOMPARE(state.searchStage, QStringLiteral("lyrics"));
+
+    LyricsCandidate first;
+    first.document.matched = query();
+    first.resolverHandle = QStringLiteral("lyrics-first");
+    auto second = first;
+    second.resolverHandle = QStringLiteral("lyrics-second");
+    emit stagedProvider.completed(stagedProvider.token, {first, second});
+    QCOMPARE(defaultProvider.requests, 0);
+    QCOMPARE(stagedProvider.chooseCalls, 1);
+    QCOMPARE(state.state, QStringLiteral("candidates"));
+    QCOMPARE(state.searchStage, QStringLiteral("lyrics"));
+    QCOMPARE(state.candidates.size(), 2);
+    QVERIFY(!state.document);
+
+    service.select(1, 1);
+    QCOMPARE(stagedProvider.chooseCalls, 2);
+    QCOMPARE(stagedProvider.lastChosen.resolverHandle, second.resolverHandle);
+    QCOMPARE(state.searchStage, QStringLiteral("download"));
+    auto document = candidate().document;
+    document.source = stagedProvider.sourceDescriptor.id;
+    emit stagedProvider.resolved(stagedProvider.token, document);
+    QCOMPARE(state.state, QStringLiteral("ready"));
+    QCOMPARE(state.document->source, stagedProvider.sourceDescriptor.id);
+    QCOMPARE(defaultProvider.requests, 0);
+}
+
+void LyricsTest::stagedProviderRejectsMismatchedSingleton_data() {
+    QTest::addColumn<bool>("songResult");
+    QTest::addColumn<QString>("mismatch");
+    for (const bool songs : {true, false}) {
+        for (const auto &field : {"title", "artist", "album", "duration", "unknown_duration"}) {
+            const auto name = QByteArray(songs ? "song-" : "lyrics-") + field;
+            QTest::newRow(name.constData()) << songs << QString::fromLatin1(field);
+        }
+    }
+}
+
+void LyricsTest::stagedProviderRejectsMismatchedSingleton() {
+    QFETCH(bool, songResult);
+    QFETCH(QString, mismatch);
+    QTemporaryDir temp;
+    MockProvider defaultProvider;
+    MockProvider stagedProvider;
+    stagedProvider.sourceDescriptor = {QStringLiteral("staged/lyrics"), QStringLiteral("Staged"), true, true};
+    LyricsService service({&defaultProvider, &stagedProvider},
+                          std::make_unique<LyricsStorage>(temp.path()));
+    LyricsSnapshot state;
+    connect(&service, &LyricsService::changed, this, [&](const auto &value) { state = value; });
+    service.load(query(), {}, {}, 1, true, false, {}, QStringLiteral("staged/lyrics"));
+    auto item = candidate();
+    item.songResult = songResult;
+    auto &matched = item.document.matched;
+    if (mismatch == QStringLiteral("title"))
+        matched.title = QStringLiteral("Other song");
+    else if (mismatch == QStringLiteral("artist"))
+        matched.artist = QStringLiteral("Other artist");
+    else if (mismatch == QStringLiteral("album"))
+        matched.album = QStringLiteral("Other album");
+    else if (mismatch == QStringLiteral("duration"))
+        matched.durationMs += 30000;
+    else
+        matched.durationMs = 0;
+    emit stagedProvider.completed(stagedProvider.token, {item});
+    QCOMPARE(stagedProvider.chooseCalls, 0);
+    QVERIFY(!state.document);
+    QCOMPARE(defaultProvider.requests, songResult ? 1 : 0);
+    if (!songResult) {
+        QCOMPARE(state.state, QStringLiteral("candidates"));
+        QCOMPARE(state.candidates.size(), 1);
+    }
+}
+
+void LyricsTest::stagedProviderFallsBackWithoutLyrics() {
+    QTemporaryDir temp;
+    MockProvider defaultProvider;
+    MockProvider stagedProvider;
+    stagedProvider.sourceDescriptor = {QStringLiteral("staged/lyrics"), QStringLiteral("Staged"), true, true};
+    stagedProvider.resolveOnChoose = false;
+    LyricsService service({&defaultProvider, &stagedProvider},
+                          std::make_unique<LyricsStorage>(temp.path()));
+    LyricsSnapshot state;
+    connect(&service, &LyricsService::changed, this, [&](const auto &value) { state = value; });
+    service.load(query(), {}, {}, 1, true, false, {}, QStringLiteral("staged/lyrics"));
+    LyricsCandidate song;
+    song.document.matched = query();
+    song.songResult = true;
+    emit stagedProvider.completed(stagedProvider.token, {song});
+    QCOMPARE(stagedProvider.chooseCalls, 1);
+    emit stagedProvider.completed(stagedProvider.token, {});
+    QCOMPARE(defaultProvider.requests, 1);
+    emit defaultProvider.completed(defaultProvider.token, {candidate()});
+    QCOMPARE(state.state, QStringLiteral("ready"));
+    QCOMPARE(state.document->source, QStringLiteral("lrclib"));
+}
 
 QTEST_GUILESS_MAIN(LyricsTest)
 #include "lyrics_test.moc"
