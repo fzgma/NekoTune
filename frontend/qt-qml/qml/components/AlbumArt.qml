@@ -19,7 +19,8 @@ Item {
     readonly property bool isPlaying: playbackState === "playing"
     readonly property real artSize: Math.min(Math.min(parent.width, parent.height), root.maxDimension)
 
-    // Ambient glow behind cover (Section 3.2: 8% moonlight purple)
+    // Ambient glow behind cover (Section 3.2: 8% moonlight purple).
+    // Two stacked layers widen the falloff so the edge stays soft.
     Rectangle {
         anchors.centerIn: coverCard
         width: coverCard.width + 20
@@ -27,6 +28,14 @@ Item {
         radius: coverCard.radius + 6
         color: root.hasSong ? Qt.rgba(root.lavenderColor.r, root.lavenderColor.g, root.lavenderColor.b, 0.08) : "transparent"
         z: -1
+    }
+    Rectangle {
+        anchors.centerIn: coverCard
+        width: coverCard.width + 56
+        height: coverCard.height + 56
+        radius: coverCard.radius + 22
+        color: root.hasSong ? Qt.rgba(root.roseColor.r, root.roseColor.g, root.roseColor.b, 0.05) : "transparent"
+        z: -2
     }
 
     Rectangle {

@@ -131,6 +131,30 @@ Item {
                 Layout.preferredHeight: Math.max(page.compact ? 176 : 192, heroContent.implicitHeight + 48)
                 radius: 16
                 color: page.theme.bgRaised
+                border.color: page.theme.borderSubtle
+                clip: true
+                // Layered wash: a lavender-to-rose diagonal gives the hero its
+                // "night radio" mood while staying under the text contrast target.
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: page.theme.bgElevated }
+                    GradientStop { position: 0.62; color: page.theme.bgRaised }
+                    GradientStop { position: 1.0; color: Qt.rgba(page.theme.roseGlow.r, page.theme.roseGlow.g, page.theme.roseGlow.b, 0.72) }
+                }
+                // Soft ambient orb hugging the right edge, behind the text.
+                Rectangle {
+                    width: parent.height * 1.9
+                    height: width
+                    radius: width / 2
+                    x: parent.width - width * 0.58
+                    anchors.verticalCenter: parent.verticalCenter
+                    opacity: page.theme.glowOpacity * 0.7
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: page.theme.accentPrimary }
+                        GradientStop { position: 0.55; color: Qt.rgba(page.theme.accentPrimary.r, page.theme.accentPrimary.g, page.theme.accentPrimary.b, 0.35) }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                }
                 RowLayout {
                     id: heroContent
                     anchors.fill: parent
@@ -139,15 +163,37 @@ Item {
                     Item {
                         Layout.preferredWidth: page.compact ? 128 : 144
                         Layout.preferredHeight: Layout.preferredWidth
-                        Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
-                        Image {
-                            objectName: "homeCurrentCover"
+                        // Static halo behind the artwork (Section 6.2: one soft glow).
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: parent.width + 20
+                            height: parent.height + 20
+                            radius: 22
+                            opacity: page.theme.glowOpacity * 0.9
+                            color: page.theme.accentPrimary
+                        }
+                        Rectangle {
                             anchors.fill: parent
-                            source: page.shell.hasSong ? String(page.shell.song.cover_url || "") : ""
-                            fillMode: Image.PreserveAspectCrop
-                            asynchronous: true
-                            mipmap: true
-                            visible: status === Image.Ready
+                            radius: 16
+                            color: page.theme.bgSurface
+                            clip: true
+                            Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
+                            Image {
+                                objectName: "homeCurrentCover"
+                                anchors.fill: parent
+                                source: page.shell.hasSong ? String(page.shell.song.cover_url || "") : ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                mipmap: true
+                                visible: status === Image.Ready
+                            }
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: parent.radius
+                                color: "transparent"
+                                border.color: page.theme.borderSubtle
+                                border.width: 1
+                            }
                         }
                     }
                     ColumnLayout {
@@ -264,7 +310,12 @@ Item {
                                 background: Rectangle {
                                     radius: 12
                                     color: card.hovered ? page.theme.bgHover : page.theme.bgSurface
-                                    border.color: card.activeFocus ? page.theme.accentPrimary : "transparent"
+                                    border.color: card.activeFocus ? page.theme.accentPrimary
+                                                : card.hovered ? Qt.rgba(page.theme.accentPrimary.r, page.theme.accentPrimary.g, page.theme.accentPrimary.b, 0.45)
+                                                : page.theme.borderSubtle
+                                    Behavior on color {
+                                        ColorAnimation { duration: page.theme.reducedMotion ? 0 : page.theme.durationFast }
+                                    }
                                 }
                                 contentItem: ColumnLayout {
                                     spacing: 8
@@ -272,8 +323,14 @@ Item {
                                         spacing: 12
                                         Item {
                                             Layout.preferredWidth: 48; Layout.preferredHeight: 48
-                                            Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
-                                            Image { objectName: "homePlaylistCover"; anchors.fill: parent; source: page.playlistCover(card.modelData); fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: status === Image.Ready }
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                radius: 10
+                                                color: page.theme.bgRaised
+                                                clip: true
+                                                Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
+                                                Image { objectName: "homePlaylistCover"; anchors.fill: parent; source: page.playlistCover(card.modelData); fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: status === Image.Ready }
+                                            }
                                         }
                                         Label {
                                             Layout.fillWidth: true

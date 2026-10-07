@@ -186,6 +186,12 @@ Item {
             Column {
                 anchors.centerIn: parent; width: parent.width; spacing: 16
                 visible: songList.count === 0
+                // Empty states get a small original illustration; searches keep the plain message.
+                EmptyStateCat {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: !root.searchText
+                    width: 120; height: 120
+                }
                 Label { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; text: i18n.text(root.searchText ? "no_search_results" : root.currentPlaylist ? "empty_playlist" : "empty_queue", i18n.language); color: Theme.textMuted }
                 TextButton { anchors.horizontalCenter: parent.horizontalCenter; visible: !root.searchText; text: i18n.text("browse_library", i18n.language); onClicked: root.libraryRequested() }
             }

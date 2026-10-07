@@ -226,6 +226,11 @@ Item {
             }
             Column {
                 anchors.centerIn: parent; visible: songList.count === 0; spacing: 16
+                EmptyStateCat {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: !root.controller.searchText && !root.selectedTagIds.length
+                    width: 120; height: 120
+                }
                 Label { anchors.horizontalCenter: parent.horizontalCenter; text: i18n.text(root.controller.searchText ? "no_search_results" : root.selectedTagIds.length ? "no_tag_matches" : "empty_library", i18n.language); color: Theme.textMuted }
                 TextButton { anchors.horizontalCenter: parent.horizontalCenter; visible: !root.controller.searchText && !root.selectedTagIds.length; text: i18n.text("import_music", i18n.language); enabled: root.connected; onClicked: root.importRequested() }
             }

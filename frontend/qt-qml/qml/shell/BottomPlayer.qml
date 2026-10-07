@@ -20,6 +20,12 @@ Rectangle {
     Layout.fillWidth: true
     Layout.preferredHeight: Theme.bottomBarHeight
     color: Theme.bgSidebar
+    // Slight lift from the canvas above toward a darker floor at the bottom.
+    gradient: Gradient {
+        GradientStop { position: 0.0; color: Theme.bgCanvasTop }
+        GradientStop { position: 0.6; color: Theme.bgSidebar }
+        GradientStop { position: 1.0; color: Qt.darker(Theme.bgSidebar, 1.06) }
+    }
     function t(key) { return translator.text(key, translator.language) }
     // An unknown duration needs a placeholder, while a current position of zero is a valid time.
     // Both values arrive in milliseconds and are displayed at whole-second precision.
@@ -41,8 +47,14 @@ Rectangle {
             Accessible.name: bar.t("now_playing")
             background: Rectangle { color: Theme.bgSurface; radius: Theme.radiusSm }
             contentItem: Item {
-                Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
-                Image { objectName: "nowPlayingCover"; anchors.fill: parent; source: bar.shell.hasSong ? bar.coverUrl : ""; fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: status === Image.Ready }
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusSm
+                    color: Theme.bgSurface
+                    clip: true
+                    Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
+                    Image { objectName: "nowPlayingCover"; anchors.fill: parent; source: bar.shell.hasSong ? bar.coverUrl : ""; fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: status === Image.Ready }
+                }
             }
             onClicked: bar.shell.openNowPlaying()
             ToolTip.visible: hovered || activeFocus

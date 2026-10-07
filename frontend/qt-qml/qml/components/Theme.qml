@@ -36,6 +36,14 @@ QtObject {
     readonly property color statusErrorBg: overrides.statusErrorBg !== undefined ? overrides.statusErrorBg : "#38202B"
     readonly property color statusInfo: overrides.statusInfo !== undefined ? overrides.statusInfo : "#A9C8F5"
 
+    // Brand atmosphere: layered surfaces, gradients and ambient glows for the
+    // "yozakura radio" mood. Accent tints are used at low opacity only.
+    readonly property color bgCanvasTop: overrides.bgCanvasTop !== undefined ? overrides.bgCanvasTop : "#13111C"
+    readonly property color bgElevated: overrides.bgElevated !== undefined ? overrides.bgElevated : "#1C1826"
+    readonly property color accentGlow: overrides.accentGlow !== undefined ? overrides.accentGlow : "#3A2E52"
+    readonly property color roseGlow: overrides.roseGlow !== undefined ? overrides.roseGlow : "#432A3A"
+    readonly property real glowOpacity: overrides.glowOpacity !== undefined ? overrides.glowOpacity : 0.10
+
     // 4. Typography
     readonly property string fontFamily: overrides.fontFamily !== undefined ? overrides.fontFamily : "sans-serif"
     readonly property string fontFamilyMonospace: overrides.fontFamilyMonospace !== undefined ? overrides.fontFamilyMonospace : "Monospace, 'Noto Sans Mono', monospace"

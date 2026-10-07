@@ -92,3 +92,61 @@ test('source download limits and cancellation leave no published partial audio',
   await assert.rejects(downloading);
   assert.deepEqual(await fs.readdir(folder), []);
 });
+
+test('generic binary downloads use audio signatures and reject error pages', async (t) => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'nekotune-audio-types-'));
+  t.after(() => fs.rm(folder, { recursive: true, force: true }));
+  let payload, contentType;
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, contentType ? { 'Content-Type': contentType } : {});
+    response.write(payload.subarray(0, 1));
+    setImmediate(() => response.end(payload.subarray(1)));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const proxy = new AudioProxy(async () => ({
+    url: `http://127.0.0.1:${server.address().port}/audio`,
+    extension: 'mp3',
+    contentTypes: ['audio/mpeg', 'audio/flac', 'audio/wav', 'audio/ogg'],
+    maxBytes: 1024,
+  }));
+  await proxy.start();
+  t.after(() => {
+    proxy.close();
+    server.closeAllConnections();
+    server.close();
+  });
+  let index = 0;
+  for (const [type, audio, extension] of [
+    ['application/octet-stream', Buffer.from('ID3fixture'), 'mp3'],
+    ['binary/octet-stream', Buffer.from([0xff, 0xfb, 0x90, 0x64]), 'mp3'],
+    ['', Buffer.from('fLaCfixture'), 'flac'],
+    ['application/octet-stream', Buffer.from('RIFF1234WAVEfixture'), 'wav'],
+    ['application/octet-stream', Buffer.from('OggSfixture'), 'ogg'],
+    ['Audio/X-FLAC; charset=binary', Buffer.from('fLaCfixture'), 'flac'],
+  ]) {
+    contentType = type;
+    payload = audio;
+    const base = path.join(folder, `audio-${index++}`);
+    const downloaded = await proxy.download('test.source/music', 'one', base);
+    assert.equal(downloaded.path, `${base}.${extension}`);
+    assert.deepEqual(await fs.readFile(downloaded.path), audio);
+  }
+  const published = (await fs.readdir(folder)).sort();
+  for (const [type, body] of [
+    ['text/html', '<html>error</html>'],
+    ['application/json', '{"error":"denied"}'],
+    ['application/octet-stream', '{"error":"denied"}'],
+    ['', '<html>error</html>'],
+    ['application/octet-stream', 'x'.repeat(100)],
+  ]) {
+    contentType = type;
+    payload = Buffer.from(body);
+    await assert.rejects(
+      proxy.download('test.source/music', 'one', path.join(folder, 'invalid')),
+      /Response is not a supported audio type/,
+    );
+    assert.deepEqual((await fs.readdir(folder)).sort(), published);
+    assert.equal(proxy.streams.size, 0);
+    assert.equal(proxy.downloads.size, 0);
+  }
+});

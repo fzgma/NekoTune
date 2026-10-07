@@ -39,6 +39,19 @@ Rectangle {
     Accessible.name: String(song.title || i18n.text("untitled", i18n.language)) + " " + String(song.artist || "")
     Accessible.selected: selected
 
+    // Current playback gets an independent accent marker, distinct from
+    // keyboard focus and row selection (Section 7.1).
+    Rectangle {
+        objectName: "trackCurrentMarker"
+        anchors.left: parent.left
+        anchors.leftMargin: 3
+        anchors.verticalCenter: parent.verticalCenter
+        width: 3
+        height: 20
+        radius: 1.5
+        color: Theme.accentPrimary
+        visible: row.current && !row.selected
+    }
     Rectangle {
         objectName: "trackFocusRing"
         anchors.fill: parent
@@ -119,8 +132,14 @@ Rectangle {
             Layout.preferredWidth: 40
             Layout.preferredHeight: 40
             visible: !row.compact
-            Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
-            Image { objectName: "trackCover"; anchors.fill: parent; source: String(row.song.cover_url || ""); fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: status === Image.Ready }
+            Rectangle {
+                anchors.fill: parent
+                radius: 8
+                color: Theme.bgSurface
+                clip: true
+                Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
+                Image { objectName: "trackCover"; anchors.fill: parent; source: String(row.song.cover_url || ""); fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: status === Image.Ready }
+            }
         }
         ColumnLayout {
             Layout.fillWidth: true

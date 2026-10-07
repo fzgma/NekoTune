@@ -7,6 +7,43 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 
+const mediaTypes = {
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/flac': 'flac',
+  'audio/x-flac': 'flac',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/ogg': 'ogg',
+  'application/ogg': 'ogg',
+  'audio/opus': 'opus',
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/aac': 'aac',
+  'audio/webm': 'webm',
+};
+
+function detectAudio(prefix) {
+  if (prefix.subarray(0, 3).equals(Buffer.from('ID3'))) return 'audio/mpeg';
+  if (prefix.subarray(0, 4).equals(Buffer.from('fLaC'))) return 'audio/flac';
+  if (prefix.subarray(0, 4).equals(Buffer.from('OggS'))) return 'audio/ogg';
+  if (prefix.subarray(0, 4).equals(Buffer.from('RIFF')) && prefix.subarray(8, 12).equals(Buffer.from('WAVE')))
+    return 'audio/wav';
+  if (prefix.length >= 4 && prefix[0] === 0xff) {
+    if ((prefix[1] & 0xf6) === 0xf0 && (prefix[2] & 0x3c) !== 0x3c) return 'audio/aac';
+    if (
+      (prefix[1] & 0xe0) === 0xe0 &&
+      (prefix[1] & 0x18) !== 0x08 &&
+      (prefix[1] & 0x06) !== 0 &&
+      (prefix[2] & 0xf0) !== 0 &&
+      (prefix[2] & 0xf0) !== 0xf0 &&
+      (prefix[2] & 0x0c) !== 0x0c
+    )
+      return 'audio/mpeg';
+  }
+  return undefined;
+}
+
 function validate(audio) {
   const url = new URL(audio.url);
   if (!['http:', 'https:'].includes(url.protocol))
@@ -171,27 +208,26 @@ export class AudioProxy {
       });
       if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`);
       const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (Array.isArray(opened.contentTypes) && !opened.contentTypes.includes(contentType))
-        throw new Error('Response is not a supported audio type');
-      const media = {
-        'audio/mpeg': 'mp3',
-        'audio/mp3': 'mp3',
-        'audio/flac': 'flac',
-        'audio/x-flac': 'flac',
-        'audio/wav': 'wav',
-        'audio/x-wav': 'wav',
-        'audio/ogg': 'ogg',
-        'application/ogg': 'ogg',
-        'audio/mp4': 'm4a',
-        'audio/aac': 'aac',
-        'audio/webm': 'webm',
-      };
-      const extension =
-        media[(response.headers.get('content-type') || '').split(';')[0].trim()] ||
+      const allowedTypes = Array.isArray(opened.contentTypes)
+        ? opened.contentTypes.map((type) => type.trim().toLowerCase())
+        : undefined;
+      const sniff =
+        allowedTypes && ['', 'application/octet-stream', 'binary/octet-stream'].includes(contentType);
+      const supported = (type) =>
+        allowedTypes.some(
+          (allowed) => allowed === type || (mediaTypes[allowed] && mediaTypes[allowed] === mediaTypes[type]),
+        );
+      const unsupported = () =>
+        new Error(`Response is not a supported audio type (${contentType || 'missing Content-Type'})`);
+      if (allowedTypes && !sniff && !supported(contentType)) throw unsupported();
+      let extension =
+        mediaTypes[contentType] ||
         (/^(mp3|flac|wav|ogg|opus|m4a|aac|webm)$/i.test(opened.extension)
           ? opened.extension.toLowerCase()
           : 'mp3');
-      const target = `${base}.${extension}`;
+      let target = `${base}.${extension}`;
+      let prefix = Buffer.alloc(0),
+        detected = !sniff;
       temporary = `${target}.partial-${randomUUID()}`;
       let received = 0,
         last = 0;
@@ -203,6 +239,18 @@ export class AudioProxy {
             done(new Error('Audio exceeds source download limit'));
             return;
           }
+          if (!detected) {
+            prefix = Buffer.concat([prefix, chunk.subarray(0, 64 - prefix.length)]);
+            const type = detectAudio(prefix);
+            if (type && supported(type)) {
+              extension = mediaTypes[type];
+              target = `${base}.${extension}`;
+              detected = true;
+            } else if (prefix.length >= 64) {
+              done(unsupported());
+              return;
+            }
+          }
           if (Date.now() - last > 100) {
             progress({ received, total });
             last = Date.now();
@@ -212,6 +260,7 @@ export class AudioProxy {
       });
       await pipeline(response.body, count, createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
       if (!received) throw new Error('Downloaded audio is empty');
+      if (!detected) throw unsupported();
       try {
         await fs.link(temporary, target);
       } catch (error) {

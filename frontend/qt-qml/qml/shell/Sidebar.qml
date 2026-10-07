@@ -16,6 +16,12 @@ Rectangle {
     Layout.preferredWidth: shell.width < 1200 ? Theme.sidebarWidthCompact : Theme.sidebarWidthWide
     Layout.fillHeight: true
     color: Theme.bgSidebar
+    // A vertical wash keeps the rail from reading as one flat black column.
+    gradient: Gradient {
+        GradientStop { position: 0.0; color: Theme.bgCanvasTop }
+        GradientStop { position: 0.32; color: Theme.bgSidebar }
+        GradientStop { position: 1.0; color: Qt.darker(Theme.bgSidebar, 1.08) }
+    }
     function t(key) { return translator.text(key, translator.language) }
     ColumnLayout {
         anchors.fill: parent
@@ -23,11 +29,76 @@ Rectangle {
         spacing: 20
         RowLayout {
             Layout.topMargin: 10; Layout.bottomMargin: 8
-            Rectangle {
-                Layout.preferredWidth: 32; Layout.preferredHeight: 32; radius: 10; color: Theme.bgSelected
-                Label { anchors.centerIn: parent; text: "N"; color: Theme.accentPrimary; font.pixelSize: 20; font.weight: Font.Bold }
+            spacing: 10
+            Item {
+                Layout.preferredWidth: 38
+                Layout.preferredHeight: 34
+                // Ambient halo behind the brand mark (Section 3.2: restrained rose/lavender).
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width + 16
+                    height: parent.height + 12
+                    radius: width / 2
+                    opacity: 0.5
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: Qt.rgba(Theme.accentGlow.r, Theme.accentGlow.g, Theme.accentGlow.b, 0.55) }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                }
+                // Rounded gradient tile that carries the cat-ear note mark.
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 32; height: 32; radius: 10
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: Theme.accentSecondary }
+                        GradientStop { position: 0.55; color: Theme.accentPrimary }
+                        GradientStop { position: 1.0; color: Theme.accentHover }
+                    }
+                }
+                Canvas {
+                    anchors.centerIn: parent
+                    width: 32; height: 32
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.strokeStyle = Theme.textOnAccent
+                        ctx.fillStyle = Theme.textOnAccent
+                        ctx.lineWidth = 1.9
+                        ctx.lineCap = "round"
+                        ctx.lineJoin = "round"
+                        const w = width, h = height
+                        // Cat ears: two rounded triangles rising above the note head.
+                        ctx.beginPath()
+                        ctx.moveTo(w * 0.27, h * 0.44)
+                        ctx.lineTo(w * 0.30, h * 0.20)
+                        ctx.lineTo(w * 0.48, h * 0.37)
+                        ctx.closePath()
+                        ctx.fill()
+                        ctx.beginPath()
+                        ctx.moveTo(w * 0.73, h * 0.44)
+                        ctx.lineTo(w * 0.70, h * 0.20)
+                        ctx.lineTo(w * 0.52, h * 0.37)
+                        ctx.closePath()
+                        ctx.fill()
+                        // Music note body: stem, flag and head.
+                        ctx.beginPath()
+                        ctx.moveTo(w * 0.56, h * 0.66)
+                        ctx.lineTo(w * 0.56, h * 0.40)
+                        ctx.lineTo(w * 0.70, h * 0.36)
+                        ctx.stroke()
+                        ctx.beginPath()
+                        ctx.ellipse(w * 0.40, h * 0.66, w * 0.13, w * 0.10, 0, 0, Math.PI * 2)
+                        ctx.fill()
+                    }
+                }
             }
-            Label { text: "NekoTune"; color: Theme.textPrimary; font.pixelSize: 19; font.weight: Font.DemiBold }
+            Label {
+                text: "NekoTune"
+                color: Theme.textPrimary
+                font.pixelSize: 19
+                font.weight: Font.DemiBold
+                font.letterSpacing: 0.6
+            }
         }
         ColumnLayout {
             Layout.fillWidth: true; spacing: 6
