@@ -326,5 +326,19 @@
   "extension_state_stopping": "停止中",
   "extension_state_failed": "故障",
   "extension_state_blocked": "依赖不可用",
-  "search": "搜索"
+  "search": "搜索",
+  "close_to_tray": "关闭窗口后收进系统托盘",
+  "tray_unavailable": "当前系统托盘不可用，关闭窗口将退出 NekoTune。",
+  "tray_no_song": "未选择歌曲",
+  "tray_show": "显示窗口",
+  "tray_hide": "隐藏窗口",
+  "tray_play": "播放",
+  "tray_pause": "暂停",
+  "tray_previous": "上一首",
+  "tray_next": "下一首",
+  "tray_quit": "退出",
+  "tray_playing": "正在播放",
+  "tray_paused": "已暂停",
+  "tray_stopped": "已停止",
+  "tray_disconnected": "后台未连接"
 }

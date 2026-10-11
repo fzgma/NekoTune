@@ -24,6 +24,7 @@ Item {
         databasePath: page.shell.databasePath
         client: page.controllers.settings; ai: page.controllers.ai
         audioOutput: page.controllers.audioOutput || null
+        desktop: page.shell.desktop || null
         connected: page.transport.connected; translator: page.translator
         extensionSettings: page.settingsPages.map(item => ({id: item.id, title: page.extensions.label(item.title, page.translator.language)}))
         onExtensionSettingsRequested: function(id) { page.shell.navigate(id) }

@@ -14,6 +14,7 @@ NekoTune 是一款本地优先的 Linux 音乐播放器，使用 C++20、Qt6 和
 | 播放队列 | 独立抽屉，支持追加、移除、清空和重启恢复 |
 | 播放控制 | 播放／暂停、停止、上一首、下一首、跳转、音量；顺序、单曲循环、随机和列表循环 |
 | 音频输出 | 设置页和播放栏选择系统默认或指定设备；保存选择，设备断开时暂停，重连后手动恢复 |
+| 系统托盘 | 关闭窗口继续后台播放，托盘可恢复窗口、播放／暂停、切歌和退出 |
 | Linux 系统媒体控制 | MPRIS 2：桌面媒体面板和媒体键控制播放、切歌、进度及音量，并显示歌曲资料与封面 |
 | 歌词与封面 | 本地优先，支持 LRC、KRC 词组高亮、在线候选选择和离线缓存 |
 | AI 歌曲信息 | 通过兼容 Chat Completions 的服务生成歌名、歌手和标签建议，确认后保存 |
@@ -27,7 +28,7 @@ NekoTune 是一款本地优先的 Linux 音乐播放器，使用 C++20、Qt6 和
 ### 依赖
 
 - CMake 3.28+、支持 C++20 的编译器和 `pkg-config`。
-- Qt 6.6+：Core、Gui、Network、Sql、Multimedia、Quick、Qml、QuickControls2、Test、QuickTest。
+- Qt 6.6+：Core、Gui、Widgets、Network、Sql、Multimedia、Quick、Qml、QuickControls2、Test、QuickTest。
 - Linux 桌面集成另需 Qt DBus 开发包；自动化总线测试需要 `dbus-run-session`，可选安装 `playerctl` 验证客户端互操作。
 - Zlib 和 FFmpeg 开发库：`libavformat`、`libavutil`。
 - QtKeychain 0.17+ 的 Qt6 开发包，CMake 包名为 `Qt6Keychain`。
@@ -84,6 +85,12 @@ NEKOTUNE_SOCKET="$nekotune_profile/nekotune.sock" \
 此目录会保留此次运行的数据。分离运行时，两个终端必须使用相同的 `NEKOTUNE_HOME` 和 `NEKOTUNE_SOCKET`；仅改变 Socket 不会隔离曲库。
 
 ## 使用
+
+### 系统托盘
+
+默认关闭主窗口后收进系统托盘，播放继续。单击或双击托盘图标恢复窗口；右键菜单提供窗口显隐、播放／暂停、上一首、下一首和退出，并显示当前歌曲。中英文菜单随设置语言切换。
+
+设置中的「关闭窗口后收进系统托盘」可切换为关闭即退出。没有可用托盘时关闭会退出；窗口隐藏后若托盘消失，会自动恢复窗口。Linux 桌面需要提供 StatusNotifierItem 或 XEmbed 托盘支持，部分 GNOME 环境需要启用托盘扩展。托盘「退出」及 Linux MPRIS Quit 始终退出并停止内嵌后台；分离运行的客户端退出不会停止外部后台进程。
 
 ### 扩展
 

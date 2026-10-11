@@ -15,6 +15,7 @@ Item {
     required property var translator
     property var ai: null
     property var audioOutput: null
+    property var desktop: null
     property bool saving: false
     property string message: ""
     property bool failed: false
@@ -45,15 +46,36 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 112
+            implicitHeight: generalSettings.implicitHeight + 36
             radius: Theme.radiusMd; color: Theme.bgSurface; border.color: Theme.borderSubtle
             ColumnLayout {
+                id: generalSettings
                 anchors.fill: parent; anchors.margins: 18; spacing: 12
                 Label { text: root.t("general_settings"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
                 RowLayout {
                     Label { Layout.fillWidth: true; text: root.t("language"); color: Theme.textSecondary; font.pixelSize: Theme.fontBody }
                     TextButton { text: "中文"; subtle: root.translator.language !== "zh"; onClicked: root.translator.language = "zh" }
                     TextButton { text: "English"; subtle: root.translator.language !== "en"; onClicked: root.translator.language = "en" }
+                }
+                CheckBox {
+                    objectName: "closeToTrayCheckBox"
+                    Layout.fillWidth: true
+                    visible: root.desktop !== null
+                    text: root.t("close_to_tray")
+                    font.pixelSize: Theme.fontBody
+                    palette.windowText: Theme.textPrimary
+                    palette.highlight: Theme.accentPrimary
+                    checked: root.desktop ? root.desktop.closeToTray : false
+                    onClicked: if (root.desktop) root.desktop.closeToTray = checked
+                    Accessible.name: text
+                }
+                Label {
+                    objectName: "trayUnavailableNotice"
+                    Layout.fillWidth: true
+                    visible: root.desktop !== null && !root.desktop.trayAvailable
+                    text: root.t("tray_unavailable")
+                    color: Theme.textMuted; font.pixelSize: Theme.fontCaption
+                    wrapMode: Text.WordWrap
                 }
             }
         }

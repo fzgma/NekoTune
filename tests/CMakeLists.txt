@@ -7,6 +7,11 @@ endfunction()
 
 set(CMAKE_WIN32_EXECUTABLE OFF)
 set(NEKOTUNE_TEST_QPA offscreen)
+add_executable(nekotune_system_tray_test system_tray_test.cpp ../frontend/qt-qml/resources.qrc)
+target_link_libraries(nekotune_system_tray_test PRIVATE nekotune_core nekotune_frontend Qt6::Test)
+nekotune_add_qt_test(NAME nekotune_system_tray_test COMMAND nekotune_system_tray_test)
+set_tests_properties(nekotune_system_tray_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
 add_executable(nekotune_system_media_test system_media_test.cpp)
 target_link_libraries(nekotune_system_media_test PRIVATE nekotune_core nekotune_frontend Qt6::Test)
 nekotune_add_qt_test(NAME nekotune_system_media_test COMMAND nekotune_system_media_test)
@@ -26,6 +31,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 if(WIN32)
     set(NEKOTUNE_TEST_QPA windows)
+    set_tests_properties(nekotune_system_tray_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software")
 endif()
 
 add_executable(nekotune_player_queue_test

@@ -1,6 +1,8 @@
+find_package(Qt6 6.6 REQUIRED COMPONENTS Widgets)
 file(GLOB FRONTEND_CONTROLLERS CONFIGURE_DEPENDS src/controllers/*.cpp src/controllers/*.h src/models/*.cpp src/models/*.h)
 add_library(nekotune_frontend STATIC src/ipc_client.cpp src/ipc_client.h src/i18n.cpp src/i18n.h src/extensions/extension_view.cpp src/extensions/extension_view.h ${FRONTEND_CONTROLLERS})
-target_sources(nekotune_frontend PRIVATE src/platform/system_media_bridge.cpp src/platform/system_media_bridge.h)
+target_sources(nekotune_frontend PRIVATE src/platform/system_media_bridge.cpp src/platform/system_media_bridge.h
+    src/platform/system_tray_controller.cpp src/platform/system_tray_controller.h)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Qt6 6.6 REQUIRED COMPONENTS DBus)
     target_sources(nekotune_frontend PRIVATE src/platform/linux/mpris_service.cpp src/platform/linux/mpris_service.h)
@@ -8,7 +10,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(nekotune_frontend PUBLIC NEKOTUNE_MPRIS)
 endif()
 target_include_directories(nekotune_frontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(nekotune_frontend PUBLIC nekotune_paths Qt6::Core Qt6::Network Qt6::Quick Qt6::Qml)
+target_link_libraries(nekotune_frontend PUBLIC nekotune_paths Qt6::Core Qt6::Network Qt6::Quick Qt6::Qml Qt6::Widgets)
 add_executable(nekotune-qt-qml
     src/main.cpp
     resources.qrc

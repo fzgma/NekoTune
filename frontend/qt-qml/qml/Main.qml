@@ -24,6 +24,7 @@ ApplicationWindow {
     visible: true
     title: "NekoTune"
     color: Theme.bgCanvas
+    property var desktop: typeof desktopIntegration !== "undefined" ? desktopIntegration : null
     property var app: controllers
     property var transport: ipcClient
     property var translator: i18n

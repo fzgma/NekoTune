@@ -326,5 +326,19 @@
   "extension_state_stopping": "Stopping",
   "extension_state_failed": "Failed",
   "extension_state_blocked": "Dependency unavailable",
-  "search": "Search"
+  "search": "Search",
+  "close_to_tray": "Keep running in the system tray when closing the window",
+  "tray_unavailable": "The system tray is unavailable. Closing the window will quit NekoTune.",
+  "tray_no_song": "No song selected",
+  "tray_show": "Show window",
+  "tray_hide": "Hide window",
+  "tray_play": "Play",
+  "tray_pause": "Pause",
+  "tray_previous": "Previous track",
+  "tray_next": "Next track",
+  "tray_quit": "Quit",
+  "tray_playing": "Playing",
+  "tray_paused": "Paused",
+  "tray_stopped": "Stopped",
+  "tray_disconnected": "Backend disconnected"
 }

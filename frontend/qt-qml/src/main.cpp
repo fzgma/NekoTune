@@ -2,6 +2,8 @@
 #include "i18n.h"
 #include "app_paths.h"
 #include "ipc_client.h"
+#include "platform/system_media_bridge.h"
+#include "platform/system_tray_controller.h"
 #ifdef NEKOTUNE_MPRIS
 #include "platform/linux/mpris_service.h"
 #endif
@@ -14,7 +16,7 @@
 #include <QCommandLineParser>
 #include <QDebug>
 #include <QDir>
-#include <QGuiApplication>
+#include <QApplication>
 #include <QNetworkAccessManager>
 #include <QNetworkDiskCache>
 #include <QQmlApplicationEngine>
@@ -64,7 +66,8 @@ class CoverNetworkManagerFactory final : public QQmlNetworkAccessManagerFactory 
 // Declaration order keeps the engine's referenced controllers alive through
 // QML teardown and lets the runtime stop on application exit.
 int main(int argc, char *argv[]) {
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
+    app.setQuitOnLastWindowClosed(false);
     QGuiApplication::setApplicationName(QStringLiteral("NekoTune"));
     QGuiApplication::setOrganizationName(QStringLiteral("NekoTune"));
     QString directoryError;
@@ -96,8 +99,14 @@ int main(int argc, char *argv[]) {
     IpcClient ipcClient;
     I18n i18n;
     AppControllers controllers(ipcClient);
-#ifdef NEKOTUNE_MPRIS
     SystemMediaBridge mediaBridge(ipcClient, *controllers.playback);
+    SystemTrayController desktopIntegration(mediaBridge, i18n);
+    QObject::connect(&desktopIntegration, &SystemTrayController::quitRequested, &app, &QCoreApplication::quit);
+    QObject::connect(&mediaBridge, &SystemMediaBridge::raiseRequested, &desktopIntegration, &SystemTrayController::showWindow);
+    QObject::connect(&mediaBridge, &SystemMediaBridge::quitRequested, &desktopIntegration, &SystemTrayController::quit);
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &desktopIntegration, &SystemTrayController::shutdown);
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &mediaBridge, &SystemMediaBridge::shutdown);
+#ifdef NEKOTUNE_MPRIS
     MprisService mpris(mediaBridge);
 #endif
 
@@ -106,6 +115,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("ipcClient"), &ipcClient);
     engine.rootContext()->setContextProperty(QStringLiteral("i18n"), &i18n);
     engine.rootContext()->setContextProperty(QStringLiteral("controllers"), &controllers);
+    engine.rootContext()->setContextProperty(QStringLiteral("desktopIntegration"), &desktopIntegration);
     engine.rootContext()->setContextProperty(QStringLiteral("lyricsDebugEnabled"),
                                              commandLine.isSet(QStringLiteral("lyrics-debug")) ||
                                                  commandLine.isSet(QStringLiteral("debug-lyrics")));
@@ -130,17 +140,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-#ifdef NEKOTUNE_MPRIS
     const auto window = qobject_cast<QWindow *>(engine.rootObjects().first());
-    QObject::connect(&mediaBridge, &SystemMediaBridge::raiseRequested, window, [window] {
-        if (window->windowState() == Qt::WindowMinimized) window->showNormal();
-        else window->show();
-        window->raise();
-        window->requestActivate();
-    });
-    QObject::connect(&mediaBridge, &SystemMediaBridge::quitRequested, &app, &QCoreApplication::quit);
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, &mediaBridge, &SystemMediaBridge::shutdown);
-#endif
+    if (!window) return 1;
+    desktopIntegration.attachWindow(window);
 
     return app.exec();
 }

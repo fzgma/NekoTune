@@ -82,7 +82,7 @@ backend/
 frontend/qt-qml/
 ├── src/controllers/            # 播放、曲库、队列、歌单、歌词、扩展、AI 等
 ├── src/models/                 # RecordModel
-├── src/platform/               # 系统媒体桥接及 Linux MPRIS 协议
+├── src/platform/               # 系统托盘、系统媒体桥接及 Linux MPRIS 协议
 ├── qml/shell/                  # 导航、底栏与页面注册表
 ├── qml/pages/                  # 首页、曲库、歌单、扩展音源、歌词、设置、诊断页
 ├── qml/components/             # 可复用界面组件
@@ -108,7 +108,7 @@ tests/                          # 服务、存储、协议、QML 和依赖边界
 | `nekotune_application` | domain |
 | `nekotune_ipc` | application、paths、Qt Network |
 | `nekotune_core` | ipc、storage、providers、infrastructure；源码来自 `runtime` |
-| `nekotune_frontend` | paths、Qt Core／Network |
+| `nekotune_frontend` | paths、Qt Core／Network／Quick／Qml／Widgets |
 
 依赖项中省略共同的 `nekotune_` 前缀。`nekotune_core` 是运行时装配库名称，源码没有额外的 `backend/core` 层。网络歌词来源与本地歌词存储共享 `infrastructure/lyrics` 目录，但分别编入 providers 和 infrastructure 目标；目录归组不等于合并构建目标。
 
@@ -121,6 +121,8 @@ Linux 下 `nekotune_frontend` 额外链接 Qt DBus；后端、领域和应用目
 ### 系统媒体集成
 
 `SystemMediaBridge` 位于桌面前端，消费 `PlaybackController` 的后端确认状态，使用 `IpcClient` 发送命令。Linux 的 `MprisService` 用 `QDBusVirtualObject` 实现 MPRIS 根接口、Player 接口和 Properties；协议编码与平台无关桥接分离。两个桌面入口共用此装配，独立后端不注册媒体会话。
+
+`SystemTrayController` 管理原生托盘菜单、主窗口关闭与恢复。桌面入口使用 `QApplication`，通过 `desktopIntegration` 向 QML 暴露托盘可用性和关闭偏好；`close_to_tray` 通过 `AppPaths` 保存。托盘播放操作复用 `SystemMediaBridge` 的 IPC 请求与后端确认状态。有可用托盘时默认关闭仅隐藏窗口，无托盘时退出；隐藏后托盘消失会恢复窗口。托盘退出和 MPRIS Quit 统一触发应用退出，内嵌后台沿用 `aboutToQuit` 清理，分离运行的外部后台保持运行。
 
 收到首次完整 `server.connected` 快照后才注册会话；断线／退出时撤销，重连后更新 TrackId 的连接代次。命令异步等待 IPC，5 秒超时回复错误，不重放请求。PropertiesChanged 只发布确认后的变化，普通进度更新不发布该信号；明确的确认跳转通过 Seeked 传递。
 
