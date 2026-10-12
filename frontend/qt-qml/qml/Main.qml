@@ -140,7 +140,7 @@ ApplicationWindow {
     // Popup backgrounds opt into shortcut blocking by a shared object name.
     // This includes menus whose overlay parents are outside the page tree.
     readonly property bool editingText: {
-        let item = activeFocusItem
+        let item = root.activeFocusItem
         while (item) {
             if (item instanceof TextInput || item instanceof TextEdit) return true
             item = item.parent

@@ -233,7 +233,8 @@ class SystemTrayTest final : public QObject {
         QCOMPARE(action("trayPlayPause")->text(), "Pause");
         QMetaObject::invokeMethod(m_audio, [this] { m_audio->suspendAudioOutput(); }, Qt::BlockingQueuedConnection);
         QTRY_COMPARE(m_playback->state(), "paused");
-        QVERIFY(!action("trayPlayPause")->isEnabled());
+        // Playback state and capabilities arrive as separate IPC events.
+        QTRY_VERIFY(!action("trayPlayPause")->isEnabled());
         m_runtime->stop();
         QTRY_VERIFY(!m_bridge->ready());
         QVERIFY(!action("trayNext")->isEnabled());

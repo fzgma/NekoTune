@@ -927,9 +927,17 @@ class ExtensionsTest final : public QObject {
       QCOMPARE(app.playback->song(), playingSong);
       QCOMPARE(app.queue->model()->items(), playingQueue);
       QCOMPARE(app.playback->state(), "playing");
+      window->setProperty("viewMode", "library");
+      QPointer<QQuickItem> search;
+      QTRY_VERIFY((search = visualItem(window->contentItem(), "librarySearchField")));
+      search->forceActiveFocus();
+      QTRY_VERIFY(window->property("editingText").toBool());
+      // Replacing the shell destroys its focused editor and releases shortcuts.
       app.theme->selectTheme("test.theme/shell");
       QTRY_VERIFY(window->findChild<QObject *>("themeTestShell"));
       QTRY_VERIFY(background.isNull());
+      QTRY_VERIFY(search.isNull());
+      QTRY_VERIFY(!window->property("editingText").toBool());
       QQmlApplicationEngine recovery;
       connect(&recovery, &QQmlEngine::warnings, this, collectWarnings);
       recovery.rootContext()->setContextProperty("controllers", &app);
