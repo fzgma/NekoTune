@@ -33,7 +33,7 @@ Rectangle {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 14
-        spacing: 8
+        spacing: Theme.spaceSm
 
         RowLayout {
             Layout.fillWidth: true
@@ -43,7 +43,7 @@ Rectangle {
                 text: root.tr("lyrics_debug_page")
                 color: Theme.accentSecondary
                 font.bold: true
-                font.pixelSize: 18
+                font.pixelSize: Theme.fontDialogTitle
             }
             Label {
                 text: "--lyrics-debug"
@@ -112,7 +112,7 @@ Rectangle {
                     anchors.fill: parent
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
-                    spacing: 8
+                    spacing: Theme.spaceSm
                     Label {
                         Layout.preferredWidth: 86
                         text: String(lineRow.modelData.time_ms) + " ms"

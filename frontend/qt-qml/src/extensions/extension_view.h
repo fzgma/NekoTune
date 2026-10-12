@@ -19,6 +19,7 @@ class ExtensionView : public QQuickItem {
     bool ready() const { return m_item; }
     QString error() const { return m_error; }
     QQuickItem *item() const { return m_item; }
+    Q_INVOKABLE bool invokeAction(const QString &method);
     QObject *controllers = nullptr;
     QObject *translator = nullptr;
     QObject *hostWindow = nullptr;

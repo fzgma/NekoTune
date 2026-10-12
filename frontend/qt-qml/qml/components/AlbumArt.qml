@@ -81,10 +81,12 @@ Item {
                 anchors.centerIn: parent
                 width: 48
                 height: 48
+                property color strokeColor: Theme.borderSubtle
+                onStrokeColorChanged: requestPaint()
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
-                    ctx.strokeStyle = Theme.borderSubtle
+                    ctx.strokeStyle = strokeColor
                     ctx.lineWidth = 2
                     ctx.lineCap = "round"
                     ctx.lineJoin = "round"

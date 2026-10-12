@@ -139,7 +139,7 @@ Rectangle {
         Flow {
             Layout.fillWidth: true
             Layout.preferredHeight: childrenRect.height
-            spacing: 8
+            spacing: Theme.spaceSm
             TextButton {
                 objectName: "aiSaveConfigButton"
                 text: root.t("save")

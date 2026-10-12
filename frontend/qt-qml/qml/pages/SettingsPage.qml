@@ -11,16 +11,19 @@ Item {
     required property var transport
     readonly property var extensions: controllers.extensions || null
     readonly property var settingsPages: extensions ? extensions.settingsPages : []
+    readonly property bool appearance: shell.settingsSection === "appearance"
     readonly property var selected: settingsPages.find(item => item.id === shell.settingsSection) || ({})
     onSettingsPagesChanged: {
-        if (shell && shell.settingsSection && !settingsPages.some(item => item.id === shell.settingsSection))
+        if (shell && shell.settingsSection && shell.settingsSection !== "appearance" && !settingsPages.some(item => item.id === shell.settingsSection))
             shell.settingsSection = ""
     }
     signal importRequested(int playlistId)
     signal editRequested(var song)
     SettingsPanel {
         anchors.fill: parent; anchors.margins: 20
-        visible: !page.selected.id
+        visible: !page.selected.id && !page.appearance
+        appearanceAvailable: Boolean(page.controllers.theme)
+        onAppearanceRequested: page.shell.navigate("appearance")
         databasePath: page.shell.databasePath
         client: page.controllers.settings; ai: page.controllers.ai
         audioOutput: page.controllers.audioOutput || null
@@ -30,8 +33,8 @@ Item {
         onExtensionSettingsRequested: function(id) { page.shell.navigate(id) }
     }
     ColumnLayout {
-        anchors.fill: parent; anchors.margins: 20; spacing: 12
-        visible: Boolean(page.selected.id)
+        anchors.fill: parent; anchors.margins: 20; spacing: Theme.spaceMd
+        visible: Boolean(page.selected.id) || page.appearance
         RowLayout {
             Layout.fillWidth: true
             TextButton {
@@ -44,16 +47,21 @@ Item {
             Label {
                 objectName: "settingsSubpageTitle"
                 Layout.fillWidth: true
-                text: page.extensions ? page.extensions.label(page.selected.title || "", page.translator.language) : ""
+                text: page.appearance ? page.translator.text("appearance", page.translator.language) : page.extensions ? page.extensions.label(page.selected.title || "", page.translator.language) : ""
                 color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle
                 textFormat: Text.PlainText; elide: Text.ElideRight
             }
         }
         Item {
             Layout.fillWidth: true; Layout.fillHeight: true
+            Loader {
+                anchors.fill: parent
+                active: page.appearance && Boolean(page.controllers.theme)
+                sourceComponent: AppearancePanel { controller: page.controllers.theme; translator: page.translator }
+            }
             ExtensionView {
                 id: extension; anchors.fill: parent
-                descriptor: page.selected
+                descriptor: page.appearance ? ({}) : page.selected
                 controllers: page.controllers; translator: page.translator; hostWindow: page.shell
             }
             Label {

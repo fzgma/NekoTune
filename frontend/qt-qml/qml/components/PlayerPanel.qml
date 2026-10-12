@@ -39,7 +39,7 @@ Item {
 
     RowLayout {
         anchors.fill: parent
-        anchors.margins: 24
+        anchors.margins: Theme.spaceXl
         anchors.topMargin: 24 + root.topInset
         spacing: 28
 
@@ -51,7 +51,7 @@ Item {
             ColumnLayout {
                 anchors.centerIn: parent
                 width: parent.width
-                spacing: 16
+                spacing: Theme.spaceLg
 
                 // Artwork container with adaptive size (224 compact, 280 wide)
                 Item {
@@ -74,7 +74,7 @@ Item {
                 // Track Details
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 4
+                    spacing: Theme.spaceXs
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -82,7 +82,7 @@ Item {
                             Layout.fillWidth: true
                             text: root.hasSong ? (root.song.title || i18n.text("untitled", i18n.language)) : i18n.text("no_track_selected", i18n.language)
                             color: root.textStrongColor
-                            font.pixelSize: 22
+                            font.pixelSize: Theme.fontSongTitle
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                         }
@@ -105,7 +105,7 @@ Item {
                         artist: root.hasSong ? String(root.song.artist || "") : ""
                         fallbackText: i18n.text(root.hasSong ? "artist_author" : "choose_audio", i18n.language)
                         color: root.textSoftColor
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontBodySecondary
                         font.weight: Font.Normal
                     }
 
@@ -114,7 +114,7 @@ Item {
                         visible: root.hasSong && Boolean(root.song.album)
                         text: root.song.album || ""
                         color: root.textMutedColor
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
                     }
                 }
@@ -134,7 +134,7 @@ Item {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 8
+            spacing: Theme.spaceSm
 
             LyricsPanel {
                 controller: root.lyricsController

@@ -2,6 +2,18 @@ import QtQuick.tooling 1.2
 
 Module {
     Component {
+        name: "ThemeDefaults"
+        prototype: "QObject"
+        exports: ["NekoTune/ThemeDefaults 1.0"]
+        exportMetaObjectRevisions: [256]
+        isSingleton: true
+        Method {
+            name: "defaults"
+            type: "QVariantMap"
+            Parameter { name: "dark"; type: "bool" }
+        }
+    }
+    Component {
         name: "ExtensionView"
         prototype: "QQuickItem"
         exports: ["NekoTune/ExtensionView 1.0"]
@@ -14,6 +26,7 @@ Module {
         Property { name: "error"; type: "QString"; isReadonly: true }
         Property { name: "item"; type: "QQuickItem"; isPointer: true; isReadonly: true }
         Signal { name: "descriptorChanged" }
+        Method { name: "invokeAction"; type: "bool"; Parameter { name: "method"; type: "QString" } }
         Signal { name: "contextChanged" }
         Signal { name: "readyChanged" }
     }

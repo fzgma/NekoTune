@@ -67,7 +67,7 @@ Rectangle {
             Accessible.name: bar.shell.hasSong ? String(bar.shell.song.title) : bar.t("no_track_selected")
             background: Item {}
             contentItem: ColumnLayout {
-                spacing: 4
+                spacing: Theme.spaceXs
                 Label { Layout.fillWidth: true; text: bar.shell.hasSong ? bar.shell.song.title || bar.t("untitled") : bar.t("no_track_selected"); color: Theme.textPrimary; font.pixelSize: Theme.fontBody; font.weight: Font.DemiBold; elide: Text.ElideRight; textFormat: Text.PlainText }
                 ArtistNames {
                     id: nowPlayingArtists
@@ -101,10 +101,10 @@ Rectangle {
         // Using separate left/right subtraction would shift the visual center as metadata width changes.
         // The maximum central width keeps the timeline bounded on large windows.
         width: Math.min(640, bar.width - 2 * (Math.max(bar.leftWidth, bar.rightWidth) + 32))
-        spacing: 4
+        spacing: Theme.spaceXs
         RowLayout {
             Layout.alignment: Qt.AlignHCenter
-            spacing: 16
+            spacing: Theme.spaceLg
             IconButton { objectName: "previousTrackButton"; kind: "previous"; tooltipText: bar.t("previous"); enabled: bar.shell.transport.connected && bar.shell.queue.length > 0; onClicked: bar.controller.previous() }
             IconButton {
                 objectName: "mainPlayButton"
@@ -120,7 +120,7 @@ Rectangle {
         }
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: Theme.spaceSm
             Label { Layout.preferredWidth: 40; text: bar.formatTime(timeline.pressed ? timeline.valueAt(timeline.position) : timeline.value, false); color: Theme.textMuted; font.pixelSize: Theme.fontCaption; horizontalAlignment: Text.AlignRight }
             // The time label above follows the handle's preview while pressed, not stale backend position.
             // SeekSlider keeps that preview stable until release and eventual backend acknowledgment.
@@ -148,7 +148,7 @@ Rectangle {
             y: rightControls.compact ? 0 : (parent.height - height) / 2
             width: rightControls.compact ? parent.width : parent.width - viewControls.width - 8
             height: rightControls.compact ? 32 : 40
-            spacing: 4
+            spacing: Theme.spaceXs
             IconButton { objectName: "volumeMuteButton"; kind: bar.shell.volume > 0 ? "volume" : "mute"; tooltipText: bar.t("volume"); enabled: bar.shell.transport.connected; implicitWidth: 32; implicitHeight: rightControls.compact ? 32 : 40; onClicked: bar.controller.toggleMute() }
             // Volume follows every moved event; seeking retains its separate release-only behavior.
             PlayerSlider {
@@ -164,7 +164,7 @@ Rectangle {
             id: viewControls
             anchors.right: parent.right; anchors.bottom: parent.bottom
             width: implicitWidth
-            spacing: 4
+            spacing: Theme.spaceXs
             AudioOutputButton {
                 controller: bar.shell.app ? bar.shell.app.audioOutput || null : null
                 translator: bar.translator; connected: bar.shell.transport.connected
@@ -207,7 +207,7 @@ Rectangle {
         closePolicy: bar.addPending ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle { objectName: "shortcutBlocker"; color: Theme.bgRaised; radius: Theme.radiusLg; border.color: Theme.borderSubtle }
         ColumnLayout {
-            anchors.fill: parent; spacing: 12
+            anchors.fill: parent; spacing: Theme.spaceMd
             Label { text: bar.t("add_to_playlist"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
             ListView {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true

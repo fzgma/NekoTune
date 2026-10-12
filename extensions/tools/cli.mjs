@@ -10,10 +10,48 @@ const [command, target, output] = process.argv.slice(2);
 try {
   if (!target)
     throw new Error(
-      'Usage: pnpm run validate <directory> | pnpm run pack <directory> [output.zip] | pnpm run create <directory>',
+      'Usage: pnpm run validate <directory> | pnpm run pack <directory> [output.zip] | pnpm run create <directory> | create-theme <directory> | create-qml-theme <directory>',
     );
   const directory = path.resolve(target);
-  if (command === 'create') {
+  if (command === 'create-theme' || command === 'create-qml-theme') {
+    await fs.mkdir(directory, { recursive: false });
+    const id =
+      'theme.' +
+      path
+        .basename(directory)
+        .toLowerCase()
+        .replace(/[^a-z0-9.-]/g, '-');
+    const theme = {
+      id: 'default',
+      title: { zh: '我的主题', en: 'My theme' },
+      author: '',
+      schemaVersion: 1,
+      variants: { light: { tokens: {} }, dark: { tokens: {} } },
+    };
+    if (command === 'create-qml-theme') {
+      theme.ui = { background: 'Background.qml' };
+      await fs.writeFile(
+        path.join(directory, 'Background.qml'),
+        'import QtQuick\nimport NekoTune 1.0\nRectangle {\n  ExtensionApi { id: api }\n  color: api.theme.isDark ? api.theme.bgCanvas : api.theme.bgSurface\n}\n',
+      );
+    }
+    await fs.writeFile(
+      path.join(directory, 'extension.json'),
+      JSON.stringify(
+        {
+          id,
+          name: 'My theme',
+          type: 'theme',
+          version: '1.0.0',
+          apiVersion: 1,
+          contributes: { themes: [theme] },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    console.log(`Created ${directory}. Edit extension.json, then run pnpm run pack ${directory}.`);
+  } else if (command === 'create') {
     const id = path
       .basename(directory)
       .toLowerCase()
@@ -75,7 +113,10 @@ try {
     if (command === 'validate') console.log(`${manifest.id}@${manifest.version}: valid`);
     else if (command === 'pack') {
       const archive = new yazl.ZipFile();
-      const destination = path.resolve(output ?? `${manifest.id}-${manifest.version}.nekotune.zip`);
+      const destination = path.resolve(
+        output ??
+          `${manifest.id}-${manifest.version}.${manifest.type === 'theme' ? 'nktheme' : 'nekotune'}.zip`,
+      );
       const writing = pipeline(archive.outputStream, createWriteStream(destination));
       async function add(folder, relative = '') {
         for (const entry of await fs.readdir(folder, { withFileTypes: true })) {

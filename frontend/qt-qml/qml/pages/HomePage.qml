@@ -97,22 +97,22 @@ Item {
             x: page.compact ? 16 : 24
             y: x
             width: scroll.width - x * 2
-            spacing: 24
+            spacing: page.theme.spaceXl
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 16
+                spacing: page.theme.spaceLg
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 6
-                    Label { text: page.t("home"); color: page.theme.textPrimary; font.pixelSize: 24; font.weight: Font.DemiBold }
+                    Label { text: page.t("home"); color: page.theme.textPrimary; font.pixelSize: page.theme.fontTitle; font.weight: Font.DemiBold }
                     Label {
                         objectName: "homeSummary"
                         Layout.fillWidth: true
                         text: page.controllers.library.loaded ? page.t("home_counts").replace("%1", page.songs.length).replace("%2", page.playlists.length)
                               : page.t(!page.transport.connected ? "home_offline" : page.initialFailed ? "home_load_failed" : "home_loading")
                         color: page.theme.textMuted
-                        font.pixelSize: 13
+                        font.pixelSize: page.theme.fontBodySecondary
                         elide: Text.ElideRight
                     }
                 }
@@ -158,8 +158,8 @@ Item {
                 RowLayout {
                     id: heroContent
                     anchors.fill: parent
-                    anchors.margins: 24
-                    spacing: 24
+                    anchors.margins: page.theme.spaceXl
+                    spacing: page.theme.spaceXl
                     Item {
                         Layout.preferredWidth: page.compact ? 128 : 144
                         Layout.preferredHeight: Layout.preferredWidth
@@ -199,11 +199,11 @@ Item {
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
-                        spacing: 8
+                        spacing: page.theme.spaceSm
                         Label {
                             text: page.t(page.shell.hasSong ? (page.shell.isPlaying ? "now_playing" : page.shell.playbackState) : "home_welcome")
                             color: page.theme.accentPrimary
-                            font.pixelSize: 12
+                            font.pixelSize: page.theme.fontCaption
                             font.weight: Font.DemiBold
                         }
                         Label {
@@ -212,7 +212,7 @@ Item {
                             text: page.shell.hasSong ? String(page.shell.song.title || page.t("untitled")) : page.t("home_make_time")
                             textFormat: Text.PlainText
                             color: page.theme.textPrimary
-                            font.pixelSize: 22
+                            font.pixelSize: page.theme.fontSongTitle
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                             HoverHandler { id: titleHover }
@@ -227,11 +227,11 @@ Item {
                             fallbackText: page.shell.hasSong ? page.t("unknown_artist")
                                   : page.t(page.shell.queue.length ? "home_queue_ready" : "home_choose_music")
                             color: page.theme.textSecondary
-                            font.pixelSize: 14
+                            font.pixelSize: page.theme.fontBody
                         }
                         RowLayout {
                             Layout.topMargin: 8
-                            spacing: 12
+                            spacing: page.theme.spaceMd
                             TextButton {
                                 objectName: "homePrimaryButton"
                                 text: page.t(page.primaryAction)
@@ -257,7 +257,7 @@ Item {
                 visible: page.skippedCount > 0
                 text: page.t("unavailable_skipped").replace("%1", page.skippedCount)
                 color: page.theme.statusWarning
-                font.pixelSize: 13
+                font.pixelSize: page.theme.fontBodySecondary
                 wrapMode: Text.WordWrap
             }
 
@@ -274,10 +274,10 @@ Item {
                     Layout.preferredWidth: page.compact ? collections.width : (collections.width - 24) * 0.4
                     Layout.minimumWidth: 0
                     Layout.alignment: Qt.AlignTop
-                    spacing: 16
+                    spacing: page.theme.spaceLg
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { Layout.fillWidth: true; text: page.t("home_my_playlists"); color: page.theme.textPrimary; font.pixelSize: 18; font.weight: Font.DemiBold }
+                        Label { Layout.fillWidth: true; text: page.t("home_my_playlists"); color: page.theme.textPrimary; font.pixelSize: page.theme.fontDialogTitle; font.weight: Font.DemiBold }
                         IconButton {
                             objectName: "homeNewPlaylistButton"
                             kind: "plus"
@@ -318,9 +318,9 @@ Item {
                                     }
                                 }
                                 contentItem: ColumnLayout {
-                                    spacing: 8
+                                    spacing: page.theme.spaceSm
                                     RowLayout {
-                                        spacing: 12
+                                        spacing: page.theme.spaceMd
                                         Item {
                                             Layout.preferredWidth: 48; Layout.preferredHeight: 48
                                             Rectangle {
@@ -338,7 +338,7 @@ Item {
                                             text: String(card.modelData.name)
                                             textFormat: Text.PlainText
                                             color: page.theme.textPrimary
-                                            font.pixelSize: 14
+                                            font.pixelSize: page.theme.fontBody
                                             font.weight: Font.DemiBold
                                             elide: Text.ElideRight
                                             maximumLineCount: 2
@@ -349,7 +349,7 @@ Item {
                                         Label {
                                             Layout.fillWidth: true
                                             text: page.translator.countText("tracks", (card.modelData.items || []).length, page.translator.language)
-                                            color: page.theme.textMuted; font.pixelSize: 12; elide: Text.ElideRight
+                                            color: page.theme.textMuted; font.pixelSize: page.theme.fontCaption; elide: Text.ElideRight
                                         }
                                         IconButton {
                                             objectName: "homePlayPlaylist" + card.modelData.id
@@ -369,13 +369,13 @@ Item {
                         Layout.fillWidth: true
                         visible: page.playlists.length === 0
                         text: page.t(page.transport.connected ? "no_playlists" : "home_offline")
-                        color: page.theme.textMuted; font.pixelSize: 14; wrapMode: Text.WordWrap
+                        color: page.theme.textMuted; font.pixelSize: page.theme.fontBody; wrapMode: Text.WordWrap
                     }
                     Label {
                         Layout.fillWidth: true
                         visible: page.playlists.length > 4
                         text: page.t("home_more_playlists")
-                        color: page.theme.textMuted; font.pixelSize: 12; wrapMode: Text.WordWrap
+                        color: page.theme.textMuted; font.pixelSize: page.theme.fontCaption; wrapMode: Text.WordWrap
                     }
                 }
 
@@ -385,10 +385,10 @@ Item {
                     Layout.preferredWidth: page.compact ? collections.width : (collections.width - 24) * 0.6
                     Layout.minimumWidth: 0
                     Layout.alignment: Qt.AlignTop
-                    spacing: 8
+                    spacing: page.theme.spaceSm
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { Layout.fillWidth: true; text: page.t("home_recent"); color: page.theme.textPrimary; font.pixelSize: 18; font.weight: Font.DemiBold }
+                        Label { Layout.fillWidth: true; text: page.t("home_recent"); color: page.theme.textPrimary; font.pixelSize: page.theme.fontDialogTitle; font.weight: Font.DemiBold }
                         TextButton {
                             objectName: "homeViewAllButton"
                             text: page.t("home_view_all")
@@ -424,7 +424,7 @@ Item {
                         Layout.topMargin: 16
                         visible: page.songs.length === 0
                         text: page.t(!page.transport.connected ? "home_offline" : page.initialLoading ? "home_loading" : page.initialFailed ? "home_load_failed" : "home_empty_library")
-                        color: page.theme.textMuted; font.pixelSize: 14; wrapMode: Text.WordWrap
+                        color: page.theme.textMuted; font.pixelSize: page.theme.fontBody; wrapMode: Text.WordWrap
                     }
                     TextButton {
                         objectName: "homeRetryButton"

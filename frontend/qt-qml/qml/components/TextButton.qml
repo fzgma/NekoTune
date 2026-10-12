@@ -14,9 +14,10 @@ Button {
     property real cornerRadius: Theme.radiusSm
 
     hoverEnabled: true
-    implicitHeight: 40
-    leftPadding: 16
-    rightPadding: 16
+    implicitHeight: Math.max(Theme.controlMinHeight, implicitContentHeight + topPadding + bottomPadding)
+    leftPadding: Theme.spaceLg
+    rightPadding: Theme.spaceLg
+    font.family: Theme.fontFamily
     font.pixelSize: Theme.fontBody
     font.weight: Font.DemiBold
 

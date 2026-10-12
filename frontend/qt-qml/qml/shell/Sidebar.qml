@@ -25,7 +25,7 @@ Rectangle {
     function t(key) { return translator.text(key, translator.language) }
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: Theme.spaceLg
         spacing: 20
         RowLayout {
             Layout.topMargin: 10; Layout.bottomMargin: 8
@@ -58,11 +58,13 @@ Rectangle {
                 Canvas {
                     anchors.centerIn: parent
                     width: 32; height: 32
+                    property color ink: Theme.textOnAccent
+                    onInkChanged: requestPaint()
                     onPaint: {
                         const ctx = getContext("2d")
                         ctx.reset()
-                        ctx.strokeStyle = Theme.textOnAccent
-                        ctx.fillStyle = Theme.textOnAccent
+                        ctx.strokeStyle = ink
+                        ctx.fillStyle = ink
                         ctx.lineWidth = 1.9
                         ctx.lineCap = "round"
                         ctx.lineJoin = "round"
@@ -138,7 +140,7 @@ Rectangle {
         }
         ListView {
             id: playlists
-            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 4
+            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: Theme.spaceXs
             model: sidebar.controllers.playlists.model
             ScrollBar.vertical: ScrollBar {}
             onCountChanged: Qt.callLater(() => {

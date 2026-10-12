@@ -17,6 +17,7 @@ import {
   cleanupPackages,
 } from './packages.mjs';
 import { AudioProxy } from './audio.mjs';
+import { catalog, validateTheme, exportTheme, themeLimits } from './themes.mjs';
 
 async function main() {
   const root = process.env.NEKOTUNE_EXTENSIONS_ROOT;
@@ -118,6 +119,8 @@ async function main() {
               throw new Error('Duplicate registration');
             if (['pages', 'settings', 'slots', 'toolbars'].includes(params.kind))
               await containedFile(entries.get(run.id).directory, params.descriptor?.source);
+            if (params.kind === 'themes')
+              await validateTheme(params.descriptor, entries.get(run.id).directory);
             registry.set(params.id, {
               ...params.descriptor,
               id: `${run.id}/${params.id}`,
@@ -258,6 +261,9 @@ async function main() {
       error: redact(entry.error ?? ''),
       generation: run?.generation ?? 0,
       nativeModules: Boolean(entry.manifest.nativeModules),
+      type: entry.manifest.type ?? 'extension',
+      hasCode: entry.manifest.type !== 'theme' || entry.manifest._themeHasCode,
+      themes: contributions.themes ?? [],
       contributes: run?.state === 'running' ? contributions : {},
       registrations:
         run?.state === 'running'
@@ -370,7 +376,8 @@ async function main() {
   }
   async function startOne(id) {
     const entry = entries.get(id);
-    if (!entry.trusted) throw new Error(`Trust must be explicitly granted to ${id}`);
+    if (!entry.trusted && (entry.manifest.type !== 'theme' || entry.manifest._themeHasCode))
+      throw new Error(`Trust must be explicitly granted to ${id}`);
     if (runs.get(id)?.state === 'running') return;
     if (runs.has(id)) return await runs.get(id).started;
     if (entry.manifest.nativeModules) {
@@ -395,6 +402,13 @@ async function main() {
       run.reject = reject;
     });
     runs.set(id, run);
+    if (!entry.manifest.main) {
+      run.state = 'running';
+      run.resolve();
+      if (entry.development) watchDevelopment(entry, run);
+      changed();
+      return;
+    }
     run.process = spawn(process.execPath, [path.join(runtimeDirectory, 'worker.cjs')], {
       cwd: entry.directory,
       detached: process.platform !== 'win32',
@@ -432,16 +446,7 @@ async function main() {
             });
         }
       }, 5000);
-      if (entry.development) {
-        run.watcher = watch(entry.directory, { recursive: true }, (_event, name) => {
-          if (!name || String(name).includes('node_modules') || String(name).endsWith('.tmp')) return;
-          clearTimeout(run.debounce);
-          run.debounce = setTimeout(
-            () => enqueueMutation(() => reload(id)).catch((error) => recordLog(id, 'error', error.message)),
-            350,
-          );
-        });
-      }
+      if (entry.development) watchDevelopment(entry, run);
     } catch (error) {
       await stop(id);
       entry.state = 'failed';
@@ -450,6 +455,17 @@ async function main() {
       changed();
       throw error;
     }
+  }
+  function watchDevelopment(entry, run) {
+    run.watcher = watch(entry.directory, { recursive: true }, (_event, name) => {
+      if (!name || String(name).includes('node_modules') || String(name).endsWith('.tmp')) return;
+      clearTimeout(run.debounce);
+      run.debounce = setTimeout(
+        () =>
+          enqueueMutation(() => reload(run.id)).catch((error) => recordLog(run.id, 'error', error.message)),
+        350,
+      );
+    });
   }
   async function stop(id) {
     audioProxy.revoke(id);
@@ -465,8 +481,8 @@ async function main() {
     run.stopped = (async () => {
       await run.wire?.request('deactivate', {}, 3000).catch(() => {});
       run.wire?.socket.destroy();
-      kill(run, 'SIGTERM');
-      if (run.process.exitCode === null && run.process.signalCode === null)
+      if (run.process) kill(run, 'SIGTERM');
+      if (run.process && run.process.exitCode === null && run.process.signalCode === null)
         await new Promise((resolve) => {
           const timer = setTimeout(() => {
             kill(run, 'SIGKILL');
@@ -502,7 +518,6 @@ async function main() {
     const entry = entries.get(id);
     if (!entry) throw new Error('Extension not found');
     if (trusted) entry.trusted = true;
-    if (!entry.trusted) throw new Error(`Trust must be explicitly granted to ${id}`);
     async function inspectGraph(candidate, visited = new Set()) {
       if (visited.has(candidate)) return;
       visited.add(candidate);
@@ -515,9 +530,14 @@ async function main() {
         await inspectGraph(dependency, visited);
     }
     await inspectGraph(id);
+    if (!entry.trusted && (entry.manifest.type !== 'theme' || entry.manifest._themeHasCode))
+      throw new Error(`Trust must be explicitly granted to ${id}`);
     const order = dependencyOrder(entries, id);
     for (const dependency of order)
-      if (!entries.get(dependency).trusted)
+      if (
+        !entries.get(dependency).trusted &&
+        (entries.get(dependency).manifest.type !== 'theme' || entries.get(dependency).manifest._themeHasCode)
+      )
         throw new Error(`Enable and trust dependency first: ${dependency}`);
     for (const dependency of order) {
       const candidate = entries.get(dependency);
@@ -586,11 +606,24 @@ async function main() {
       if (params.development) directory = await fs.realpath(params.path);
       else {
         stage = path.join(root, 'packages', `.staging-${randomUUID()}`);
-        await unpack(params.path, stage);
+        await unpack(params.path, stage, params.themeOnly === true || params.path.endsWith('.nktheme.zip'));
         directory = stage;
       }
       const manifest = await readManifest(directory),
         old = entries.get(manifest.id);
+      if (params.expectedId !== undefined) {
+        if (typeof params.expectedId !== 'string' || !entries.has(params.expectedId))
+          throw new Error('Extension to update is not installed');
+        if (manifest.id !== params.expectedId) throw new Error('theme_update_id_mismatch');
+      }
+      if (params.themeOnly && manifest.type !== 'theme')
+        throw new Error('Use the extension manager to install executable extensions');
+      if (
+        manifest.type === 'theme' &&
+        !params.development &&
+        (await fs.stat(params.path)).size > themeLimits.archive
+      )
+        throw new Error('Theme archive exceeds 20 MiB');
       if (nativeActivated.has(manifest.id))
         throw new Error('Native QML modules were loaded; restart in safe mode before updating');
       if (old && !params.replace) throw new Error('Extension already installed; set replace to update');
@@ -603,15 +636,21 @@ async function main() {
       updating = affected;
       if (updating.length) host.send({ event: 'extensions.reloading', ids: updating, active: true });
       for (const id of [...affected].reverse()) await stop(id);
+      const trustRetained = Boolean(
+        old?.trusted &&
+          (old.manifest.type !== 'theme' || old.manifest._themeHasCode || !manifest._themeHasCode),
+      );
+      const codeNeedsTrust = manifest.type === 'theme' && manifest._themeHasCode && !trustRetained;
       const entry = {
         directory,
         development: Boolean(params.development),
         manifest,
-        trusted: Boolean(old?.trusted),
-        enabled: Boolean(old?.enabled),
+        trusted: trustRetained,
+        // Importing code into a formerly data-only theme waits for an explicit trust decision.
+        enabled: Boolean(old?.enabled && !codeNeedsTrust),
         state: 'disabled',
         previous:
-          old && !old.enabled
+          old && (!old.enabled || codeNeedsTrust)
             ? (old.previous ?? {
                 directory: old.directory,
                 development: old.development,
@@ -749,6 +788,21 @@ async function main() {
     }
     return await enqueueMutation(async () => {
       if (method === 'extensions.install') return await install(params);
+      if (method === 'extensions.export_theme') {
+        const id = params.contribution || 'builtin/yozakura';
+        const builtin = catalog.themes.find((theme) => theme.id === id);
+        if (builtin) return await exportTheme({ theme: builtin, destination: params.path });
+        const slash = id.indexOf('/');
+        const entry = entries.get(id.slice(0, slash));
+        const theme =
+          entry &&
+          ((entry.manifest.contributes?.themes ?? []).find((theme) => theme.id === id.slice(slash + 1)) ??
+            runs.get(entry.manifest.id)?.registrations.themes.get(id.slice(slash + 1)));
+        if (!theme) throw new Error('Theme is unavailable for export');
+        await readManifest(entry.directory);
+        await validateTheme(theme, entry.directory);
+        return await exportTheme({ theme, entry, destination: params.path });
+      }
       if (method === 'extensions.enable') {
         await enable(params.id, params.trusted === true);
         for (const [id, entry] of entries)
@@ -761,6 +815,7 @@ async function main() {
           throw new Error('Invalid selection');
         if (
           params.contribution &&
+          !(params.slot === 'theme' && catalog.themes.some((theme) => theme.id === params.contribution)) &&
           !snapshot().extensions.some((entry) =>
             (entry.contributes[params.slot === 'theme' ? 'themes' : 'slots'] ?? []).some(
               (item) =>
@@ -769,12 +824,29 @@ async function main() {
           )
         )
           throw new Error('Contribution is unavailable for this slot');
+        const previous = { ...state.selections };
         state.selections[params.slot] = params.contribution;
-        await save();
+        try {
+          await save();
+        } catch (error) {
+          state.selections = previous;
+          throw error;
+        }
         changed();
       } else if (method === 'extensions.uninstall') {
         const entry = entries.get(params.id);
         if (!entry) throw new Error('Extension not found');
+        if (entry.manifest.type === 'theme' && state.selections.theme?.startsWith(params.id + '/')) {
+          const previous = state.selections.theme;
+          state.selections.theme = '';
+          try {
+            await save();
+          } catch (error) {
+            state.selections.theme = previous;
+            throw error;
+          }
+          changed();
+        }
         await disable(params.id);
         if (params.clearData === true)
           for (const key of await readJson(path.join(dataDirectory(params.id), 'secret-keys.json'), []))

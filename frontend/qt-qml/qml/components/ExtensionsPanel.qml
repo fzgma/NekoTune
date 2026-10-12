@@ -7,6 +7,8 @@ Item {
     objectName: "extensionsPanel"
     required property var client
     required property var translator
+    property var themeController: null
+    signal appearanceRequested()
     property string selectedId: ""
     property string configTarget: ""
     property int configRequest: -1
@@ -37,7 +39,7 @@ Item {
             Label { text: root.t("extensions"); color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.bold: true }
             Label { Layout.fillWidth: true; text: root.t("extension_description"); color: Theme.textSecondary; wrapMode: Text.Wrap }
             Flow {
-                Layout.fillWidth: true; spacing: 8
+                Layout.fillWidth: true; spacing: Theme.spaceSm
                 TextButton { text: root.t("extension_install"); onClicked: packagePicker.open() }
                 TextButton { text: root.t("extension_mount"); subtle: true; onClicked: directoryPicker.open() }
                 TextButton { text: root.t("extension_restore"); subtle: true; onClicked: root.client.resetInterface() }
@@ -52,7 +54,7 @@ Item {
                     Layout.fillWidth: true; implicitHeight: cardBody.implicitHeight + 28
                     color: Theme.bgSurface; radius: Theme.radiusMd; border.color: Theme.borderSubtle
                     ColumnLayout {
-                        id: cardBody; anchors.fill: parent; anchors.margins: 14; spacing: 8
+                        id: cardBody; anchors.fill: parent; anchors.margins: 14; spacing: Theme.spaceSm
                         RowLayout {
                             Layout.fillWidth: true
                             Label { Layout.fillWidth: true; text: card.modelData.name + "  " + card.modelData.version; color: Theme.textPrimary; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight }
@@ -61,13 +63,13 @@ Item {
                         Label { Layout.fillWidth: true; text: card.modelData.id + (card.modelData.development ? " · " + root.t("extension_development") : ""); color: Theme.textMuted; textFormat: Text.PlainText }
                         Label { Layout.fillWidth: true; visible: text !== ""; text: card.modelData.error || card.modelData.description; color: card.modelData.error ? Theme.statusError : Theme.textSecondary; wrapMode: Text.Wrap; textFormat: Text.PlainText }
                         Flow {
-                            Layout.fillWidth: true; spacing: 8
+                            Layout.fillWidth: true; spacing: Theme.spaceSm
                             TextButton {
                                 text: root.t(card.modelData.state === "running" ? "extension_disable" : "extension_enable")
                                 onClicked: {
                                     root.selectedId = card.modelData.id
                                     if (card.modelData.state === "running") root.manage("disable", {id: root.selectedId})
-                                    else if (!card.modelData.trusted) trustDialog.open()
+                                    else if (!card.modelData.trusted && card.modelData.hasCode !== false) trustDialog.open()
                                     else root.manage("enable", {id: root.selectedId})
                                 }
                             }
@@ -80,10 +82,11 @@ Item {
                 }
             }
             Label { text: root.t("extension_appearance"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle; Layout.topMargin: 10 }
+            TextButton { text: root.t("appearance") + "  ›"; subtle: true; onClicked: root.appearanceRequested() }
             Repeater {
                 model: {
                     const items = root.client.items
-                    const slots = ["shell", "page:home", "page:library", "page:queue", "page:lyrics", "bottomPlayer", "theme"]
+                    const slots = ["shell", "page:home", "page:library", "page:queue", "page:lyrics", "bottomPlayer"]
                     for (const item of root.client.contributions("slots"))
                         if (item.slot && !slots.includes(item.slot)) slots.push(item.slot)
                     return slots
@@ -102,11 +105,13 @@ Item {
                     }
                     ChoiceField {
                         Layout.fillWidth: true
+                        enabled: !root.themeController || !root.themeController.uiSlots[selector.modelData]
                         model: { const revision = root.client.selections; const items = root.client.items; return root.options(selector.modelData) }
                         textRole: "label"; valueRole: "id"
                         currentIndex: Math.max(0, model.findIndex(item => item.id === (root.client.selections[selector.modelData] || "")))
                         onActivated: root.manage("select", {slot: selector.modelData, contribution: currentValue})
                     }
+                    Label { visible: root.themeController !== null && Boolean(root.themeController.uiSlots[selector.modelData]); text: root.t("theme_managed_slot"); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
                 }
             }
         }

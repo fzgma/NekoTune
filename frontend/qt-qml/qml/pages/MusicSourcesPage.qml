@@ -37,7 +37,7 @@ Item {
         function onEventReceived(event) { if (event.event === "music.download") page.message = page.t("extension_download_" + event.state) + (event.message ? ": " + event.message : "") }
     }
     ColumnLayout {
-        anchors.fill: parent; anchors.margins: 24; spacing: 16
+        anchors.fill: parent; anchors.margins: Theme.spaceXl; spacing: Theme.spaceLg
         Label { text: page.t("music_sources"); color: Theme.textPrimary; font.pixelSize: Theme.fontTitle }
         RowLayout {
             Layout.fillWidth: true
@@ -48,14 +48,14 @@ Item {
         Label { Layout.fillWidth: true; visible: text !== ""; text: page.message; color: Theme.textSecondary; wrapMode: Text.Wrap; textFormat: Text.PlainText }
         Label { visible: source.count === 0; text: page.t("music_sources_empty"); color: Theme.textMuted }
         ListView {
-            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 8; model: page.tracks
+            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: Theme.spaceSm; model: page.tracks
             ScrollBar.vertical: ScrollBar {}
             delegate: Rectangle {
                 id: row
                 required property var modelData
                 width: ListView.view.width; height: 78; radius: Theme.radiusSm; color: Theme.bgSurface
                 RowLayout {
-                    anchors.fill: parent; anchors.margins: 12; spacing: 12
+                    anchors.fill: parent; anchors.margins: Theme.spaceMd; spacing: Theme.spaceMd
                     ColumnLayout {
                         Layout.fillWidth: true
                         Label { Layout.fillWidth: true; text: row.modelData.title; color: Theme.textPrimary; textFormat: Text.PlainText; elide: Text.ElideRight }

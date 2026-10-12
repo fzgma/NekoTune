@@ -18,6 +18,9 @@
 #include <QQuickWindow>
 #include <QRegularExpression>
 #include <QSignalSpy>
+#include <QScopeGuard>
+#include <QStyleHints>
+#include <QImage>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -495,6 +498,398 @@ class ExtensionsTest final : public QObject {
         QVERIFY(!item->error().isEmpty());
         item->setDescriptor({});
         QTRY_VERIFY(item->error().isEmpty());
+        QVERIFY(!item->invokeAction("focusSearch"));
+        QTemporaryDir actionDirectory;
+        QFile actionFile(actionDirectory.filePath("Search.qml"));
+        QVERIFY(actionFile.open(QIODevice::WriteOnly));
+        actionFile.write("import QtQuick\nItem { property int calls: 0; "
+                         "function focusSearch(): void { calls++ } }");
+        actionFile.close();
+        item->setDescriptor({{"source", actionFile.fileName()}});
+        QTRY_VERIFY(item->ready());
+        QVERIFY(item->invokeAction("focusSearch"));
+        QCOMPARE(item->item()->property("calls").toInt(), 1);
+        QVERIFY(!item->invokeAction("destroy"));
+        item->setDescriptor({});
+        QTRY_VERIFY(!item->ready());
+        QVERIFY(!item->invokeAction("focusSearch"));
+    }
+    void themeModesAndPersistenceFailures() {
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME");
+      auto restore = qScopeGuard([&] { qputenv("NEKOTUNE_HOME", oldHome); });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      QVERIFY(AppPaths::saveSetting("unrelated", 42));
+      IpcClient client;
+      AppControllers app(client);
+      auto *theme = app.theme;
+      QCOMPARE(theme->items().size(), 3);
+      QCOMPARE(theme->tokens().value("bgCanvas").toString(), "#0E0D14");
+      theme->setMode("light");
+      QVERIFY(!theme->isDark());
+      QCOMPARE(AppPaths::setting("unrelated").toInt(), 42);
+      QCOMPARE(theme->tokens().value("bgCanvas").toString(), "#FBF8FF");
+      {
+        AppControllers restarted(client);
+        QCOMPARE(restarted.theme->mode(), "light");
+      }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+      const auto oldScheme = QGuiApplication::styleHints()->colorScheme();
+      theme->setMode("system");
+      QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
+      QTRY_VERIFY(theme->isDark());
+      QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Light);
+      QTRY_VERIFY(!theme->isDark());
+      QGuiApplication::styleHints()->setColorScheme(oldScheme);
+#endif
+      theme->setMode("light");
+      QFile broken(AppPaths::configFile("settings.json"));
+      QVERIFY(broken.open(QIODevice::WriteOnly));
+      broken.write("not json");
+      broken.close();
+      theme->setMode("dark");
+      QCOMPARE(theme->mode(), "light");
+      QCOMPARE(theme->error(), "theme_save_failed");
+      QFile unchanged(AppPaths::configFile("settings.json"));
+      QVERIFY(unchanged.open(QIODevice::ReadOnly));
+      QCOMPARE(unchanged.readAll(), QByteArray("not json"));
+    }
+    void themePackagesAndAppearance() {
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME"),
+                 oldSocket = qgetenv("NEKOTUNE_SOCKET"),
+                 oldDb = qgetenv("NEKOTUNE_DB_PATH");
+      auto restore = qScopeGuard([&] {
+        qputenv("NEKOTUNE_HOME", oldHome);
+        qputenv("NEKOTUNE_SOCKET", oldSocket);
+        qputenv("NEKOTUNE_DB_PATH", oldDb);
+        qunsetenv("NEKOTUNE_SAFE_MODE");
+      });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      qputenv("NEKOTUNE_SOCKET", profile.filePath("theme.sock").toUtf8());
+      qputenv("NEKOTUNE_DB_PATH", profile.filePath("theme.sqlite3").toUtf8());
+      QVERIFY(AppPaths::prepare());
+      QVERIFY(AppPaths::saveSetting("lyrics_offline", true));
+      BackendRuntime runtime([] { return std::make_unique<ExtensionAudio>(); });
+      QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+      ExtensionPeer peer;
+      peer.socket.connectToServer(runtime.serverName());
+      QVERIFY(peer.socket.waitForConnected(3000));
+      QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
+                                   .value("data")
+                                   .toObject()
+                                   .value("runtimeReady")
+                                   .toBool(),
+                               15000);
+      const auto folder = profile.filePath("theme");
+      QVERIFY(QDir().mkpath(folder));
+      auto write = [&](const QString &name, const QByteArray &bytes) {
+        QFile file(folder + '/' + name);
+        return file.open(QIODevice::WriteOnly) &&
+               file.write(bytes) == bytes.size();
+      };
+      QVERIFY(
+          write("Player.qml", "import QtQuick\nimport NekoTune 1.0\nRectangle "
+                              "{ objectName: 'themeTestPlayer'; ExtensionApi { "
+                              "id: api }\n color: api.theme.accentPrimary }"));
+      QVERIFY(write("Page.qml", "import QtQuick\nRectangle { objectName: "
+                                "'themeTestPage'; color: 'transparent' }"));
+      QVERIFY(write("Shell.qml", "import QtQuick\nRectangle { objectName: "
+                                 "'themeTestShell'; color: '#123456' }"));
+      QVERIFY(write("Background.qml", "import QtQuick\nimport NekoTune 1.0\n"
+                                      "Rectangle { objectName: 'themeTestBackground'; "
+                                      "ExtensionApi { id: api }\n"
+                                      "color: api.theme.isDark ? '#142B25' : '#E9F4EF' }"));
+      QVERIFY(write("Broken.qml", "import QtQuick\nQtObject {}"));
+      QImage image(20, 20, QImage::Format_RGB32);
+      image.fill(QColor("#305040"));
+      QVERIFY(image.save(folder + "/background.png"));
+      QJsonObject dark{{"tokens", QJsonObject{{"accentPrimary", "#9BD4B3"}}},
+                       {"background", QJsonObject{{"source", "background.png"},
+                                                  {"blur", 0.5}}}};
+      QJsonObject light{{"tokens", QJsonObject{{"accentPrimary", "#2E6B4A"}}}};
+      QJsonObject theme{
+          {"id", "default"},
+          {"title", "QML test"},
+          {"schemaVersion", 1},
+          {"variants", QJsonObject{{"light", light}, {"dark", dark}}},
+          {"ui", QJsonObject{{"bottomPlayer", "Player.qml"},
+                             {"pages", QJsonObject{{"library", "Page.qml"}}}}}};
+      auto shellTheme = theme;
+      shellTheme["id"] = "shell";
+      shellTheme["ui"] = QJsonObject{{"shell", "Shell.qml"}};
+      auto brokenTheme = theme;
+      brokenTheme["id"] = "broken";
+      brokenTheme["ui"] = QJsonObject{{"bottomPlayer", "Broken.qml"}};
+      auto backgroundTheme = theme;
+      backgroundTheme["id"] = "background";
+      backgroundTheme["title"] = "Large text with QML background";
+      backgroundTheme["tokens"] = QJsonObject{{"fontBody", 22},
+                                                {"fontBodySecondary", 20},
+                                                {"fontCaption", 18},
+                                                {"fontDialogTitle", 24},
+                                                {"fontTitle", 32}};
+      backgroundTheme["ui"] = QJsonObject{{"background", "Background.qml"}};
+      const QJsonObject manifest{
+          {"id", "test.theme"},
+          {"name", "Theme test"},
+          {"version", "1.0.0"},
+          {"apiVersion", 1},
+          {"type", "theme"},
+          {"contributes", QJsonObject{{"themes", QJsonArray{theme, shellTheme,
+                                                            brokenTheme,
+                                                            backgroundTheme}}}}};
+      QVERIFY(write("extension.json", QJsonDocument(manifest).toJson()));
+      QCOMPARE(peer.call("extensions.install",
+                         {{"path", folder}, {"development", true}})
+                   .value("status")
+                   .toString(),
+               "ok");
+      IpcClient client;
+      AppControllers app(client);
+      I18n translator;
+      QStringList qmlWarnings;
+      QQmlApplicationEngine engine;
+      auto collectWarnings = [&](const QList<QQmlError> &errors) {
+        for (const auto &error : errors)
+          qmlWarnings.append(error.toString());
+      };
+      connect(&engine, &QQmlEngine::warnings, this, collectWarnings);
+      engine.rootContext()->setContextProperty("controllers", &app);
+      engine.rootContext()->setContextProperty("ipcClient", &client);
+      engine.rootContext()->setContextProperty("i18n", &translator);
+      engine.rootContext()->setContextProperty("lyricsDebugEnabled", false);
+      engine.load(QUrl("qrc:/qml/Main.qml"));
+      QVERIFY(!engine.rootObjects().isEmpty());
+      auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+      QVERIFY(window);
+      window->resize(1100, 760);
+      window->show();
+      client.connectBackend();
+      QTRY_COMPARE(app.theme->items().size(), 7);
+      QVERIFY(!window->findChild<QObject *>("themeTestPlayer"));
+      QVERIFY(!visualItem(window->contentItem(), "themeTestBackground"));
+      QSignalSpy trust(app.theme, &ThemeController::trustRequested);
+      app.theme->selectTheme("test.theme/default");
+      QCOMPARE(trust.size(), 1);
+      app.theme->selectTheme("test.theme/default", true);
+      QTRY_COMPARE(app.theme->activeId(), "test.theme/default");
+      QTRY_VERIFY2(
+          window->findChild<QObject *>("themeTestPlayer"),
+          qPrintable(window->findChild<QObject *>("bottomPlayerThemeSlot")
+                         ->property("error")
+                         .toString()));
+      QPointer<QObject> player =
+          window->findChild<QObject *>("themeTestPlayer");
+      QVERIFY(!visualItem(window->contentItem(), "themeTestPage"));
+      app.theme->setMode("light");
+      QCOMPARE(window->color(), QColor("#FBF8FF"));
+      QCOMPARE(window->findChild<QObject *>("themeTestPlayer"), player.data());
+      QCOMPARE(player->property("color").value<QColor>(), QColor("#2E6B4A"));
+      window->setProperty("viewMode", "library");
+      auto *pageSlot =
+          visualItem(window->contentItem(), "themePageSlot_library");
+      QVERIFY(pageSlot);
+      QTRY_VERIFY2(
+          visualItem(window->contentItem(), "themeTestPage"),
+          qPrintable(QString("active=%1 error=%2 slots=%3")
+                         .arg(pageSlot->property("active").toBool())
+                         .arg(pageSlot->property("error").toString())
+                         .arg(QString::fromUtf8(
+                             QJsonDocument::fromVariant(app.theme->uiSlots())
+                                 .toJson(QJsonDocument::Compact)))));
+      QMetaObject::invokeMethod(window, "navigateTo",
+                                Q_ARG(QVariant, "appearance"),
+                                Q_ARG(QVariant, 0));
+      QTRY_VERIFY(visualItem(window->contentItem(), "themeCard_builtin/ocean"));
+      auto *ocean =
+          visualItem(window->contentItem(), "themeCard_builtin/ocean");
+      QVERIFY(ocean->isVisible());
+      QTest::mouseClick(
+          window, Qt::LeftButton, Qt::NoModifier,
+          ocean->mapToScene(QPointF(ocean->width() / 2, ocean->height() / 2))
+              .toPoint());
+      QTRY_COMPARE(app.theme->activeId(), "builtin/ocean");
+      QTRY_VERIFY(player.isNull());
+      QCOMPARE(window->color(), QColor("#F3FAFD"));
+      const auto screenshots =
+          qEnvironmentVariable("NEKOTUNE_TEST_SCREENSHOT_DIR");
+      auto capture = [&](const QString &name) {
+        if (screenshots.isEmpty())
+          return true;
+        QDir().mkpath(screenshots);
+        QTest::qWait(200);
+        return window->grabWindow().save(screenshots + '/' + name + ".png");
+      };
+      translator.setLanguage("zh");
+      auto *exportButton =
+          visualItem(window->contentItem(), "exportTheme_builtin/ocean");
+      QVERIFY(exportButton);
+      QVERIFY(exportButton->isVisible());
+      QVERIFY(exportButton->width() > 0 && exportButton->height() > 0);
+      QVERIFY(capture("theme-appearance-light-zh"));
+      translator.setLanguage("en");
+      app.theme->setMode("dark");
+      QVERIFY(capture("theme-appearance-dark-en"));
+      for (const QString mode : {"light", "dark"}) {
+        app.theme->setMode(mode);
+        for (const QString page : {"home", "library", "lyrics"}) {
+          QMetaObject::invokeMethod(window, "navigateTo", Q_ARG(QVariant, page),
+                                    Q_ARG(QVariant, 0));
+          QVERIFY(capture("theme-" + mode + "-" + page));
+        }
+      }
+      QMetaObject::invokeMethod(window, "navigateTo",
+                                Q_ARG(QVariant, "appearance"),
+                                Q_ARG(QVariant, 0));
+      window->resize(1000, 640);
+      app.theme->selectTheme("test.theme/background");
+      QTRY_COMPARE(app.theme->activeId(), "test.theme/background");
+      QTRY_VERIFY(visualItem(window->contentItem(), "themeTestBackground"));
+      QPointer<QQuickItem> background =
+          visualItem(window->contentItem(), "themeTestBackground");
+      QCOMPARE(window->property("font").value<QFont>().pixelSize(), 22);
+      QVERIFY(capture("theme-appearance-narrow-large-en"));
+      app.theme->setMode("light");
+      QCOMPARE(visualItem(window->contentItem(), "themeTestBackground"),
+               background.data());
+      QCOMPARE(background->property("color").value<QColor>(), QColor("#E9F4EF"));
+      QMetaObject::invokeMethod(window, "navigateTo", Q_ARG(QVariant, "home"),
+                                Q_ARG(QVariant, 0));
+      QVERIFY(capture("theme-background-large-light"));
+      QFile audioFile(profile.filePath("theme-playback.wav"));
+      QVERIFY(audioFile.open(QIODevice::WriteOnly));
+      QDataStream audioStream(&audioFile);
+      audioStream.setByteOrder(QDataStream::LittleEndian);
+      audioFile.write("RIFF", 4);
+      audioStream << quint32(36 + 16000);
+      audioFile.write("WAVEfmt ", 8);
+      audioStream << quint32(16) << quint16(1) << quint16(1) << quint32(8000)
+                  << quint32(16000) << quint16(2) << quint16(16);
+      audioFile.write("data", 4);
+      audioStream << quint32(16000);
+      audioFile.write(QByteArray(16000, '\0'));
+      audioFile.close();
+      QCOMPARE(peer.call("queue.add", {{"path", audioFile.fileName()}})
+                   .value("status").toString(), "ok");
+      QTRY_COMPARE(app.queue->model()->count(), 1);
+      app.queue->playQueueItem(app.queue->model()->get(0).value("queue_id").toInt());
+      QTRY_COMPARE(app.playback->state(), "playing");
+      const auto playingSong = app.playback->song();
+      const auto playingQueue = app.queue->model()->items();
+      // Reload recreates theme views without replacing the host playback state.
+      QPointer<QQuickItem> oldBackground = background;
+      app.theme->reloadTheme("test.theme/background");
+      QTRY_VERIFY(oldBackground.isNull());
+      QTRY_VERIFY(!app.theme->busy());
+      QVERIFY2(app.theme->error().isEmpty(), qPrintable(app.theme->error()));
+      QTRY_VERIFY(visualItem(window->contentItem(), "themeTestBackground"));
+      background = visualItem(window->contentItem(), "themeTestBackground");
+      QCOMPARE(app.theme->notice(), "theme_reloaded");
+      QCOMPARE(app.theme->selectedId(), "test.theme/background");
+      QCOMPARE(app.theme->mode(), "light");
+      QCOMPARE(app.playback->song(), playingSong);
+      QCOMPARE(app.queue->model()->items(), playingQueue);
+      QCOMPARE(app.playback->state(), "playing");
+      app.theme->selectTheme("test.theme/shell");
+      QTRY_VERIFY(window->findChild<QObject *>("themeTestShell"));
+      QTRY_VERIFY(background.isNull());
+      QQmlApplicationEngine recovery;
+      connect(&recovery, &QQmlEngine::warnings, this, collectWarnings);
+      recovery.rootContext()->setContextProperty("controllers", &app);
+      recovery.rootContext()->setContextProperty("i18n", &translator);
+      recovery.rootContext()->setContextProperty("ignoreExtensionTheme", true);
+      recovery.load(QUrl("qrc:/qml/ExtensionsWindow.qml"));
+      QVERIFY(!recovery.rootObjects().isEmpty());
+      auto *recoveryWindow =
+          qobject_cast<QQuickWindow *>(recovery.rootObjects().first());
+      QVERIFY(recoveryWindow);
+      recoveryWindow->setProperty("appearance", true);
+      recoveryWindow->resize(760, 580);
+      recoveryWindow->show();
+      QCOMPARE(recoveryWindow->color(), QColor("#0E0D14"));
+      QTRY_VERIFY(visualItem(recoveryWindow->contentItem(),
+                             "themeCard_builtin/yozakura"));
+      if (!screenshots.isEmpty()) {
+        QTest::qWait(200);
+        QVERIFY(recoveryWindow->grabWindow().save(
+            screenshots + "/theme-recovery-appearance-narrow.png"));
+      }
+      app.theme->selectTheme("test.theme/broken");
+      QTRY_COMPARE(app.theme->activeId(), "test.theme/broken");
+      QTRY_VERIFY(!window->findChild<QObject *>("themeTestShell"));
+      QTRY_VERIFY(window->findChild<QObject *>("playPauseButton") ||
+                  window->findChild<QObject *>("bottomPlayerThemeSlot"));
+      auto *slot = window->findChild<QObject *>("bottomPlayerThemeSlot");
+      QVERIFY(slot);
+      QTRY_VERIFY(!slot->property("error").toString().isEmpty());
+      QVERIFY(!slot->property("ready").toBool());
+      app.theme->setMode("dark");
+      auto *staticImage = visualItem(window->contentItem(), "themeStaticBackgroundImage");
+      QVERIFY(staticImage);
+      QTRY_COMPARE(staticImage->property("status").toInt(), 1);
+      QVERIFY(staticImage->isVisible());
+      auto *backgroundEffect = visualItem(window->contentItem(), "themeStaticBackgroundEffect");
+      QVERIFY(backgroundEffect);
+      QVERIFY(!backgroundEffect->property("active").toBool());
+      QVERIFY(capture("theme-static-background-dark"));
+      QCOMPARE(
+          peer.call("extensions.install",
+                    {{"path", QStringLiteral(NEKOTUNE_SOURCE_DIR
+                                             "/extensions/examples/custom-ui")},
+                     {"development", true}})
+              .value("status")
+              .toString(),
+          "ok");
+      QCOMPARE(peer.call("extensions.enable",
+                         {{"id", "example.custom-ui"}, {"trusted", true}})
+                   .value("status")
+                   .toString(),
+               "ok");
+      QCOMPARE(peer.call("extensions.select",
+                         {{"slot", "bottomPlayer"},
+                          {"contribution", "example.custom-ui/player"}})
+                   .value("status")
+                   .toString(),
+               "ok");
+      QTRY_VERIFY(slot->property("ready").toBool());
+      QVERIFY(!slot->property("error").toString().isEmpty());
+      app.theme->selectTheme("test.theme/default");
+      QTRY_COMPARE(app.theme->activeId(), "test.theme/default");
+      QCOMPARE(peer.call("extensions.disable", {{"id", "test.theme"}})
+                   .value("status")
+                   .toString(),
+               "ok");
+      QTRY_VERIFY(app.theme->unavailable());
+      QCOMPARE(app.theme->selectedId(), "test.theme/default");
+      QCOMPARE(peer.call("extensions.enable", {{"id", "test.theme"}})
+                   .value("status")
+                   .toString(),
+               "ok");
+      QTRY_COMPARE(app.theme->activeId(), "test.theme/default");
+      qputenv("NEKOTUNE_SAFE_MODE", "1");
+      {
+        AppControllers safe(client);
+        QVERIFY(safe.theme->uiSlots().isEmpty());
+        QCOMPARE(safe.theme->activeId(), "builtin/yozakura");
+        QVERIFY(safe.theme->isDark());
+      }
+      qunsetenv("NEKOTUNE_SAFE_MODE");
+      app.theme->removeTheme("test.theme/default");
+      QTRY_COMPARE(app.theme->selectedId(), "builtin/yozakura");
+      QTRY_COMPARE(app.theme->items().size(), 4);
+      QCOMPARE(app.extensions->selections().value("bottomPlayer").toString(),
+               "example.custom-ui/player");
+      QTRY_VERIFY(slot->property("ready").toBool());
+      QTRY_VERIFY(slot->property("error").toString().isEmpty());
+      QCOMPARE(app.playback->state(), "playing");
+      QCOMPARE(app.playback->song(), playingSong);
+      QCOMPARE(app.queue->model()->items(), playingQueue);
+      QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
+      recoveryWindow->close();
+      window->close();
+      peer.socket.abort();
+      runtime.stop();
     }
     void managementThemeAndShellInRealFrontend() {
         BackendRuntime runtime;

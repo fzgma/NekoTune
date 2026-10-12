@@ -29,8 +29,15 @@ Item {
     }
 
     Canvas {
+        id: drawing
         anchors.fill: parent
         antialiasing: true
+        Connections {
+            target: root
+            function onInkColorChanged() { drawing.requestPaint() }
+            function onAccentColorChanged() { drawing.requestPaint() }
+            function onLineWidthChanged() { drawing.requestPaint() }
+        }
 
         onPaint: {
             const ctx = getContext("2d")

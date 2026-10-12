@@ -30,7 +30,7 @@ Rectangle {
     signal activated()
     signal playClicked()
     signal actionRequested(string action)
-    height: Theme.songRowHeight
+    height: Math.max(Theme.songRowHeight, trackMetadata.implicitHeight + Theme.spaceMd * 2, Theme.songThumbnailSize + Theme.spaceSm * 2)
     radius: Theme.radiusMd
     color: (selected || current) ? Theme.bgSelected : hover.hovered ? Theme.bgHover : "transparent"
     border.color: "transparent"
@@ -88,7 +88,7 @@ Rectangle {
         anchors.fill: parent
         anchors.leftMargin: 8
         anchors.rightMargin: 8
-        spacing: 12
+        spacing: Theme.spaceMd
         CheckBox {
             id: selectionBox
             visible: row.showCheckbox
@@ -108,13 +108,13 @@ Rectangle {
         }
         Item {
             Layout.preferredWidth: 32
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: Theme.songThumbnailSize
             Label {
                 anchors.centerIn: parent
                 text: String(row.rowIndex + 1)
                 visible: row.downloadRow || (!hover.hovered && !row.selected && !row.current && !row.activeFocus)
                 color: Theme.textMuted
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
             }
             IconButton {
                 anchors.centerIn: parent
@@ -129,12 +129,12 @@ Rectangle {
             }
         }
         Item {
-            Layout.preferredWidth: 40
-            Layout.preferredHeight: 40
+            Layout.preferredWidth: Theme.songThumbnailSize
+            Layout.preferredHeight: Theme.songThumbnailSize
             visible: !row.compact
             Rectangle {
                 anchors.fill: parent
-                radius: 8
+                radius: Theme.radiusSm
                 color: Theme.bgSurface
                 clip: true
                 Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
@@ -142,14 +142,15 @@ Rectangle {
             }
         }
         ColumnLayout {
+            id: trackMetadata
             Layout.fillWidth: true
-            spacing: 4
+            spacing: Theme.spaceXs
             Label {
                 Layout.fillWidth: true
                 text: row.song.title || i18n.text("untitled", i18n.language)
                 textFormat: Text.PlainText
                 color: row.current ? Theme.accentPrimary : row.available ? Theme.textPrimary : Theme.textMuted
-                font.pixelSize: 14
+                font.pixelSize: Theme.fontBody
                 font.weight: row.current ? Font.DemiBold : Font.Normal
                 elide: Text.ElideRight
             }
@@ -163,7 +164,7 @@ Rectangle {
                 fallbackText: row.available ? String(row.song.path || "").split("/").pop()
                                             : i18n.text("file_unavailable", i18n.language)
                 color: row.available ? Theme.textMuted : Theme.statusWarning
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
             }
         }
         Label {
@@ -175,7 +176,7 @@ Rectangle {
                 return Math.floor(seconds / 60) + ":" + ("0" + seconds % 60).slice(-2)
             }
             color: Theme.textMuted
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontCaption
             Layout.preferredWidth: 44
             horizontalAlignment: Text.AlignRight
         }

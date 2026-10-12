@@ -47,11 +47,12 @@ int ExtensionsController::request(const QString &method, const QVariantMap &para
             return;
         }
         auto normalized = params;
-        if (method == "extensions.install")
+        if (method == "extensions.install" || method == "extensions.export_theme")
             normalized.insert("path", IpcClient::normalizePath(params.value("path").toString()));
         send(
             method, QJsonObject::fromVariantMap(normalized),
             [this, id](const QJsonObject &data, const QString &error) {
+                if (error.isEmpty() && data.contains("extensions")) apply(data);
                 m_error = error;
                 emit errorChanged();
                 emit completed(id, data.toVariantMap(), error);

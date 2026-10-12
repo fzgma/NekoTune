@@ -1,5 +1,6 @@
 import QtQuick
 import NekoTune 1.0
+import "../components"
 Item {
     id: root
     required property var modelData
@@ -18,11 +19,13 @@ Item {
     Component.onCompleted: loadNative()
     onActiveChanged: loadNative()
     Loader { id: nativeLoader; anchors.fill: parent; active: root.active && !root.modelData.extensionId; visible: !extension.ready }
-    ExtensionView {
-        id: extension; anchors.fill: parent
-        descriptor: root.active ? root.replacement : ({})
+    ThemeSlot {
+        id: extension; objectName: "themePageSlot_" + root.modelData.id; anchors.fill: parent
+        active: root.active
+        themeActive: root.active && root.visible
+        themeDescriptor: !root.modelData.extensionId && root.controllers.theme ? root.controllers.theme.uiSlots["page:" + root.modelData.id] || ({}) : ({})
+        fallbackDescriptor: root.replacement
         controllers: root.controllers; translator: root.translator; hostWindow: root.shell
-        visible: ready
     }
-    Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.Wrap; color: "#FF9BAE"; text: extension.error; visible: root.modelData.extensionId !== undefined && !extension.ready }
+    Text { anchors.centerIn: parent; width: parent.width - 40; wrapMode: Text.Wrap; color: Theme.statusError; text: extension.error; visible: root.modelData.extensionId !== undefined && !extension.ready }
 }

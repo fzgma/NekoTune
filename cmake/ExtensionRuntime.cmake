@@ -53,7 +53,7 @@ add_custom_command(OUTPUT "${CMAKE_SOURCE_DIR}/extensions/dist/supervisor.cjs" "
     COMMAND "${CMAKE_COMMAND}" -E env CI=true ${NEKOTUNE_PNPM_COMMAND} install --frozen-lockfile --store-dir "${CMAKE_BINARY_DIR}/pnpm-store"
     COMMAND ${NEKOTUNE_PNPM_COMMAND} build
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/extensions"
-    DEPENDS ${EXTENSION_RUNTIME_SOURCES} "${CMAKE_SOURCE_DIR}/extensions/tools/build.mjs" "${CMAKE_SOURCE_DIR}/extensions/tools/cli.mjs" "${CMAKE_SOURCE_DIR}/extensions/package.json" "${CMAKE_SOURCE_DIR}/extensions/pnpm-lock.yaml" "${CMAKE_SOURCE_DIR}/extensions/pnpm-workspace.yaml"
+    DEPENDS "${CMAKE_SOURCE_DIR}/shared/themes/catalog.json" ${EXTENSION_RUNTIME_SOURCES} "${CMAKE_SOURCE_DIR}/extensions/tools/build.mjs" "${CMAKE_SOURCE_DIR}/extensions/tools/cli.mjs" "${CMAKE_SOURCE_DIR}/extensions/package.json" "${CMAKE_SOURCE_DIR}/extensions/pnpm-lock.yaml" "${CMAKE_SOURCE_DIR}/extensions/pnpm-workspace.yaml"
     VERBATIM)
 add_custom_target(nekotune_extension_runtime ALL DEPENDS "${CMAKE_SOURCE_DIR}/extensions/dist/supervisor.cjs" "${CMAKE_SOURCE_DIR}/extensions/dist/worker.cjs")
 include(GNUInstallDirs)

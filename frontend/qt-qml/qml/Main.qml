@@ -24,6 +24,16 @@ ApplicationWindow {
     visible: true
     title: "NekoTune"
     color: Theme.bgCanvas
+    font.family: Theme.fontFamily
+    font.pixelSize: Theme.fontBody
+    palette.window: Theme.bgRaised
+    palette.windowText: Theme.textPrimary
+    palette.base: Theme.bgSurface
+    palette.text: Theme.textPrimary
+    palette.button: Theme.bgSurface
+    palette.buttonText: Theme.textPrimary
+    palette.highlight: Theme.accentPrimary
+    palette.highlightedText: Theme.textOnAccent
     property var desktop: typeof desktopIntegration !== "undefined" ? desktopIntegration : null
     property var app: controllers
     property var transport: ipcClient
@@ -35,6 +45,7 @@ ApplicationWindow {
     property bool queueOpen: false
     property int currentPlaylist: 0
     property var extensions: root.app.extensions || null
+    readonly property var themeController: root.app.theme || null
     readonly property bool hasBrowserSources: extensions !== null && extensions.browserSources.length > 0
     property var pages: PageRegistry.pages.concat(extensions ? extensions.pages : [])
     readonly property var theme: Theme
@@ -101,7 +112,7 @@ ApplicationWindow {
         nowPlayingOpen = false
         queueOpen = false
         if (id === "music_sources" && !hasBrowserSources) id = "home"
-        if (root.extensions && root.extensions.settingsPages.some(page => page.id === id)) {
+        if (id === "appearance" || root.extensions && root.extensions.settingsPages.some(page => page.id === id)) {
             settingsSection = id
             viewMode = "settings"
             return
@@ -136,6 +147,7 @@ ApplicationWindow {
         sequence: "Ctrl+F"
         enabled: !root.nowPlayingOpen && !root.popupActive
         onActivated: {
+            if (fullShell.invokeAction("focusSearch")) return
             const page = root.queueOpen ? queuePanel : root.currentPage()
             if (page && typeof page.focusSearch === "function") page.focusSearch()
         }
@@ -171,10 +183,11 @@ ApplicationWindow {
             Shortcut { sequence: commandItem.modelData.shortcut || ""; enabled: sequence !== "" && !root.editingText && !root.popupActive; onActivated: root.extensions.execute(commandItem.modelData.id) }
         }
     }
-    ExtensionView {
-        id: fullShell; objectName: "shellExtension"; anchors.fill: parent
-        descriptor: root.extensions ? root.extensions.activeSlots.shell || ({}) : ({})
-        controllers: root.app; translator: root.translator; hostWindow: root; visible: ready
+    ThemeSlot {
+        id: fullShell; z: 1; objectName: "shellExtension"; anchors.fill: parent
+        themeDescriptor: root.themeController ? root.themeController.uiSlots.shell || ({}) : ({})
+        fallbackDescriptor: root.extensions ? root.extensions.activeSlots.shell || ({}) : ({})
+        controllers: root.app; translator: root.translator; hostWindow: root
     }
     ColumnLayout {
         visible: !fullShell.ready
@@ -219,6 +232,7 @@ ApplicationWindow {
                         GradientStop { position: 0.55; color: Theme.bgCanvas }
                         GradientStop { position: 1.0; color: Qt.darker(Theme.bgCanvas, 1.08) }
                     }
+                    ThemeBackground { anchors.fill: parent; controllers: root.app; translator: root.translator; hostWindow: root }
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 0
@@ -231,7 +245,7 @@ ApplicationWindow {
                                 id: errorLabel
                                 anchors.fill: parent; anchors.margins: 10
                                 text: root.translator.text(root.transport.error, root.translator.language); textFormat: Text.PlainText
-                                color: Theme.statusError; wrapMode: Text.WordWrap; font.pixelSize: 12
+                                color: Theme.statusError; wrapMode: Text.WordWrap; font.pixelSize: Theme.fontCaption
                             }
                         }
                         Item {
@@ -289,7 +303,7 @@ ApplicationWindow {
                 QueuePanel {
                     id: queuePanel
                     objectName: "queueDrawerPanel"
-                    anchors.fill: parent; anchors.margins: 16
+                    anchors.fill: parent; anchors.margins: Theme.spaceLg
                     compact: true
                     connected: root.transport.connected
                     queueController: root.app.queue
@@ -316,7 +330,12 @@ ApplicationWindow {
         Item {
             Layout.fillWidth: true; Layout.preferredHeight: Theme.bottomBarHeight
             BottomPlayer { anchors.fill: parent; visible: !customPlayer.ready; shell: root; controller: root.app.playback; translator: root.translator; onEditRequested: song => metadataEditor.openForSong(song) }
-            ExtensionView { id: customPlayer; anchors.fill: parent; descriptor: root.extensions ? root.extensions.activeSlots.bottomPlayer || ({}) : ({}); controllers: root.app; translator: root.translator; hostWindow: root; visible: ready }
+            ThemeSlot {
+                id: customPlayer; objectName: "bottomPlayerThemeSlot"; anchors.fill: parent
+                themeDescriptor: root.themeController ? root.themeController.uiSlots.bottomPlayer || ({}) : ({})
+                fallbackDescriptor: root.extensions ? root.extensions.activeSlots.bottomPlayer || ({}) : ({})
+                controllers: root.app; translator: root.translator; hostWindow: root
+            }
         }
     }
 }

@@ -24,6 +24,8 @@ Item {
     property string databasePath: ""
     property bool showDataLocation: false
     property var extensionSettings: []
+    property bool appearanceAvailable: false
+    signal appearanceRequested()
     signal extensionSettingsRequested(string id)
 
     function t(key) { return translator.text(key, translator.language) }
@@ -50,7 +52,7 @@ Item {
             radius: Theme.radiusMd; color: Theme.bgSurface; border.color: Theme.borderSubtle
             ColumnLayout {
                 id: generalSettings
-                anchors.fill: parent; anchors.margins: 18; spacing: 12
+                anchors.fill: parent; anchors.margins: 18; spacing: Theme.spaceMd
                 Label { text: root.t("general_settings"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
                 RowLayout {
                     Label { Layout.fillWidth: true; text: root.t("language"); color: Theme.textSecondary; font.pixelSize: Theme.fontBody }
@@ -80,6 +82,15 @@ Item {
             }
         }
 
+        TextButton {
+            objectName: "appearanceSettingsButton"
+            Layout.fillWidth: true
+            visible: root.appearanceAvailable
+            text: root.t("appearance") + "  ›"
+            subtle: true
+            onClicked: root.appearanceRequested()
+        }
+
         Rectangle {
             Layout.fillWidth: true
             visible: root.audioOutput !== null
@@ -87,7 +98,7 @@ Item {
             radius: Theme.radiusMd; color: Theme.bgSurface; border.color: Theme.borderSubtle
             ColumnLayout {
                 id: outputSettings
-                anchors.fill: parent; anchors.margins: 18; spacing: 12
+                anchors.fill: parent; anchors.margins: 18; spacing: Theme.spaceMd
                 Label { text: root.t("audio_output"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
                 AudioOutputPicker {
                     objectName: "settingsAudioOutputPicker"
@@ -100,7 +111,7 @@ Item {
         ColumnLayout {
             Layout.fillWidth: true
             visible: root.extensionSettings.length > 0
-            spacing: 8
+            spacing: Theme.spaceSm
             Label { text: root.t("extension_settings"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
             Repeater {
                 model: root.extensionSettings

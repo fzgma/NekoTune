@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import semver from 'semver';
 import yauzl from 'yauzl';
+import { validateTheme, inspectThemePackage, themeLimits } from './themes.mjs';
 
 export const validId = (id) => typeof id === 'string' && /^[a-z][a-z0-9._-]{1,100}$/.test(id);
 export async function readManifest(directory) {
@@ -36,6 +37,13 @@ export async function readManifest(directory) {
       if (['pages', 'settings', 'slots', 'toolbars'].includes(kind))
         await containedFile(directory, item.source);
     }
+  }
+  if (manifest.id === 'builtin') throw new Error('Reserved extension ID');
+  for (const theme of contributions.themes ?? [])
+    await validateTheme(theme, directory, { strict: manifest.type === 'theme' });
+  if (manifest.type === 'theme') {
+    const info = await inspectThemePackage(directory, manifest);
+    Object.defineProperty(manifest, '_themeHasCode', { value: info.hasCode });
   }
   return manifest;
 }
@@ -121,7 +129,9 @@ export async function cleanupPackages(directory, retainedDirectories) {
   }
   return failures;
 }
-export async function unpack(zipPath, destination) {
+export async function unpack(zipPath, destination, themeOnly = false) {
+  if (themeOnly && (await fs.stat(zipPath)).size > themeLimits.archive)
+    throw new Error('Theme archive exceeds 20 MiB');
   const zip = await new Promise((resolve, reject) =>
     yauzl.open(zipPath, { lazyEntries: true }, (error, file) => (error ? reject(error) : resolve(file))),
   );
@@ -146,7 +156,7 @@ export async function unpack(zipPath, destination) {
         const name = entry.fileName;
         if (
           files > 20_000 ||
-          bytes > 512 * 1024 * 1024 ||
+          bytes > (themeOnly ? themeLimits.unpacked : 512 * 1024 * 1024) ||
           name.includes('\\') ||
           path.isAbsolute(name) ||
           name.split('/').includes('..') ||

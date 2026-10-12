@@ -82,12 +82,12 @@ async function checkDistribution(backendOnly) {
         if (request) { pending.delete(message.id); request.resolve(message); }
       }
     });
-    async function call(method) {
+    async function call(method, params = {}) {
       assert.ok(!exited && !socket.destroyed, diagnostics());
       const requestId = ++id;
       const reply = new Promise((resolve, reject) => pending.set(requestId, { resolve, reject }));
       trace.push(`send: ${requestId} ${method}`);
-      socket.write(JSON.stringify({ id: requestId, method, params: {} }) + '\n');
+      socket.write(JSON.stringify({ id: requestId, method, params }) + '\n');
       let timer;
       try {
         const response = await Promise.race([reply, new Promise((_, reject) => {
@@ -105,10 +105,21 @@ async function checkDistribution(backendOnly) {
       await new Promise(resolve => setTimeout(resolve, 150));
     }
     assert.equal(extensions?.catalogueReady, true, `Bundled Node supervisor failed:\n${diagnostics()}`);
+    const selection = await call('extensions.select', { slot: 'theme', contribution: 'builtin/ocean' });
+    assert.equal(selection.selections.theme, 'builtin/ocean');
+    const themePath = path.join(root, 'ocean.nktheme.zip');
+    await call('extensions.export_theme', { contribution: 'builtin/ocean', path: themePath });
+    const archive = await fs.readFile(themePath);
+    assert.equal(archive.readUInt32LE(0), 0x04034b50);
+    const imported = await call('extensions.install', { path: themePath, themeOnly: true });
+    assert.equal(imported.extension.type, 'theme');
+    assert.equal(imported.extension.hasCode, false);
+    await call('extensions.select', { slot: 'theme', contribution: '' });
     await new Promise(resolve => setTimeout(resolve, 1500));
     assert.ok(!exited, `Process exited after IPC startup:\n${diagnostics()}`);
     assert.doesNotMatch(output, /QQmlApplicationEngine failed|module "[^"]+" is not installed/);
-    console.log(`Installed ${label}, SQLite, IPC and bundled Node supervisor passed.`);
+    assert.doesNotMatch(output, /TypeError:|ReferenceError:|Binding loop detected/);
+    console.log(`Installed ${label}, SQLite, IPC, bundled Node and theme import/export passed.`);
   } finally {
     socket?.destroy();
     child.kill();

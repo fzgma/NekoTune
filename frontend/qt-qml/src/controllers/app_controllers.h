@@ -3,6 +3,7 @@
 #include "controllers/audio_output_controller.h"
 #include "controllers/extensions_controller.h"
 #include "controllers/settings_controller.h"
+#include "controllers/theme_controller.h"
 #include "controllers/library_controller.h"
 #include "controllers/lyrics_controller.h"
 #include "controllers/playback_controller.h"
@@ -27,6 +28,7 @@ class AppControllers final : public QObject {
     Q_PROPERTY(SettingsController *settings MEMBER settings CONSTANT)
     Q_PROPERTY(AiController *ai MEMBER ai CONSTANT)
     Q_PROPERTY(ExtensionsController *extensions MEMBER extensions CONSTANT)
+    Q_PROPERTY(ThemeController *theme MEMBER theme CONSTANT)
     Q_PROPERTY(QString databasePath READ databasePath NOTIFY databasePathChanged)
   public:
     explicit AppControllers(IpcClient &client);
@@ -41,6 +43,7 @@ class AppControllers final : public QObject {
     SettingsController *settings;
     AiController *ai;
     ExtensionsController *extensions;
+    ThemeController *theme;
   signals:
     void databasePathChanged();
 

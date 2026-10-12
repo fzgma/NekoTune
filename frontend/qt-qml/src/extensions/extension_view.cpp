@@ -1,4 +1,5 @@
 #include "extensions/extension_view.h"
+#include "controllers/theme_controller.h"
 #include <QFileInfo>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -10,6 +11,12 @@ ExtensionView::ExtensionView(QQuickItem *parent) : QQuickItem(parent) {
 ExtensionView::~ExtensionView() {
     delete m_item;
     delete m_engine;
+}
+bool ExtensionView::invokeAction(const QString &method) {
+    if (!m_item || method != QStringLiteral("focusSearch") ||
+        m_item->metaObject()->indexOfMethod("focusSearch()") < 0)
+        return false;
+    return QMetaObject::invokeMethod(m_item, "focusSearch", Qt::DirectConnection);
 }
 void ExtensionView::setDescriptor(const QVariantMap &descriptor) {
     if (descriptor == m_descriptor)
@@ -76,6 +83,8 @@ void registerExtensionQmlTypes() {
     static bool registered = false;
     if (!registered) {
         qmlRegisterType<ExtensionView>("NekoTune", 1, 0, "ExtensionView");
+        qmlRegisterSingletonType<ThemeDefaults>("NekoTune", 1, 0, "ThemeDefaults",
+            [](QQmlEngine *, QJSEngine *) -> QObject * { return new ThemeDefaults; });
         registered = true;
     }
 }

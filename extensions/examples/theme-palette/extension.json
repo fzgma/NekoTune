@@ -1,0 +1,32 @@
+{
+  "id": "example.theme-palette",
+  "name": "Mint theme example",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "type": "theme",
+  "contributes": {
+    "themes": [
+      {
+        "id": "default",
+        "title": {
+          "zh": "薄荷示例",
+          "en": "Mint example"
+        },
+        "author": "NekoTune",
+        "schemaVersion": 1,
+        "variants": {
+          "light": {
+            "tokens": {
+              "accentPrimary": "#2E6B4A"
+            }
+          },
+          "dark": {
+            "tokens": {
+              "accentPrimary": "#9BD4B3"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

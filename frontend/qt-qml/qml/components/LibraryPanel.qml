@@ -131,10 +131,10 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 16
+        spacing: Theme.spaceLg
         RowLayout {
             Layout.fillWidth: true
-            spacing: 16
+            spacing: Theme.spaceLg
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 6
@@ -146,7 +146,7 @@ Item {
         }
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: Theme.spaceSm
             InputField {
                 id: search
                 objectName: "librarySearchField"
@@ -197,7 +197,7 @@ Item {
         ListView {
             id: songList
             objectName: "librarySongList"
-            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 8
+            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: Theme.spaceSm
             header: Item { height: 4 }
             footer: Item { height: 4 }
             leftMargin: 4
@@ -225,7 +225,7 @@ Item {
                 onActionRequested: action => root.songAction(action, modelData)
             }
             Column {
-                anchors.centerIn: parent; visible: songList.count === 0; spacing: 16
+                anchors.centerIn: parent; visible: songList.count === 0; spacing: Theme.spaceLg
                 EmptyStateCat {
                     anchors.horizontalCenter: parent.horizontalCenter
                     visible: !root.controller.searchText && !root.selectedTagIds.length
@@ -354,7 +354,7 @@ Item {
         background: Rectangle { objectName: "shortcutBlocker"; color: Theme.bgRaised; radius: Theme.radiusLg; border.color: Theme.borderSubtle }
         ColumnLayout {
             anchors.fill: parent
-            spacing: 8
+            spacing: Theme.spaceSm
             Label {
                 text: i18n.text("add_to_playlist", i18n.language)
                 color: Theme.textPrimary

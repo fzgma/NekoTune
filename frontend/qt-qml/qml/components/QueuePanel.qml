@@ -115,7 +115,7 @@ Item {
         spacing: root.compact ? 12 : 16
         RowLayout {
             Layout.fillWidth: true
-            spacing: 12
+            spacing: Theme.spaceMd
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 5
@@ -157,7 +157,7 @@ Item {
         ListView {
             id: songList
             objectName: root.currentPlaylist ? "playlistSongList" : "queueSongList"
-            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 8
+            Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: Theme.spaceSm
             header: Item { height: 4 }
             footer: Item { height: 4 }
             leftMargin: 4
@@ -184,7 +184,7 @@ Item {
                 onActionRequested: action => root.songAction(action, modelData)
             }
             Column {
-                anchors.centerIn: parent; width: parent.width; spacing: 16
+                anchors.centerIn: parent; width: parent.width; spacing: Theme.spaceLg
                 visible: songList.count === 0
                 // Empty states get a small original illustration; searches keep the plain message.
                 EmptyStateCat {
@@ -231,7 +231,7 @@ Item {
         onOpened: playlistName.forceActiveFocus()
         background: Rectangle { objectName: "shortcutBlocker"; color: Theme.bgRaised; radius: Theme.radiusLg; border.color: Theme.borderSubtle }
         contentItem: ColumnLayout {
-            spacing: 16
+            spacing: Theme.spaceLg
             Label { text: i18n.text(root.editingPlaylist ? "rename_playlist" : "new_playlist", i18n.language); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
             InputField { id: playlistName; objectName: "playlistNameInput"; Layout.fillWidth: true; placeholderText: i18n.text("playlist_name", i18n.language); enabled: !root.pendingMethod; onAccepted: if (saveName.enabled) saveName.clicked() }
             Label { Layout.fillWidth: true; visible: Boolean(root.operationError); text: root.operationError; color: Theme.statusError; wrapMode: Text.WordWrap; textFormat: Text.PlainText }
@@ -260,7 +260,7 @@ Item {
         closePolicy: root.pendingMethod ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle { objectName: "shortcutBlocker"; color: Theme.bgRaised; radius: Theme.radiusLg; border.color: Theme.borderSubtle }
         ColumnLayout {
-            anchors.fill: parent; spacing: 12
+            anchors.fill: parent; spacing: Theme.spaceMd
             Label { text: i18n.text("add_to_playlist", i18n.language); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
             ListView {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true

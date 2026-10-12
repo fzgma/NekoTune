@@ -4,8 +4,9 @@ import QtQuick.Controls
 ComboBox {
     id: control
     implicitHeight: Theme.controlMinHeight
+    font.family: Theme.fontFamily
     font.pixelSize: Theme.fontBody
-    leftPadding: 12
+    leftPadding: Theme.spaceMd
     rightPadding: 32
     contentItem: Text {
         text: control.displayText
@@ -16,7 +17,7 @@ ComboBox {
     }
     indicator: Text {
         anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
-        text: "⌄"; color: Theme.textMuted; font.pixelSize: 18
+        text: "⌄"; color: Theme.textMuted; font.pixelSize: Theme.fontDialogTitle
     }
     background: Rectangle {
         color: Theme.bgRaised; radius: Theme.radiusSm

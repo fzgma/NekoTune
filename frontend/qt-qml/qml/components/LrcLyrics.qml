@@ -90,7 +90,7 @@ Item {
         anchors.topMargin: 20
         anchors.bottomMargin: 20
         clip: true
-        spacing: 16
+        spacing: Theme.spaceLg
         cacheBuffer: Math.max(0, height)
         visible: root.lines && root.lines.length > 0
         model: root.lines
@@ -158,6 +158,7 @@ Item {
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
+                font.family: Theme.fontFamily
                 font.pixelSize: root.width < 500 ? Theme.fontLyricsCompact : Theme.fontLyricsWide
                 font.weight: lineDelegate.active ? Font.DemiBold : Font.Normal
                 lineHeightMode: Text.ProportionalHeight
@@ -211,7 +212,8 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: wordItem.modelData.text
                             textFormat: Text.PlainText
-                            font.pixelSize: root.width < 500 ? 20 : 24
+                            font.family: Theme.fontFamily
+                font.pixelSize: root.width < 500 ? Theme.fontLyricsCompact : Theme.fontLyricsWide
                             font.weight: Font.DemiBold
                             color: lineDelegate.active ? root.inactiveColor
                                    : lineDelegate.distanceToActive <= 1 ? root.nearColor : root.inactiveColor
@@ -232,7 +234,8 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: wordItem.modelData.text
                                 textFormat: Text.PlainText
-                                font.pixelSize: root.width < 500 ? 20 : 24
+                                font.family: Theme.fontFamily
+                font.pixelSize: root.width < 500 ? Theme.fontLyricsCompact : Theme.fontLyricsWide
                                 font.weight: Font.DemiBold
                                 color: lineDelegate.active ? root.activeColor
                                        : lineDelegate.distanceToActive <= 1 ? root.nearColor : root.inactiveColor
@@ -294,7 +297,7 @@ Item {
 
     ScrollView {
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: Theme.spaceLg
         visible: (!root.lines || root.lines.length === 0) && root.plainText.length > 0
         contentWidth: availableWidth
 
@@ -304,7 +307,8 @@ Item {
             readOnly: true
             wrapMode: TextEdit.Wrap
             color: Theme.textSecondary
-            font.pixelSize: 15
+            font.family: Theme.fontFamily
+                font.pixelSize: 15
             horizontalAlignment: TextEdit.AlignHCenter
             background: null
         }

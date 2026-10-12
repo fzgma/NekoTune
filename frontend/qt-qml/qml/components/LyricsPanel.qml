@@ -40,7 +40,7 @@ Item {
             Layout.fillWidth: true
             text: i18n.text("lyrics", i18n.language) + (document.source ? " · " + document.source : "")
             color: Theme.textMuted
-            font.pixelSize: 12
+            font.pixelSize: Theme.fontCaption
             font.weight: Font.Medium
             elide: Text.ElideRight
         }
@@ -82,7 +82,7 @@ Item {
         color: root.current.state === "error" ? Theme.statusError : Theme.textMuted
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
     }
 
     LrcLyrics {
@@ -127,7 +127,7 @@ Item {
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: Theme.spaceMd
 
             RowLayout {
                 Layout.fillWidth: true
@@ -165,7 +165,7 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 8
+                spacing: Theme.spaceSm
                 TextField {
                     id: artistField
                     Layout.fillWidth: true
@@ -247,7 +247,7 @@ Item {
                     onClicked: root.controller.setLyricsOffline(checked)
                     contentItem: Text {
                         text: offlineCheckbox.text
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                         color: Theme.textSecondary
                         leftPadding: offlineCheckbox.indicator.width + 6
                         verticalAlignment: Text.AlignVCenter
@@ -271,7 +271,7 @@ Item {
                         ? i18n.text("lyrics_choose_song", i18n.language)
                         : i18n.text("lyrics_" + (root.current.state || "idle"), i18n.language)
                 color: Theme.textMuted
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
                 wrapMode: Text.Wrap
             }
 
@@ -343,7 +343,7 @@ Item {
                         // Line 2: Album, Duration, and Type Badge
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 8
+                            spacing: Theme.spaceSm
 
                             Label {
                                 Layout.fillWidth: true

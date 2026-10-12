@@ -52,7 +52,7 @@ my-extension/
 
 `id` 使用小写字母、数字、点、横线和下划线，以字母开头，长度 2–101。`version` 使用 SemVer，`apiVersion` 当前为 `1`。`dependencies` 将扩展 ID 映射到 SemVer 范围，宿主检测版本不匹配、缺失与循环依赖；依赖必须分别被用户信任。
 
-`main` 导出 `activate(context)`，可导出 `deactivate(context)`；纯界面扩展可以省略 `main`。QML 文件路径相对于扩展根目录，不能越出目录。所有 UI 根组件使用 `Item` 或其子类；宿主提供顶层窗口。
+`main` 导出 `activate(context)`，可导出 `deactivate(context)`；纯界面扩展可以省略 `main`，此时不创建 Node Worker，启停与重载直接更新清单贡献。QML 文件路径相对于扩展根目录，不能越出目录。所有 UI 根组件使用 `Item` 或其子类；宿主提供顶层窗口。
 
 在仓库中运行：
 
@@ -153,6 +153,8 @@ Item {
 
 每个扩展视图用独立 QML 引擎管理；重载销毁旧视图与引擎。耗时任务应放在后台，QML 代码仍共享 GUI 线程，不能保证任意 QML 代码的故障隔离。
 
+完整 Shell 可在根 Item 实现 `function focusSearch(): void`，宿主将 `Ctrl+F` 转交给它，让 Shell 聚焦当前页面或抽屉的搜索框。宿主经 C++ 调用该动作，不跨引擎保存页面 JavaScript 对象。主题应从 `ExtensionApi.app` 的 C++ 控制器读取歌曲、队列和模型，避免直接复用另一个 QML 引擎中的 JavaScript 数组或函数对象。
+
 `contributes` 支持以下数组，同类贡献的 `id` 不得重复；公开身份为 `<extensionId>/<id>`：
 
 | 类别 | 字段与用途 |
@@ -160,11 +162,11 @@ Item {
 | `pages` | `id,title,source,group`；group 默认 `primary`，也可为 `utility` |
 | `settings` | `id,title,source`；显示在「设置 → 扩展设置」，点击进入子页面，不占用主侧栏；默认 Shell 可通过 `ExtensionApi.window.navigate("<extensionId>/<id>")` 打开 |
 | `slots` | `id,title,source,slot`；slot 为 `shell`、`bottomPlayer` 或 `page:<内置页面ID>` |
-| `themes` | `id,title,tokens`；覆盖已有 `Theme.qml` 的颜色、字体、尺寸和动效变量 |
+| `themes` | `id,title,tokens`，可带 `schemaVersion:1`、`variants.light/dark`、`author` 与 `ui`；支持配色、背景和 QML 界面，详见 [主题制作](themes.md) |
 | `menus` | `id,title,context,command`；context 为 `song` 或 `playlist`，命令收到歌曲或歌单上下文 |
 | `toolbars` | `id,title,source,height`；插入默认 Shell 顶部工具栏 |
 
-`title` 可用字符串或 `{zh,en}`。界面替换通过管理页选择；主题或替换项停用后回退到内置实现。完整 Shell 自行决定布局；默认 Shell 提供的工具栏和菜单不会自动出现在作者完全替换的界面中。
+`title` 可用字符串或 `{zh,en}`。主题通过「设置 → 外观」选择；独立界面替换仍通过扩展管理页选择。当前主题声明的插槽优先，切走主题后恢复独立选择；不可用时回退到内置实现。完整 Shell 自行决定布局；默认 Shell 提供的工具栏和菜单不会自动出现在作者完全替换的界面中。
 
 ## 音乐和歌词来源
 
@@ -216,3 +218,5 @@ pnpm --dir extensions check
 ```
 
 CMake 会验证并缓存官方 Node.js 压缩包。离线构建可传入 `-DNEKOTUNE_NODE_ARCHIVE=/absolute/path/node-v24.21.0-linux-x64.tar.xz`；JS 构建依赖也需提前填充 pnpm 缓存。`cmake --install build --prefix <directory>` 安装应用、后台、Node 及打包后的运行时；Qt 等系统依赖仍由部署环境提供。
+
+主题包使用 `type: "theme"`，仅贡献 `themes`，无 Node 入口或 Worker。纯数据主题可以直接启用；含 QML/JavaScript 时按扩展信任流程启用。`extensions.list` 的条目新增 `type`、`hasCode` 和 `themes`（包含未启用主题的展示描述），`contributes` 仍只包含运行中的贡献。切勿根据 `themes` 列表直接加载 QML。

@@ -247,11 +247,13 @@ API 默认不清理文件，界面删除确认框默认勾选清理；前端必�
 
 ### 用户动态扩展
 
-完整使用与开发契约见 [扩展文档](extensions.md)。`IExtensionBackend` 是领域侧的异步调用与事件边界，`ExtensionService` 和 `MusicService` 在应用层编排注册来源和业务操作。基础设施中的 `ExtensionBackend` 启动捆绑 Node 管理进程；管理进程再为每个扩展启动独立进程。两级通信都使用独立本地 Socket，日志与协议分离。普通扩展调用不会占住 `CommandScheduler`，只有短暂的数据库变更和已有文件导入流程进入串行队列。
+完整使用与开发契约见 [扩展文档](extensions.md)。`IExtensionBackend` 是领域侧的异步调用与事件边界，`ExtensionService` 和 `MusicService` 在应用层编排注册来源和业务操作。基础设施中的 `ExtensionBackend` 启动捆绑 Node 管理进程；管理进程再为提供 `main` 入口的扩展启动独立 Worker。无入口的主题和纯界面扩展直接发布清单贡献，仍参与启停、更新与开发重载。两级通信都使用独立本地 Socket，日志与协议分离。普通扩展调用不会占住 `CommandScheduler`，只有短暂的数据库变更和已有文件导入流程进入串行队列。
 
 音乐来源以来源 ID 和来源曲目 ID 保存稳定身份，`songs.hash` 对在线记录为空。`ISourceResolver` 将在线引用异步解析成宿主管理的本地代理 URL，再交给现有 Qt Multimedia 适配器；网络地址、鉴权头和有效期只存在于运行时。解析代次与播放意图隔离迟到结果。下载复用托管资源分配、文件校验与曲库入库。远程资源的歌词、封面使用独立资源键，不进行本地配套文件探测或清理。
 
 前端 `ExtensionsController` 消费后台注册快照。`PageHost` 保留原页面，并按用户选择加载替代项；`ExtensionView` 使用独立 QML 引擎管理视图和重载生命周期。默认 Shell 仍由 `Main.qml` 组织，完整 Shell 扩展接管窗口内容。恢复窗口由宿主独立加载，并强制使用内置主题。QML 故障不能实现进程级隔离，安全模式用于重启恢复。
+
+`ThemeController` 消费同一扩展快照，合并 `shared/themes/catalog.json` 的基础变量与所选主题，监听系统明暗并通过 `AppPaths` 保存显示模式。主题 ID 仍由扩展选择配置保存。`ThemeSlot` 按当前主题、独立扩展、内置界面的顺序回退，不改写独立插槽选择；主题页面按实际显示加载。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出在 Node 管理进程完成，卡片与导入流程不实例化主题 QML。格式、限制与恢复方法见 [主题文档](themes.md)。
 
 ### 内置功能扩展
 

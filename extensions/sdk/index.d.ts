@@ -56,6 +56,7 @@ export interface ExtensionContext {
     ): Promise<Disposable>;
   };
   ui: {
+    register(kind: 'themes', id: string, descriptor: ThemeDescriptor): Promise<Disposable>;
     register(
       kind: 'pages' | 'settings' | 'slots' | 'themes' | 'menus' | 'toolbars',
       id: string,
@@ -84,4 +85,42 @@ export interface ExtensionContext {
   };
   subscriptions: Disposable[];
   log: Pick<Console, 'info' | 'warn' | 'error' | 'debug' | 'log'>;
+}
+/** Theme token names, ranges and defaults are defined in shared/themes/catalog.json. */
+export type ThemeTokens = Record<string, string | number | boolean>;
+export interface ThemeBackground {
+  source: string;
+  opacity?: number;
+  overlayColor?: string;
+  overlayOpacity?: number;
+  blur?: number;
+}
+export interface ThemeVariant {
+  tokens?: ThemeTokens;
+  background?: ThemeBackground;
+}
+export interface ThemeDescriptor {
+  title: string | { zh?: string; en?: string };
+  author?: string;
+  schemaVersion: 1;
+  tokens?: ThemeTokens;
+  variants: { light: ThemeVariant; dark: ThemeVariant };
+  ui?: {
+    background?: string;
+    shell?: string;
+    bottomPlayer?: string;
+    pages?: Partial<
+      Record<
+        | 'home'
+        | 'library'
+        | 'queue'
+        | 'lyrics'
+        | 'settings'
+        | 'extensions'
+        | 'music_sources'
+        | 'lyrics_debug',
+        string
+      >
+    >;
+  };
 }

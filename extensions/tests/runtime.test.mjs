@@ -149,6 +149,9 @@ test('lifecycle, nested calls, storage, reload and rollback', { timeout: 45_000 
   );
   assert.ok(!JSON.stringify(await call('extensions.logs', { id: 'test.echo' })).includes('fixture-secret'));
   assert.equal((await call('extensions.list')).extensions[0].contributes.themes[0].id, 'test.echo/test');
+  const dynamicExport = path.join(root, 'dynamic.nktheme.zip');
+  await call('extensions.export_theme', { contribution: 'test.echo/test', path: dynamicExport });
+  assert.ok((await fs.stat(dynamicExport)).size > 0);
   const first = (await call('extensions.list')).extensions[0].generation;
   await call('extensions.reload', { id: 'test.echo' });
   assert.ok((await call('extensions.list')).extensions[0].generation > first);
@@ -467,3 +470,152 @@ test(
     assert.deepEqual(entry.registrations, {});
   },
 );
+
+test('theme packages have no workers, enforce QML trust and retain selections across disable', async (t) => {
+  const { root, call, events } = await runtime(t);
+  const folder = path.join(root, 'theme');
+  await fs.mkdir(folder);
+  const theme = { id: 'default', title: 'Test', schemaVersion: 1, variants: { light: {}, dark: {} } };
+  const manifest = {
+    id: 'test.theme',
+    name: 'Theme',
+    version: '1.0.0',
+    apiVersion: 1,
+    type: 'theme',
+    contributes: { themes: [theme] },
+  };
+  await fs.writeFile(path.join(folder, 'extension.json'), JSON.stringify(manifest));
+  await call('extensions.install', { path: folder, development: true });
+  assert.equal((await call('extensions.list')).extensions[0].themes.length, 1);
+  await call('extensions.enable', { id: 'test.theme' });
+  await call('extensions.select', { slot: 'theme', contribution: 'test.theme/default' });
+  assert.equal((await call('extensions.list')).extensions[0].state, 'running');
+  await call('extensions.disable', { id: 'test.theme' });
+  assert.equal((await call('extensions.list')).selections.theme, 'test.theme/default');
+  await fs.writeFile(path.join(folder, 'Background.qml'), 'import QtQuick\nItem {}');
+  theme.ui = { background: 'Background.qml' };
+  await fs.writeFile(path.join(folder, 'extension.json'), JSON.stringify(manifest));
+  await assert.rejects(call('extensions.enable', { id: 'test.theme' }), /Trust/);
+  await call('extensions.enable', { id: 'test.theme', trusted: true });
+  await call('extensions.reload', { id: 'test.theme' });
+  assert.equal(events.filter((event) => event.event === 'extensions.process').length, 0);
+  const exported = path.join(root, 'export.nktheme.zip');
+  await call('extensions.export_theme', { contribution: 'test.theme/default', path: exported });
+  await call('extensions.uninstall', { id: 'test.theme' });
+  assert.equal((await call('extensions.list')).selections.theme, '');
+  await call('extensions.install', { path: exported, themeOnly: true });
+  await assert.rejects(call('extensions.enable', { id: 'test.theme' }), /Trust/);
+  await call('extensions.select', { slot: 'theme', contribution: 'builtin/ocean' });
+  const registry = path.join(root, 'extensions/registry.json');
+  await fs.rename(registry, registry + '.saved');
+  await fs.mkdir(registry);
+  await assert.rejects(call('extensions.select', { slot: 'theme', contribution: 'builtin/forest' }));
+  assert.equal((await call('extensions.list')).selections.theme, 'builtin/ocean');
+  await fs.rmdir(registry);
+  await fs.rename(registry + '.saved', registry);
+});
+
+test('targeted theme updates validate identity before replacing and preserve selection on reload', async (t) => {
+  const { root, call, events } = await runtime(t);
+  async function themeZip(id, version, color) {
+    const output = path.join(root, `${id}-${version}.nktheme.zip`);
+    const zip = new yazl.ZipFile();
+    const writing = pipeline(zip.outputStream, createWriteStream(output));
+    zip.addBuffer(Buffer.from(JSON.stringify({
+      id, version, name: id, type: 'theme', apiVersion: 1,
+      contributes: { themes: [{ id: 'default', title: id, schemaVersion: 1,
+        tokens: { accentPrimary: color }, variants: { light: {}, dark: {} } }] },
+    })), 'extension.json');
+    zip.end();
+    await writing;
+    return output;
+  }
+  const id = 'test.target-theme';
+  const first = await themeZip(id, '1.0.0', '#123456');
+  const other = await themeZip('test.other-theme', '1.0.0', '#345678');
+  const second = await themeZip(id, '1.0.1', '#234567');
+  await call('extensions.install', { path: first, themeOnly: true });
+  await call('extensions.enable', { id });
+  await call('extensions.select', { slot: 'theme', contribution: `${id}/default` });
+  const before = await call('extensions.list');
+  await assert.rejects(call('extensions.install', {
+    path: other, themeOnly: true, expectedId: id, replace: true,
+  }), /theme_update_id_mismatch/);
+  await assert.rejects(call('extensions.install', {
+    path: second, themeOnly: true, expectedId: id,
+  }), /already installed/);
+  const unchanged = await call('extensions.list');
+  assert.deepEqual(unchanged.extensions, before.extensions);
+  assert.deepEqual(unchanged.selections, before.selections);
+  await call('extensions.install', { path: second, themeOnly: true, expectedId: id, replace: true });
+  const updated = await call('extensions.list');
+  assert.equal(updated.extensions[0].version, '1.0.1');
+  assert.equal(updated.extensions[0].state, 'running');
+  assert.equal(updated.selections.theme, `${id}/default`);
+  assert.notEqual(updated.extensions[0].directory, before.extensions[0].directory);
+  await call('extensions.reload', { id });
+  const reloaded = await call('extensions.list');
+  assert.ok(reloaded.extensions[0].generation > updated.extensions[0].generation);
+  assert.equal(reloaded.extensions[0].themes[0].tokens.accentPrimary, '#234567');
+  assert.deepEqual(reloaded.selections, before.selections);
+  assert.equal(events.filter(e => e.event === 'extensions.process').length, 0);
+});
+
+test('legacy theme extensions without a Node entry publish contributions without a worker', async (t) => {
+  const { root, call, events } = await runtime(t);
+  const folder = path.join(root, 'legacy');
+  await fs.mkdir(folder);
+  await fs.writeFile(
+    path.join(folder, 'extension.json'),
+    JSON.stringify({
+      id: 'test.legacy-theme',
+      name: 'Legacy theme',
+      version: '1.0.0',
+      apiVersion: 1,
+      contributes: { themes: [{ id: 'default', title: 'Legacy', tokens: { bgCanvas: '#123456' } }] },
+    }),
+  );
+  await call('extensions.install', { path: folder, development: true });
+  await call('extensions.enable', { id: 'test.legacy-theme', trusted: true });
+  await call('extensions.select', { slot: 'theme', contribution: 'test.legacy-theme/default' });
+  await call('extensions.reload', { id: 'test.legacy-theme' });
+  await call('extensions.disable', { id: 'test.legacy-theme' });
+  await call('extensions.enable', { id: 'test.legacy-theme' });
+  const snapshot = await call('extensions.list');
+  assert.equal(snapshot.selections.theme, 'test.legacy-theme/default');
+  assert.equal(snapshot.extensions[0].contributes.themes[0].tokens.bgCanvas, '#123456');
+  assert.equal(events.filter((event) => event.event === 'extensions.process').length, 0);
+});
+
+test('updating a data theme to QML waits for trust without running code', async (t) => {
+  const { root, call, events } = await runtime(t);
+  const first = path.join(root, 'first'),
+    second = path.join(root, 'second');
+  await fs.mkdir(first);
+  await fs.mkdir(second);
+  const theme = { id: 'default', title: 'Upgrade', schemaVersion: 1, variants: { light: {}, dark: {} } };
+  const manifest = {
+    id: 'test.upgrade-theme',
+    name: 'Upgrade',
+    version: '1.0.0',
+    apiVersion: 1,
+    type: 'theme',
+    contributes: { themes: [theme] },
+  };
+  await fs.writeFile(path.join(first, 'extension.json'), JSON.stringify(manifest));
+  await call('extensions.install', { path: first, development: true });
+  await call('extensions.enable', { id: manifest.id });
+  await call('extensions.select', { slot: 'theme', contribution: manifest.id + '/default' });
+  theme.ui = { shell: 'Shell.qml' };
+  manifest.version = '2.0.0';
+  await fs.writeFile(path.join(second, 'Shell.qml'), 'import QtQuick\nItem {}');
+  await fs.writeFile(path.join(second, 'extension.json'), JSON.stringify(manifest));
+  await call('extensions.install', { path: second, development: true, replace: true });
+  const updated = (await call('extensions.list')).extensions[0];
+  assert.equal(updated.state, 'disabled');
+  assert.equal(updated.trusted, false);
+  await assert.rejects(call('extensions.enable', { id: manifest.id }), /Trust/);
+  await call('extensions.enable', { id: manifest.id, trusted: true });
+  assert.equal((await call('extensions.list')).extensions[0].state, 'running');
+  assert.equal(events.filter((event) => event.event === 'extensions.process').length, 0);
+});

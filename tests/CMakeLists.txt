@@ -149,5 +149,5 @@ target_link_libraries(nekotune_extensions_test PRIVATE nekotune_core nekotune_fr
 target_compile_definitions(nekotune_extensions_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 nekotune_add_qt_test(NAME nekotune_extensions_test COMMAND nekotune_extensions_test)
 set_tests_properties(nekotune_extensions_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=${NEKOTUNE_TEST_QPA};QT_QUICK_BACKEND=software")
-add_test(NAME nekotune_extension_sdk_test COMMAND "${NEKOTUNE_NODE_BINARY}" --test tests/packages.test.mjs tests/audio.test.mjs tests/runtime.test.mjs)
+add_test(NAME nekotune_extension_sdk_test COMMAND "${NEKOTUNE_NODE_BINARY}" --test tests/packages.test.mjs tests/audio.test.mjs tests/runtime.test.mjs tests/themes.test.mjs)
 set_tests_properties(nekotune_extension_sdk_test PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" TIMEOUT 120)

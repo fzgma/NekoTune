@@ -113,7 +113,7 @@ Popup {
     }
     ColumnLayout {
         anchors.fill: parent
-        spacing: 12
+        spacing: Theme.spaceMd
         RowLayout {
             Layout.fillWidth: true
             Label {
@@ -173,11 +173,11 @@ Popup {
             clip: true
             ColumnLayout {
                 width: formScroll.availableWidth
-                spacing: 12
+                spacing: Theme.spaceMd
                 ColumnLayout {
                     id: metadataFields
                     Layout.fillWidth: true
-                    spacing: 12
+                    spacing: Theme.spaceMd
                     Label {
                         objectName: "metadataImportSource"
                         Layout.fillWidth: true
@@ -236,7 +236,7 @@ Popup {
                     Label {
                         text: metadataEditor.translator.text("tags", metadataEditor.translator.language)
                         color: Theme.textSecondary
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                     }
                     Flow {
                         id: tagFlow

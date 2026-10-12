@@ -38,7 +38,7 @@ ColumnLayout {
         return port ? portName(port) + " · " + device.name : String(device.name)
     }
     property alias currentIndex: deviceList.currentIndex
-    spacing: 8
+    spacing: Theme.spaceSm
     function t(key) { return translator.text(key, translator.language) }
     function resetSelection() {
         deviceList.currentIndex = Math.max(0, options.findIndex(item => isSelected(item)))
@@ -91,7 +91,7 @@ ColumnLayout {
             Accessible.checkable: true
             Accessible.checked: selected
             contentItem: RowLayout {
-                spacing: 8
+                spacing: Theme.spaceSm
                 Label { text: row.selected ? "✓" : ""; Layout.preferredWidth: 16; color: Theme.accentPrimary }
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.minimumWidth: 0

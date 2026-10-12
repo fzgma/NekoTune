@@ -206,3 +206,7 @@ Linux 密钥库相关集成测试通过 `dbus-run-session` 和 `gnome-keyring-da
 - [API 文档](docs/API.md)：本地协议、业务方法、事件与错误语义。
 - [产品需求](docs/PRD.md)：产品目标与规划。
 - [UI 设计规范](docs/ui-design-guidelines.md)：界面风格和交互约定。
+
+### 主题与外观
+
+在「设置 → 外观」切换夜樱、深海、森林及其深浅配色，或选择跟随系统。支持导入/导出主题包、静态背景和受信任的 QML 界面替换。主题模板、打包命令和恢复方法见 [主题制作指南](docs/themes.md)。

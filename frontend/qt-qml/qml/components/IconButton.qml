@@ -16,8 +16,8 @@ Button {
     property real cornerRadius: Theme.radiusSm
 
     hoverEnabled: true
-    implicitWidth: 40
-    implicitHeight: 40
+    implicitWidth: Theme.iconButtonSize
+    implicitHeight: Theme.iconButtonSize
 
     ToolTip.visible: button.hovered && button.tooltipText.length > 0
     ToolTip.text: button.tooltipText
