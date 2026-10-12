@@ -2,6 +2,7 @@
 #include "app_paths.h"
 #include "controllers/extensions_controller.h"
 #include "ipc_client.h"
+#include "extensions/extension_view.h"
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
@@ -9,8 +10,23 @@
 #include <QJsonObject>
 #include <QStyleHints>
 #include <QUrl>
+#include <QElapsedTimer>
+#include <QPointer>
+#include <QQuickWindow>
+#include <QTimer>
 
 namespace {
+bool viewsLoading(QQuickItem *item) {
+  if (const auto *view = qobject_cast<ExtensionView *>(item); view && view->loading())
+    return true;
+  if ((item->objectName() == "themeBackground" || item->objectName() == "builtinShellLoader") &&
+      item->property("loading").toBool())
+    return true;
+  for (auto *child : item->childItems())
+    if (viewsLoading(child))
+      return true;
+  return false;
+}
 QVariantMap themeCatalog() {
   QFile file(QStringLiteral(":/themes/catalog.json"));
   return file.open(QIODevice::ReadOnly)
@@ -18,6 +34,36 @@ QVariantMap themeCatalog() {
              : QVariantMap{};
 }
 } // namespace
+void ThemeController::presentWindow(QQuickWindow *window) {
+  if (!window)
+    return;
+  auto *timer = new QTimer(window);
+  timer->setInterval(16);
+  QElapsedTimer elapsed;
+  elapsed.start();
+  const QPointer<ThemeController> guard(this);
+  connect(timer, &QTimer::timeout, window, [guard, window, timer, elapsed] {
+    // A caller may explicitly show the window (e.g. a test). Never reopen a
+    // window later when the user has already hidden it to the tray.
+    if (!guard || window->isVisible()) {
+      window->setProperty("appearanceStartupPending", false);
+      timer->deleteLater();
+      return;
+    }
+    const bool timedOut = elapsed.elapsed() >= 12000;
+    if (!timedOut && ((!guard->safeMode() && !guard->m_extensions.appearanceReady()) ||
+                      viewsLoading(window->contentItem())))
+      return;
+    if (timedOut) {
+      guard->m_error = "theme_startup_timeout";
+      emit guard->changed();
+    }
+    window->setProperty("appearanceStartupPending", false);
+    window->show();
+    timer->deleteLater();
+  });
+  timer->start();
+}
 QVariantMap ThemeDefaults::defaults(bool dark) const {
   const auto catalog = themeCatalog();
   const auto rules = catalog.value("tokens").toMap();

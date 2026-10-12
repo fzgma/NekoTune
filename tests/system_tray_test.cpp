@@ -92,6 +92,13 @@ class SystemTrayTest final : public QObject {
         QVERIFY(m_window->isVisible());
     }
     void restoresMaximizedAndMinimizedWindows() {
+        m_window->hide();
+        m_window->setProperty("appearanceStartupPending", true);
+        m_tray->showWindow();
+        QVERIFY(!m_window->isVisible());
+        m_window->setProperty("appearanceStartupPending", false);
+        m_tray->showWindow();
+        QVERIFY(m_window->isVisible());
         m_window->setWindowState(Qt::WindowMaximized);
         m_window->close();
         m_tray->showWindow();

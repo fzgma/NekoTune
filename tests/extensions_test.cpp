@@ -533,15 +533,8 @@ class ExtensionsTest final : public QObject {
         AppControllers restarted(client);
         QCOMPARE(restarted.theme->mode(), "light");
       }
-#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-      const auto oldScheme = QGuiApplication::styleHints()->colorScheme();
       theme->setMode("system");
-      QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
-      QTRY_VERIFY(theme->isDark());
-      QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Light);
-      QTRY_VERIFY(!theme->isDark());
-      QGuiApplication::styleHints()->setColorScheme(oldScheme);
-#endif
+      QCOMPARE(theme->isDark(), QGuiApplication::styleHints()->colorScheme() != Qt::ColorScheme::Light);
       theme->setMode("light");
       QFile broken(AppPaths::configFile("settings.json"));
       QVERIFY(broken.open(QIODevice::WriteOnly));
@@ -553,6 +546,149 @@ class ExtensionsTest final : public QObject {
       QFile unchanged(AppPaths::configFile("settings.json"));
       QVERIFY(unchanged.open(QIODevice::ReadOnly));
       QCOMPARE(unchanged.readAll(), QByteArray("not json"));
+    }
+    void themeSystemColorSchemeNotifications() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME");
+      auto *hints = QGuiApplication::styleHints();
+      const auto oldScheme = hints->colorScheme();
+      auto restore = qScopeGuard([&] {
+        hints->setColorScheme(oldScheme);
+        qputenv("NEKOTUNE_HOME", oldHome);
+      });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      IpcClient client;
+      AppControllers app(client);
+      app.theme->setMode("system");
+      for (const auto scheme : {Qt::ColorScheme::Dark, Qt::ColorScheme::Light}) {
+        hints->setColorScheme(scheme);
+        // setColorScheme is a platform hint; offscreen platforms may ignore it.
+        QTest::qWait(100);
+        if (hints->colorScheme() != scheme)
+          QSKIP("The platform does not support overriding the system color scheme");
+        QTRY_COMPARE(app.theme->isDark(), scheme == Qt::ColorScheme::Dark);
+      }
+#else
+      QSKIP("Color scheme overrides require Qt 6.8 or later");
+#endif
+    }
+    void themeStartup_data() {
+      QTest::addColumn<QString>("kind");
+      for (const QString kind : {"builtin", "shell", "worker", "slots", "broken", "missing",
+                                  "disabled", "safe", "offline"})
+        QTest::newRow(qPrintable(kind)) << kind;
+    }
+    void themeStartup() {
+      QFETCH(QString, kind);
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME"), oldSocket = qgetenv("NEKOTUNE_SOCKET"),
+                 oldDb = qgetenv("NEKOTUNE_DB_PATH"), oldSafe = qgetenv("NEKOTUNE_SAFE_MODE");
+      auto restore = qScopeGuard([&] {
+        qputenv("NEKOTUNE_HOME", oldHome); qputenv("NEKOTUNE_SOCKET", oldSocket);
+        qputenv("NEKOTUNE_DB_PATH", oldDb); qputenv("NEKOTUNE_SAFE_MODE", oldSafe);
+      });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      qputenv("NEKOTUNE_SOCKET", profile.filePath("startup.sock").toUtf8());
+      qputenv("NEKOTUNE_DB_PATH", profile.filePath("startup.sqlite3").toUtf8());
+      qputenv("NEKOTUNE_SAFE_MODE", kind == "safe" ? "1" : "0");
+      QVERIFY(AppPaths::prepare());
+      QVERIFY(AppPaths::saveSetting("lyrics_offline", true));
+      QVERIFY(AppPaths::saveSetting("theme_mode", "light"));
+      const auto folder = profile.filePath("theme");
+      QVERIFY(QDir().mkpath(folder));
+      auto write = [](const QString &path, const QByteArray &bytes) {
+        QFile file(path);
+        return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+      };
+      QVERIFY(write(folder + "/Shell.qml", kind == "broken" ? QByteArray("import QtQuick\nQtObject {}")
+          : QByteArray("import QtQuick\nRectangle { objectName: 'startupShell'; color: '#123456' }")));
+      QVERIFY(write(folder + "/Part.qml", "import QtQuick\nRectangle { objectName: 'startupPart'; color: '#123456' }"));
+      QImage background(16, 16, QImage::Format_RGB32);
+      background.fill(QColor("#123456"));
+      QVERIFY(background.save(folder + "/background.png"));
+      QJsonObject ui{{"shell", "Shell.qml"}};
+      if (kind == "slots")
+        ui = {{"bottomPlayer", "Part.qml"}, {"pages", QJsonObject{{"home", "Part.qml"}}}};
+      QJsonObject theme{{"id", "default"}, {"title", "Startup"}, {"schemaVersion", 1},
+                        {"tokens", QJsonObject{{"bgCanvas", "#123456"}}}, {"ui", ui},
+                        {"variants", QJsonObject{{"light", QJsonObject{{"background", QJsonObject{{"source", "background.png"}}}}},
+                                                 {"dark", QJsonObject{}}}}};
+      QJsonObject manifest{
+          {"id", "test.startup"}, {"name", "Startup"}, {"version", "1.0.0"},
+          {"apiVersion", 1}, {"type", "theme"}, {"contributes", QJsonObject{{"themes", QJsonArray{theme}}}}};
+      if (kind == "worker") {
+        manifest.remove("type");
+        manifest.insert("main", "main.mjs");
+        QVERIFY(write(folder + "/main.mjs", "export async function activate() { await new Promise(r => setTimeout(r, 250)); }"));
+      }
+      QVERIFY(write(folder + "/extension.json", QJsonDocument(manifest).toJson()));
+      const QString selected = kind == "builtin" ? "builtin/ocean" : "test.startup/default";
+      QVERIFY(QDir().mkpath(AppPaths::extensionsDirectory()));
+      QVERIFY(write(AppPaths::extensionsDirectory() + "/registry.json", QJsonDocument(QJsonObject{
+          {"selections", QJsonObject{{"theme", selected}}},
+          {"entries", QJsonArray{QJsonObject{{"id", "test.startup"},
+              {"directory", kind == "missing" ? folder + "/missing" : folder},
+              {"development", true}, {"enabled", kind != "disabled"}, {"trusted", true}}}}}).toJson()));
+      BackendRuntime runtime([] { return std::make_unique<ExtensionAudio>(); });
+      IpcClient client;
+      AppControllers app(client);
+      I18n translator;
+      QQmlApplicationEngine engine;
+      engine.rootContext()->setContextProperty("controllers", &app);
+      engine.rootContext()->setContextProperty("ipcClient", &client);
+      engine.rootContext()->setContextProperty("i18n", &translator);
+      engine.rootContext()->setContextProperty("lyricsDebugEnabled", false);
+      engine.load(QUrl("qrc:/qml/Main.qml"));
+      QVERIFY(!engine.rootObjects().isEmpty());
+      auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+      QVERIFY(window);
+      auto cleanup = qScopeGuard([&] { delete window; runtime.stop(); });
+      QVERIFY(!window->isVisible());
+      auto *nativeLoader = window->findChild<QObject *>("builtinShellLoader");
+      QVERIFY(nativeLoader);
+      QSignalSpy nativeLoads(nativeLoader, SIGNAL(loaded()));
+      QString firstTheme;
+      QColor firstColor;
+      bool firstShell = false, firstSlots = false, firstBackground = false;
+      connect(window, &QWindow::visibleChanged, this, [&](bool visible) {
+        if (!visible || !firstTheme.isEmpty()) return;
+        firstTheme = app.theme->activeId();
+        firstColor = window->color();
+        firstShell = visualItem(window->contentItem(), "startupShell");
+        auto *player = visualItem(window->contentItem(), "bottomPlayerThemeSlot");
+        auto *page = visualItem(window->contentItem(), "themePageSlot_home");
+        firstSlots = player && player->property("ready").toBool() && page && page->property("ready").toBool();
+        auto *image = visualItem(window->contentItem(), "themeStaticBackgroundImage");
+        firstBackground = image && image->property("status").toInt() == 1;
+      });
+      if (kind != "safe") {
+        QTest::qWait(80);
+        QVERIFY(!window->isVisible());
+      }
+      if (kind != "offline") {
+        QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+        client.connectBackend();
+      }
+      QTRY_VERIFY_WITH_TIMEOUT(window->isVisible(), 15000);
+      const bool fallback = kind == "missing" || kind == "disabled" || kind == "safe" || kind == "offline";
+      QCOMPARE(firstTheme, fallback ? QString("builtin/yozakura") : selected);
+      QCOMPARE(firstColor, QColor(app.theme->tokens().value("bgCanvas").toString()));
+      QCOMPARE(firstShell, kind == "shell" || kind == "worker");
+      if (firstShell) QVERIFY(nativeLoads.isEmpty());
+      if (kind == "slots") { QVERIFY(firstSlots); QVERIFY(firstBackground); }
+      if (kind == "offline") QCOMPARE(app.theme->error(), "theme_startup_timeout");
+      QVERIFY(!window->property("appearanceStartupPending").toBool());
+      const auto screenshots = qEnvironmentVariable("NEKOTUNE_TEST_SCREENSHOT_DIR");
+      if (!screenshots.isEmpty()) {
+        QDir().mkpath(screenshots);
+        QTRY_VERIFY(window->isExposed());
+        QVERIFY(window->grabWindow().save(screenshots + "/startup-" + kind + ".png"));
+      }
+      window->hide();
+      app.theme->setMode("dark");
+      QTest::qWait(60);
+      QVERIFY(!window->isVisible());
     }
     void themePackagesAndAppearance() {
       QTemporaryDir profile;

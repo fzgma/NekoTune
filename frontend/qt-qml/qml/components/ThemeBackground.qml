@@ -4,6 +4,8 @@ import QtQuick.Effects
 
 Item {
     id: root
+    objectName: "themeBackground"
+    readonly property bool loading: backdrop.status === Image.Loading
     required property var controllers
     required property var translator
     required property var hostWindow

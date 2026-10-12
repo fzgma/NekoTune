@@ -33,6 +33,7 @@ async function main() {
   let state = { entries: [], selections: {} },
     closing = false,
     catalogueReady = false,
+    startupComplete = false,
     generation = 0,
     mutations = Promise.resolve();
   const host = new Wire(net.createConnection(process.env.NEKOTUNE_EXTENSION_SOCKET));
@@ -279,6 +280,7 @@ async function main() {
       selections: state.selections ?? {},
       safeMode: process.env.NEKOTUNE_SAFE_MODE === '1',
       catalogueReady,
+      startupComplete,
     };
   }
   function changed() {
@@ -921,8 +923,12 @@ async function main() {
       }
       catalogueReady = true;
       changed();
+      const selectedOwners = new Set(Object.values(state.selections ?? {})
+        .filter(id => typeof id === 'string').map(id => id.split('/')[0]));
+      const startupEntries = [...entries].sort(([left], [right]) =>
+        Number(selectedOwners.has(right)) - Number(selectedOwners.has(left)));
       if (process.env.NEKOTUNE_SAFE_MODE !== '1')
-        for (const [id, entry] of entries)
+        for (const [id, entry] of startupEntries)
           if (entry.enabled && entry.state !== 'failed')
             await (async () => {
               const order = dependencyOrder(entries, id);
@@ -941,6 +947,9 @@ async function main() {
             });
     } catch (error) {
       host.send({ event: 'extensions.error', message: error.message });
+    } finally {
+      startupComplete = true;
+      changed();
     }
   });
 }

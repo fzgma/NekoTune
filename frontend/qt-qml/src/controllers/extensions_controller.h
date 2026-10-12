@@ -16,6 +16,7 @@ class ExtensionsController final : public FeatureController {
     Q_PROPERTY(QVariantMap selections READ selections NOTIFY changed)
     Q_PROPERTY(QVariantMap themeTokens READ themeTokens NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+    Q_PROPERTY(bool appearanceReady READ appearanceReady NOTIFY changed)
   public:
     explicit ExtensionsController(IpcClient &client);
     QVariantList items() const { return m_items; }
@@ -30,6 +31,7 @@ class ExtensionsController final : public FeatureController {
     QVariantMap selections() const { return m_selections; }
     QVariantMap themeTokens() const;
     QString error() const { return m_error; }
+    bool appearanceReady() const;
     Q_INVOKABLE int request(const QString &method, const QVariantMap &params = {});
     Q_INVOKABLE void refresh();
     Q_INVOKABLE QVariantList contributions(const QString &kind) const;
@@ -53,4 +55,6 @@ class ExtensionsController final : public FeatureController {
     QVariantMap m_selections;
     QString m_error;
     int m_nextId = 1;
+    bool m_catalogueReady = false;
+    bool m_startupComplete = false;
 };

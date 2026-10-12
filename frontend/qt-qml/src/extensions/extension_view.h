@@ -17,6 +17,7 @@ class ExtensionView : public QQuickItem {
     QVariantMap descriptor() const { return m_descriptor; }
     void setDescriptor(const QVariantMap &descriptor);
     bool ready() const { return m_item; }
+    bool loading() const { return m_scheduled; }
     QString error() const { return m_error; }
     QQuickItem *item() const { return m_item; }
     Q_INVOKABLE bool invokeAction(const QString &method);

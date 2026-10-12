@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
@@ -21,7 +22,16 @@ ApplicationWindow {
     height: 860
     minimumWidth: 1000
     minimumHeight: 640
-    visible: true
+    visible: false
+    property bool appearanceStartupPending: true
+    Component.onCompleted: {
+        if (root.themeController)
+            root.themeController.presentWindow(root)
+        else {
+            appearanceStartupPending = false
+            visible = true
+        }
+    }
     title: "NekoTune"
     color: Theme.bgCanvas
     font.family: Theme.fontFamily
@@ -86,19 +96,15 @@ ApplicationWindow {
     MetadataEditor { id: metadataEditor; shell: root; controller: root.app.library; ai: root.app.ai; translator: root.translator }
     TagEditor { id: tagEditor; shell: root; controller: root.app.tags; translator: root.translator }
     function pageStatus(id) {
-        const index = root.pages.findIndex(page => page.id === id)
-        const loader = pageRepeater.itemAt(index)
+        const loader = nativeShell.item ? nativeShell.item.loaderForId(id) : null
         return loader ? loader.status : -1
     }
     function pageItem(id) {
-        const index = root.pages.findIndex(page => page.id === id)
-        const loader = pageRepeater.itemAt(index)
+        const loader = nativeShell.item ? nativeShell.item.loaderForId(id) : null
         return loader ? loader.item : null
     }
     function queuePage() {
-        const index = root.pages.findIndex(page => page.id === "queue")
-        const loader = pageRepeater.itemAt(index)
-        return loader ? loader.item : null
+        return pageItem("queue")
     }
     // Navigation closes temporary playback surfaces before changing browse state.
     // The queue page also represents saved playlists, keyed by currentPlaylist.
@@ -148,7 +154,7 @@ ApplicationWindow {
         enabled: !root.nowPlayingOpen && !root.popupActive
         onActivated: {
             if (fullShell.invokeAction("focusSearch")) return
-            const page = root.queueOpen ? queuePanel : root.currentPage()
+            const page = root.queueOpen ? (nativeShell.item ? nativeShell.item.queueDrawer : null) : root.currentPage()
             if (page && typeof page.focusSearch === "function") page.focusSearch()
         }
     }
@@ -189,152 +195,181 @@ ApplicationWindow {
         fallbackDescriptor: root.extensions ? root.extensions.activeSlots.shell || ({}) : ({})
         controllers: root.app; translator: root.translator; hostWindow: root
     }
-    ColumnLayout {
-        visible: !fullShell.ready
+    Loader {
+        id: nativeShell
+        objectName: "builtinShellLoader"
         anchors.fill: parent
-        spacing: 0
-        RowLayout {
-            Layout.fillWidth: true
-            visible: toolbarRepeater.count > 0
-            Repeater {
-                id: toolbarRepeater
-                model: root.extensions ? root.extensions.toolbars : []
-                delegate: ExtensionView {
-                    required property var modelData
-                    Layout.fillWidth: true; Layout.preferredHeight: modelData.height || 48
-                    descriptor: modelData; controllers: root.app; translator: root.translator; hostWindow: root
+        // A full theme shell replaces this tree; do not construct every built-in
+        // page first just to hide it when the selected theme finishes loading.
+        readonly property bool wanted: (!root.appearanceStartupPending || !root.extensions || root.extensions.appearanceReady
+                 || root.themeController && root.themeController.safeMode)
+            && !fullShell.ready
+            && ((!root.themeController || !root.themeController.uiSlots.shell)
+                && (!root.extensions || !root.extensions.activeSlots.shell)
+                || fullShell.resolved && fullShell.error !== "")
+        property bool reconcilePending: true
+        readonly property bool loading: reconcilePending || status === Loader.Loading
+        active: false
+        function reconcile() {
+            active = wanted
+            reconcilePending = false
+        }
+        function schedule() {
+            reconcilePending = true
+            Qt.callLater(reconcile)
+        }
+        Component.onCompleted: schedule()
+        onWantedChanged: schedule()
+        sourceComponent: ColumnLayout {
+            objectName: "builtinShell"
+            readonly property var queueDrawer: queuePanel
+            function loaderForId(id) {
+                return pageRepeater.itemAt(root.pages.findIndex(page => page.id === id))
+            }
+            spacing: 0
+            RowLayout {
+                Layout.fillWidth: true
+                visible: toolbarRepeater.count > 0
+                Repeater {
+                    id: toolbarRepeater
+                    model: root.extensions ? root.extensions.toolbars : []
+                    delegate: ExtensionView {
+                        required property var modelData
+                        Layout.fillWidth: true; Layout.preferredHeight: modelData.height || 48
+                        descriptor: modelData; controllers: root.app; translator: root.translator; hostWindow: root
+                    }
                 }
             }
-        }
-        Item {
-            id: workspace
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            RowLayout {
-                anchors.fill: parent
-                spacing: 0
-                Sidebar {
-                    shell: root; controllers: root.app; transport: root.transport; translator: root.translator
-                    pages: root.pages.filter(page => page.id !== "music_sources" || root.hasBrowserSources)
-                    currentPlaylist: root.currentPlaylist
-                    visible: !root.nowPlayingOpen && root.viewMode !== "lyrics"
-                    onPlaylistRequested: id => root.navigate("queue", id)
-                    onNewPlaylistRequested: if (root.queuePage()) root.queuePage().newPlaylist()
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: root.color
-                    // A faint top-down wash keeps the browsing canvas from
-                    // reading as a single flat black surface.
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.bgCanvasTop }
-                        GradientStop { position: 0.55; color: Theme.bgCanvas }
-                        GradientStop { position: 1.0; color: Qt.darker(Theme.bgCanvas, 1.08) }
+            Item {
+                id: workspace
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                RowLayout {
+                    anchors.fill: parent
+                    spacing: 0
+                    Sidebar {
+                        shell: root; controllers: root.app; transport: root.transport; translator: root.translator
+                        pages: root.pages.filter(page => page.id !== "music_sources" || root.hasBrowserSources)
+                        currentPlaylist: root.currentPlaylist
+                        visible: !root.nowPlayingOpen && root.viewMode !== "lyrics"
+                        onPlaylistRequested: id => root.navigate("queue", id)
+                        onNewPlaylistRequested: if (root.queuePage()) root.queuePage().newPlaylist()
                     }
-                    ThemeBackground { anchors.fill: parent; controllers: root.app; translator: root.translator; hostWindow: root }
-                    ColumnLayout {
-                        anchors.fill: parent
-                        spacing: 0
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: errorLabel.implicitHeight + 20
-                            visible: Boolean(root.transport.error)
-                            color: Theme.statusErrorBg
-                            Label {
-                                id: errorLabel
-                                anchors.fill: parent; anchors.margins: 10
-                                text: root.translator.text(root.transport.error, root.translator.language); textFormat: Text.PlainText
-                                color: Theme.statusError; wrapMode: Text.WordWrap; font.pixelSize: Theme.fontCaption
-                            }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: root.color
+                        // A faint top-down wash keeps the browsing canvas from
+                        // reading as a single flat black surface.
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Theme.bgCanvasTop }
+                            GradientStop { position: 0.55; color: Theme.bgCanvas }
+                            GradientStop { position: 1.0; color: Qt.darker(Theme.bgCanvas, 1.08) }
                         }
-                        Item {
-                            Layout.fillWidth: true; Layout.fillHeight: true
-                            Repeater {
-                                id: pageRepeater
-                                model: root.pages
-                                delegate: PageHost {
-                                    id: pageLoader
-                                    anchors.fill: parent
-                                    active: !modelData.debug || root.debugEnabled
-                                    visible: modelData.id === "lyrics" ? root.nowPlayingOpen || root.viewMode === "lyrics"
-                                             : !root.nowPlayingOpen && root.viewMode === modelData.id
-                                    objectName: modelData.id === "lyrics_debug" ? "lyricsDebugPageLoader" : modelData.id + "PageLoader"
-                                    shell: root; controllers: root.app; transport: root.transport; translator: root.translator
-                                    Connections {
-                                        target: pageLoader.item
-                                        ignoreUnknownSignals: true
-                                        function onImportRequested(id) { root.openImport(id ? "playlist" : modelData.id === "queue" ? "queue" : "library", id) }
-                                        function onEditRequested(song) { metadataEditor.openForSong(song) }
-                                        function onNewTagRequested() { tagEditor.openNew() }
-                                        function onEditTagRequested(tag) { tagEditor.openForTag(tag) }
+                        ThemeBackground { anchors.fill: parent; controllers: root.app; translator: root.translator; hostWindow: root }
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 0
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: errorLabel.implicitHeight + 20
+                                visible: Boolean(root.transport.error)
+                                color: Theme.statusErrorBg
+                                Label {
+                                    id: errorLabel
+                                    anchors.fill: parent; anchors.margins: 10
+                                    text: root.translator.text(root.transport.error, root.translator.language); textFormat: Text.PlainText
+                                    color: Theme.statusError; wrapMode: Text.WordWrap; font.pixelSize: Theme.fontCaption
+                                }
+                            }
+                            Item {
+                                Layout.fillWidth: true; Layout.fillHeight: true
+                                Repeater {
+                                    id: pageRepeater
+                                    model: root.pages
+                                    delegate: PageHost {
+                                        id: pageLoader
+                                        anchors.fill: parent
+                                        active: !modelData.debug || root.debugEnabled
+                                        visible: modelData.id === "lyrics" ? root.nowPlayingOpen || root.viewMode === "lyrics"
+                                                 : !root.nowPlayingOpen && root.viewMode === modelData.id
+                                        objectName: modelData.id === "lyrics_debug" ? "lyricsDebugPageLoader" : modelData.id + "PageLoader"
+                                        shell: root; controllers: root.app; transport: root.transport; translator: root.translator
+                                        Connections {
+                                            target: pageLoader.item
+                                            ignoreUnknownSignals: true
+                                            function onImportRequested(id) { root.openImport(id ? "playlist" : modelData.id === "queue" ? "queue" : "library", id) }
+                                            function onEditRequested(song) { metadataEditor.openForSong(song) }
+                                            function onNewTagRequested() { tagEditor.openNew() }
+                                            function onEditTagRequested(tag) { tagEditor.openForTag(tag) }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
+                Rectangle {
+                    id: drawer
+                    objectName: "queueDrawer"
+                    anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right
+                    anchors.rightMargin: root.queueOpen ? 0 : -8
+                    width: root.width < 1200 ? 360 : 400
+                    // Keep rendering through the exit animation, but stop accepting input immediately.
+                    visible: root.queueOpen || opacity > 0
+                    enabled: root.queueOpen
+                    opacity: root.queueOpen ? 1 : 0
+                    color: Theme.bgRaised
+                    border.color: Theme.borderSubtle
+                    border.width: 1
+                    z: 10
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.reducedMotion ? 0 : Theme.durationDrawer; easing.type: Easing.OutCubic }
+                    }
+                    Behavior on anchors.rightMargin {
+                        NumberAnimation { duration: Theme.reducedMotion ? 0 : Theme.durationDrawer; easing.type: Easing.OutCubic }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.AllButtons
+                        onWheel: wheel => wheel.accepted = true
+                    }
+                    QueuePanel {
+                        id: queuePanel
+                        objectName: "queueDrawerPanel"
+                        anchors.fill: parent; anchors.margins: Theme.spaceLg
+                        compact: true
+                        connected: root.transport.connected
+                        queueController: root.app.queue
+                        playbackController: root.app.playback
+                        playbackMode: root.app.playback.playbackMode
+                        playlistController: root.app.playlists
+                        queue: root.queue
+                        queueModel: root.app.queue.model
+                        playlists: root.app.playlists.model.items
+                        duration: root.duration
+                        currentSong: root.song; playbackState: root.playbackState
+                        onAddRequested: root.openImport("queue", 0)
+                        onClearRequested: root.app.queue.clearQueue()
+                        onPlayRequested: id => root.app.queue.playQueueItem(id)
+                        onTogglePlayPauseRequested: root.app.playback.togglePlayPause()
+                        onRemoveRequested: id => root.app.queue.removeQueueItem(id)
+                        onEditRequested: song => metadataEditor.openForSong(song)
+                        onPlaylistRequested: (action, params) => root.app.playlists.managePlaylist(action, params)
+                        onLibraryRequested: root.navigate("library")
+                        onCloseRequested: root.queueOpen = false
+                    }
+                }
             }
-            Rectangle {
-                id: drawer
-                objectName: "queueDrawer"
-                anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right
-                anchors.rightMargin: root.queueOpen ? 0 : -8
-                width: root.width < 1200 ? 360 : 400
-                // Keep rendering through the exit animation, but stop accepting input immediately.
-                visible: root.queueOpen || opacity > 0
-                enabled: root.queueOpen
-                opacity: root.queueOpen ? 1 : 0
-                color: Theme.bgRaised
-                border.color: Theme.borderSubtle
-                border.width: 1
-                z: 10
-                Behavior on opacity {
-                    NumberAnimation { duration: Theme.reducedMotion ? 0 : Theme.durationDrawer; easing.type: Easing.OutCubic }
+            Item {
+                Layout.fillWidth: true; Layout.preferredHeight: Theme.bottomBarHeight
+                BottomPlayer { anchors.fill: parent; visible: !customPlayer.ready; shell: root; controller: root.app.playback; translator: root.translator; onEditRequested: song => metadataEditor.openForSong(song) }
+                ThemeSlot {
+                    id: customPlayer; objectName: "bottomPlayerThemeSlot"; anchors.fill: parent
+                    themeDescriptor: root.themeController ? root.themeController.uiSlots.bottomPlayer || ({}) : ({})
+                    fallbackDescriptor: root.extensions ? root.extensions.activeSlots.bottomPlayer || ({}) : ({})
+                    controllers: root.app; translator: root.translator; hostWindow: root
                 }
-                Behavior on anchors.rightMargin {
-                    NumberAnimation { duration: Theme.reducedMotion ? 0 : Theme.durationDrawer; easing.type: Easing.OutCubic }
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.AllButtons
-                    onWheel: wheel => wheel.accepted = true
-                }
-                QueuePanel {
-                    id: queuePanel
-                    objectName: "queueDrawerPanel"
-                    anchors.fill: parent; anchors.margins: Theme.spaceLg
-                    compact: true
-                    connected: root.transport.connected
-                    queueController: root.app.queue
-                    playbackController: root.app.playback
-                    playbackMode: root.app.playback.playbackMode
-                    playlistController: root.app.playlists
-                    queue: root.queue
-                    queueModel: root.app.queue.model
-                    playlists: root.app.playlists.model.items
-                    duration: root.duration
-                    currentSong: root.song; playbackState: root.playbackState
-                    onAddRequested: root.openImport("queue", 0)
-                    onClearRequested: root.app.queue.clearQueue()
-                    onPlayRequested: id => root.app.queue.playQueueItem(id)
-                    onTogglePlayPauseRequested: root.app.playback.togglePlayPause()
-                    onRemoveRequested: id => root.app.queue.removeQueueItem(id)
-                    onEditRequested: song => metadataEditor.openForSong(song)
-                    onPlaylistRequested: (action, params) => root.app.playlists.managePlaylist(action, params)
-                    onLibraryRequested: root.navigate("library")
-                    onCloseRequested: root.queueOpen = false
-                }
-            }
-        }
-        Item {
-            Layout.fillWidth: true; Layout.preferredHeight: Theme.bottomBarHeight
-            BottomPlayer { anchors.fill: parent; visible: !customPlayer.ready; shell: root; controller: root.app.playback; translator: root.translator; onEditRequested: song => metadataEditor.openForSong(song) }
-            ThemeSlot {
-                id: customPlayer; objectName: "bottomPlayerThemeSlot"; anchors.fill: parent
-                themeDescriptor: root.themeController ? root.themeController.uiSlots.bottomPlayer || ({}) : ({})
-                fallbackDescriptor: root.extensions ? root.extensions.activeSlots.bottomPlayer || ({}) : ({})
-                controllers: root.app; translator: root.translator; hostWindow: root
             }
         }
     }

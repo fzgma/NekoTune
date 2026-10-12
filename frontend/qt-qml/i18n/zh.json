@@ -350,6 +350,7 @@
   "theme_import": "导入主题",
   "theme_update": "更新主题包",
   "theme_reload": "重新加载",
+  "theme_startup_timeout": "主题启动等待超时，已显示可用界面。请检查连接或在外观设置中重新加载主题。",
   "theme_update_hint": "下载或重新打包后，点卡片上的「更新主题包」选择新版 ZIP。「重新加载」读取已安装的文件；主题启用后可用。",
   "theme_updated": "主题包已更新。",
   "theme_reloaded": "主题已重新加载。",

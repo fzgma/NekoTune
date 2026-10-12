@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QQuickWindow>
 #include <functional>
 
 class ExtensionsController;
@@ -58,6 +59,7 @@ public:
   Q_INVOKABLE void exportTheme(const QString &id, const QString &path);
   Q_INVOKABLE void removeTheme(const QString &id);
   Q_INVOKABLE void reset();
+  Q_INVOKABLE void presentWindow(QQuickWindow *window);
 signals:
   void changed();
   void trustRequested(const QString &id);

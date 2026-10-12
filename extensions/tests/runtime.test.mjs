@@ -515,6 +515,51 @@ test('theme packages have no workers, enforce QML trust and retain selections ac
   await fs.rename(registry + '.saved', registry);
 });
 
+test('selected themes start before unrelated background workers', async (t) => {
+  const { call, events } = await runtime(t, false, async (root) => {
+    const background = await fixture(root, 'test.background', `
+      export async function activate() { await new Promise(resolve => setTimeout(resolve, 150)); }
+    `);
+    const theme = path.join(root, 'theme');
+    await fs.mkdir(theme);
+    await fs.writeFile(path.join(theme, 'extension.json'), JSON.stringify({
+      id: 'test.theme', name: 'Theme', version: '1.0.0', apiVersion: 1, type: 'theme',
+      contributes: { themes: [{ id: 'default', title: 'Theme', schemaVersion: 1,
+        variants: { light: {}, dark: {} } }] },
+    }));
+    await fs.mkdir(path.join(root, 'extensions'));
+    await fs.writeFile(path.join(root, 'extensions/registry.json'), JSON.stringify({
+      entries: [
+        { id: 'test.background', directory: background, enabled: true, trusted: true },
+        { id: 'test.theme', directory: theme, enabled: true },
+      ],
+      selections: { theme: 'test.theme/default' },
+    }));
+  });
+  await until(() => call('extensions.list'), snapshot => snapshot.startupComplete);
+  const started = id => events.findIndex(event =>
+    event.extensions?.some(entry => entry.id === id && entry.state === 'running'));
+  assert.ok(started('test.theme') >= 0);
+  assert.ok(started('test.theme') < started('test.background'));
+});
+
+test('startup distinguishes the catalogue from completion of saved extension activation', async (t) => {
+  const { call, events } = await runtime(t, false, async (root) => {
+    const directory = await fixture(root, 'test.startup', `
+      export async function activate() { await new Promise(resolve => setTimeout(resolve, 150)); }
+    `);
+    await fs.mkdir(path.join(root, 'extensions'));
+    await fs.writeFile(path.join(root, 'extensions/registry.json'), JSON.stringify({
+      entries: [{ id: 'test.startup', directory, enabled: true, trusted: true }],
+      selections: { theme: 'test.startup/default' },
+    }));
+  });
+  const ready = await until(() => call('extensions.list'), snapshot => snapshot.startupComplete);
+  assert.equal(ready.extensions[0].state, 'running');
+  assert.ok(events.some(event => event.catalogueReady && !event.startupComplete));
+  assert.equal(ready.selections.theme, 'test.startup/default');
+});
+
 test('targeted theme updates validate identity before replacing and preserve selection on reload', async (t) => {
   const { root, call, events } = await runtime(t);
   async function themeZip(id, version, color) {

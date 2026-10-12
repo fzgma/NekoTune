@@ -140,6 +140,7 @@ void SystemTrayController::hideWindow() {
 }
 void SystemTrayController::showWindow() {
     if (!m_window || m_stopping) return;
+    if (m_window->property("appearanceStartupPending").toBool()) return;
     // show() chooses the platform's default state and can discard maximization.
     // Use the explicit show variants to retain the state across hiding/minimizing.
     const auto restoreState = m_restoreState;

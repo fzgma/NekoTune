@@ -17,6 +17,8 @@ ExtensionsController::ExtensionsController(IpcClient &client) : FeatureControlle
     connect(&client, &IpcClient::connectedChanged, this, [this] {
         if (!m_client.connected()) {
             m_items.clear();
+            m_catalogueReady = false;
+            m_startupComplete = false;
             emit changed();
         }
     });
@@ -24,7 +26,29 @@ ExtensionsController::ExtensionsController(IpcClient &client) : FeatureControlle
 void ExtensionsController::apply(const QJsonObject &data) {
     m_items = data.value("extensions").toVariant().toList();
     m_selections = data.value("selections").toObject().toVariantMap();
+    m_catalogueReady = data.value("catalogueReady").toBool();
+    m_startupComplete = data.value("startupComplete").toBool();
     emit changed();
+}
+bool ExtensionsController::appearanceReady() const {
+    if (m_startupComplete)
+        return true;
+    if (!m_catalogueReady)
+        return false;
+    // The catalogue arrives before enabled extensions activate. Only wait for
+    // selected UI providers; unrelated background workers need not delay a window.
+    for (const auto &selection : m_selections) {
+        const auto owner = selection.toString().section('/', 0, 0);
+        for (const auto &value : m_items) {
+            const auto entry = value.toMap();
+            if (entry.value("id") != owner || !entry.value("enabled").toBool())
+                continue;
+            const auto state = entry.value("state").toString();
+            if (state != "running" && state != "failed" && state != "blocked")
+                return false;
+        }
+    }
+    return true;
 }
 void ExtensionsController::refresh() {
     send(

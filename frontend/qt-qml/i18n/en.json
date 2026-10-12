@@ -350,6 +350,7 @@
   "theme_import": "Import theme",
   "theme_update": "Update package",
   "theme_reload": "Reload",
+  "theme_startup_timeout": "Theme startup timed out. The available interface is shown. Check the connection or reload the theme in Appearance.",
   "theme_update_hint": "After downloading or rebuilding a theme, choose its new ZIP with Update package. Reload reads the installed files and is available once the theme is enabled.",
   "theme_updated": "Theme package updated.",
   "theme_reloaded": "Theme reloaded.",

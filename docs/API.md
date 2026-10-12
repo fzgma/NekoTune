@@ -411,7 +411,7 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 | 方法 | 参数 | data / 行为 |
 | --- | --- | --- |
-| `extensions.list` | 无 | `extensions` 注册状态数组、`selections` 界面选择、`runtimeReady` 表示管理进程已连接且扩展发现已完成 |
+| `extensions.list` | 无 | `extensions` 注册状态数组、`selections` 界面选择；`runtimeReady` 表示管理进程已连接且扩展发现已完成；`catalogueReady` 表示目录已读取，`startupComplete` 表示启动激活已结束（含失败），不代表所有扩展均可用 |
 | `extensions.install` | `path` 本地 ZIP；开发目录传 `development:true`；覆盖已有版本需 `replace:true` | `extension` 安装记录；更新启动失败回滚旧程序版本 |
 | `extensions.enable` | `id`；首次信任需 `trusted:true` | 依赖按序启动，返回注册快照 |
 | `extensions.disable` | `id` | 撤销能力，依赖该扩展的其他扩展进入 blocked 状态 |

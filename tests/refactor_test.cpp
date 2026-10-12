@@ -811,6 +811,7 @@ class RefactorTest final : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
         QTRY_VERIFY(client.connected());
+        QTRY_VERIFY(window->isVisible());
         window->setProperty("viewMode", "queue");
         window->setProperty("currentPlaylist", 0);
         QVariant queuePageValue;
@@ -900,6 +901,7 @@ class RefactorTest final : public QObject {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         QVERIFY(window);
         QTRY_VERIFY(client.connected());
+        QTRY_VERIFY(window->isVisible());
         auto *drawer = window->findChild<QQuickItem *>("queueDrawer");
         auto *secondary = window->findChild<QQuickItem *>("playerSecondaryControls");
         auto *transport = window->findChild<QQuickItem *>("transportControls");

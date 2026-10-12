@@ -290,10 +290,11 @@ void ExtensionBackend::fail(const QString &message) {
         value = entry;
     }
     m_snapshot.insert("extensions", extensions);
+    m_snapshot.insert("startupComplete", true);
     emit changed();
-    emit eventReady({{"event", "extensions.changed"},
-                     {"extensions", extensions},
-                     {"selections", m_snapshot.value("selections")}});
+    auto event = m_snapshot;
+    event.insert("event", "extensions.changed");
+    emit eventReady(event);
     emit eventReady({{"event", "extensions.error"}, {"message", message}});
 }
 void ExtensionBackend::killWorkers() {

@@ -12,6 +12,8 @@ Item {
     property bool active: true
     property bool themeActive: active
     readonly property bool ready: primary.ready || fallback.ready
+    readonly property bool resolved: ready || ((!themeActive || !themeDescriptor.source || primary.error !== "")
+        && (!active || !fallbackDescriptor.source || fallback.error !== ""))
     readonly property var item: primary.ready ? primary.item : fallback.item
     readonly property string error: [primary.error, fallback.error].filter(value => value !== "").join("\n")
     function invokeAction(method: string): bool {
