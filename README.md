@@ -57,6 +57,8 @@ GitHub Actions 的 `Build and Release` 工作流在推送 `main`、提交 PR、�
 
 解压 Windows 包后运行 `bin/nekotune.exe`；解压 Linux 包后运行根目录的 `./NekoTune`。包中包含 Qt、FFmpeg、QtKeychain、QML 模块和 Node，无需另装 Node 或 Qt。Linux 包在 Ubuntu 24.04 构建，面向 glibc 2.39+ 的 x64 桌面系统，仍需系统图形驱动、音频服务和 Secret Service 密钥库。Windows 包面向 Windows 10/11 x64。CI 使用软件渲染，Linux 使用离屏平台，Windows 使用原生窗口平台，并以 0.5 的 Qt 缩放因子在 runner 的小屏幕上覆盖 1360 像素逻辑宽度；该缩放只用于 CI。真实设备的图形驱动、音频设备和原生密钥库仍需设备验收。
 
+Linux 包同时包含 IBus 和 Fcitx 输入上下文插件；Fcitx5-Qt 5.1.9 使用与发行包相同的 Qt 编译，不能用系统新版 Qt 的插件替换。系统仍需运行对应输入法服务，并配置 `QT_IM_MODULE=fcitx` 或 `ibus`。CI 会检查两个插件实际加载成功，候选框与中文上屏另需通过输入法交互验证。
+
 ### 分离运行
 
 在两个终端中分别启动后端与前端：

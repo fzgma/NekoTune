@@ -8,8 +8,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 const stage = path.resolve(process.argv[2]);
-async function checkDistribution(backendOnly) {
-  const label = backendOnly ? 'Backend' : 'Desktop';
+async function checkDistribution(backendOnly, inputMethod = '') {
+  const label = backendOnly ? 'Backend' : `Desktop${inputMethod ? ' (' + inputMethod + ')' : ''}`;
+  const inputPlugin = inputMethod ? await fs.realpath(path.join(stage, 'plugins/platforminputcontexts',
+    `lib${inputMethod === 'fcitx' ? 'fcitx5' : 'ibus'}platforminputcontextplugin.so`)) : '';
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nekotune-release-'));
   const socketName = process.platform === 'win32'
     ? 'nekotune-release-' + randomUUID() : path.join(root, 'backend.sock');
@@ -32,6 +34,11 @@ async function checkDistribution(backendOnly) {
       ? `${stage}/bin;${process.env.SystemRoot}/System32;${process.env.SystemRoot}`
       : '/usr/bin:/bin',
   });
+  if (inputMethod) {
+    environment.QT_IM_MODULE = inputMethod;
+    environment.QT_DEBUG_PLUGINS = '1';
+    delete environment.QT_IM_MODULES;
+  }
   if (backendOnly && process.platform !== 'win32') environment.LD_LIBRARY_PATH = path.join(stage, 'lib');
   const executable = backendOnly
     ? path.join(stage, 'bin', process.platform === 'win32' ? 'nekotune-backend.exe' : 'nekotune-backend')
@@ -119,6 +126,10 @@ async function checkDistribution(backendOnly) {
     assert.ok(!exited, `Process exited after IPC startup:\n${diagnostics()}`);
     assert.doesNotMatch(output, /QQmlApplicationEngine failed|module "[^"]+" is not installed/);
     assert.doesNotMatch(output, /TypeError:|ReferenceError:|Binding loop detected/);
+    if (inputMethod) {
+      assert.ok(output.includes(`"${inputPlugin}" loaded library`),
+        `Packaged ${inputMethod} input context was not loaded:\n${diagnostics()}`);
+    }
     console.log(`Installed ${label}, SQLite, IPC, bundled Node and theme import/export passed.`);
   } finally {
     socket?.destroy();
@@ -133,8 +144,10 @@ async function checkDistribution(backendOnly) {
 }
 
 const failures = [];
-for (const backendOnly of [true, false]) {
-  try { await checkDistribution(backendOnly); }
+const checks = process.platform === 'linux' ? [[true, ''], [false, 'fcitx'], [false, 'ibus']]
+  : [[true, ''], [false, '']];
+for (const [backendOnly, inputMethod] of checks) {
+  try { await checkDistribution(backendOnly, inputMethod); }
   catch (error) { console.error(error); failures.push(error); }
 }
 if (failures.length) throw new AggregateError(failures, 'Installed distribution validation failed');

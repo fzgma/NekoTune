@@ -24,6 +24,8 @@
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <memory>
+#include <vector>
 using namespace nekotune;
 
 static QQuickItem *visualItem(QQuickItem *parent, const QString &name) {
@@ -449,6 +451,50 @@ class ExtensionsTest final : public QObject {
         second.socket.abort();
         peer.socket.abort();
         runtime.stop();
+    }
+    void isolatedQmlViewsKeepLocalTypesAndTranslations() {
+        QTemporaryDir directory;
+        IpcClient client;
+        AppControllers controllers(client);
+        I18n translator;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("testApp", &controllers);
+        engine.rootContext()->setContextProperty("testI18n", &translator);
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick; import NekoTune 1.0; ExtensionView { "
+                          "controllers:testApp; translator:testI18n }", QUrl());
+        std::vector<std::unique_ptr<QObject>> views;
+        const QStringList names{"netease", "kugou", "sekai"};
+        for (const auto &name : names) {
+            const auto folder = directory.filePath(name + "/qml");
+            QVERIFY(QDir().mkpath(folder));
+            auto write = [&](const QString &fileName, const QByteArray &bytes) {
+                QFile file(folder + '/' + fileName);
+                return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+            };
+            QVERIFY(write("Page.qml", "import QtQuick\nItem { "
+                          "property string title: local.text(); Translator { id: local } }"));
+            QVERIFY(write("Translator.qml", "import QtQuick\nimport \"translations.js\" as T\n"
+                          "QtObject { function text() { return T.title } }"));
+            QVERIFY(write("translations.js", ".pragma library\nvar title = '" + name.toUtf8() + "'"));
+            auto object = std::unique_ptr<QObject>(component.create());
+            QVERIFY2(object, qPrintable(component.errorString()));
+            auto *view = qobject_cast<ExtensionView *>(object.get());
+            QVERIFY(view);
+            view->setDescriptor({{"source", folder + "/Page.qml"}, {"extensionId", name}});
+            QTRY_VERIFY_WITH_TIMEOUT(view->ready(), 5000);
+            QCOMPARE(view->item()->property("title").toString(), name);
+            views.push_back(std::move(object));
+        }
+        // A reload must keep the package's own types while other engines live.
+        auto *view = qobject_cast<ExtensionView *>(views[1].get());
+        QPointer<QQuickItem> old(view->item());
+        auto descriptor = view->descriptor();
+        descriptor.insert("generation", 2);
+        view->setDescriptor(descriptor);
+        QTRY_VERIFY(old.isNull());
+        QTRY_VERIFY(view->ready());
+        QCOMPARE(view->item()->property("title").toString(), names[1]);
     }
     void isolatedQmlViewsReloadAndRecover() {
         IpcClient client;

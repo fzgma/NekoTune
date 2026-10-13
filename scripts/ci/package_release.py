@@ -22,21 +22,16 @@ def copy_file(source: Path, destination: Path) -> None:
     shutil.copy2(source.resolve(), destination)
 
 
-def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path]) -> None:
-    # Multimedia also installs optional Quick3D modules without their 3D dependencies.
-    # Ship the host's 2D UI modules and the multimedia API used by extensions.
-    for module in ("QtQml", "QtQuick", "Qt", "QtMultimedia"):
-        source = qt / "qml" / module
-        if source.exists():
-            shutil.copytree(source, stage / "qml" / module, dirs_exist_ok=True)
-    for kind in (
-        "platforms", "platforminputcontexts", "xcbglintegrations", "imageformats",
-        "tls", "sqldrivers", "multimedia", "styles", "iconengines",
-        "networkinformation",
-    ):
-        source = qt / "plugins" / kind
-        if source.exists():
-            for plugin in source.glob("*.so"):
+def copy_linux_plugins(stage: Path, roots: list[Path]) -> None:
+    for root in roots:
+        if not root.is_dir():
+            raise RuntimeError(f"Qt plugin directory does not exist: {root}")
+        for kind in (
+            "platforms", "platforminputcontexts", "xcbglintegrations", "imageformats",
+            "tls", "sqldrivers", "multimedia", "styles", "iconengines",
+            "networkinformation",
+        ):
+            for plugin in (root / kind).glob("*.so"):
                 if kind == "sqldrivers" and plugin.name != "libqsqlite.so":
                     continue
                 if kind == "platforms" and plugin.name not in {
@@ -46,6 +41,32 @@ def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path]) -> None:
                 if kind == "imageformats" and not plugin.name.startswith("libq"):
                     continue
                 copy_file(plugin, stage / "plugins" / kind / plugin.name)
+    for name in (
+        "libfcitx5platforminputcontextplugin.so", "libibusplatforminputcontextplugin.so",
+    ):
+        plugin = stage / "plugins/platforminputcontexts" / name
+        if not plugin.is_file():
+            raise RuntimeError(f"Required Linux input method plugin is missing: {plugin}")
+
+
+def copy_fcitx_licenses(stage: Path, source: Path) -> None:
+    licenses = source / "LICENSES"
+    if not licenses.is_dir() or not any(licenses.glob("*.txt")):
+        raise RuntimeError(f"Fcitx5-Qt license files are missing: {licenses}")
+    shutil.copytree(licenses, stage / "licenses/Fcitx5-Qt", dirs_exist_ok=True)
+
+
+def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
+                 extra_plugin_dirs: list[Path]) -> None:
+    # Multimedia also installs optional Quick3D modules without their 3D dependencies.
+    # Ship the host's 2D UI modules and the multimedia API used by extensions.
+    for module in ("QtQml", "QtQuick", "Qt", "QtMultimedia"):
+        source = qt / "qml" / module
+        if source.exists():
+            shutil.copytree(source, stage / "qml" / module, dirs_exist_ok=True)
+    # All plugins must be present before scanning ELF dependencies. Extra plugins
+    # must be built against this Qt, never copied from a newer system Qt.
+    copy_linux_plugins(stage, [qt / "plugins", *extra_plugin_dirs])
     library_dir = stage / "lib"
     library_dir.mkdir(exist_ok=True)
     # The loader, libc and graphics drivers belong to the target OS.
@@ -147,6 +168,10 @@ def main() -> None:
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--qt-prefix", type=Path, required=True)
     parser.add_argument("--library-dir", type=Path, action="append", default=[])
+    parser.add_argument("--plugin-dir", type=Path, action="append", default=[],
+                        help="Additional plugin root, built with --qt-prefix")
+    parser.add_argument("--fcitx-source", type=Path,
+                        help="Fcitx5-Qt source tree supplying bundled license notices")
     parser.add_argument("--platform", choices=["linux", "windows"], required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, default=Path("dist"))
@@ -154,7 +179,11 @@ def main() -> None:
     stage = args.stage.resolve()
     qt = args.qt_prefix.resolve()
     if args.platform == "linux":
-        bundle_linux(stage, qt, [directory.resolve() for directory in args.library_dir])
+        if args.fcitx_source is None:
+            parser.error("--fcitx-source is required for Linux distributions")
+        copy_fcitx_licenses(stage, args.fcitx_source.resolve())
+        bundle_linux(stage, qt, [directory.resolve() for directory in args.library_dir],
+                     [directory.resolve() for directory in args.plugin_dir])
     else:
         bundle_windows(stage, qt)
     licenses = stage / "licenses"
@@ -168,6 +197,11 @@ def main() -> None:
             shutil.copytree(source, licenses / source.name, dirs_exist_ok=True)
         elif source.is_file():
             copy_file(source, licenses / "QtKeychain-LICENSE")
+    fcitx_notice = (
+        "Fcitx5-Qt 5.1.9 (BSD/LGPL): licenses/Fcitx5-Qt/\n"
+        "Source: https://github.com/fcitx/fcitx5-qt/tree/3ade1a680221f3e211adcfb50c323285c4bded77\n"
+        if args.platform == "linux" else ""
+    )
     (licenses / "THIRD-PARTY.md").write_text(
         "This distribution includes Qt (LGPL/GPL), QtKeychain (BSD), "
         "FFmpeg and its codec libraries, Node.js and their dependencies.\n"
@@ -175,7 +209,8 @@ def main() -> None:
         "Qt source and licenses: https://code.qt.io/ and https://www.qt.io/licensing/\n"
         "QtKeychain source: https://github.com/frankosterfeld/qtkeychain/tree/0.17.0\n"
         "FFmpeg source and licenses: https://ffmpeg.org/legal.html\n"
-        "MSYS2 package sources and notices: https://github.com/msys2/MINGW-packages\n",
+        "MSYS2 package sources and notices: https://github.com/msys2/MINGW-packages\n"
+        + fcitx_notice,
         encoding="utf-8",
     )
     args.output.mkdir(parents=True, exist_ok=True)

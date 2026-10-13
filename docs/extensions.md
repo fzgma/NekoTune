@@ -153,6 +153,8 @@ Item {
 
 每个扩展视图用独立 QML 引擎管理；重载销毁旧视图与引擎。耗时任务应放在后台，QML 代码仍共享 GUI 线程，不能保证任意 QML 代码的故障隔离。
 
+同目录的 QML 类型可直接使用，子目录用相对路径导入（例如 `import "components"`）。宿主不将每个视图目录额外注册为模块搜索根，避免 Qt 6.8 把多个扩展的同名类型（如 `Translator.qml`）解析为同一个旧式模块。
+
 完整 Shell 可在根 Item 实现 `function focusSearch(): void`，宿主将 `Ctrl+F` 转交给它，让 Shell 聚焦当前页面或抽屉的搜索框。宿主经 C++ 调用该动作，不跨引擎保存页面 JavaScript 对象。主题应从 `ExtensionApi.app` 的 C++ 控制器读取歌曲、队列和模型，避免直接复用另一个 QML 引擎中的 JavaScript 数组或函数对象。
 
 `contributes` 支持以下数组，同类贡献的 `id` 不得重复；公开身份为 `<extensionId>/<id>`：

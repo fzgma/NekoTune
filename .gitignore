@@ -5,9 +5,11 @@
 /stage/
 /dist/
 /.ci-qtkeychain/
+/.ci-fcitx5-qt/
 /.ccache/
 
 # CMake generated files
+__pycache__/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake

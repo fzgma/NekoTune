@@ -53,7 +53,8 @@ jobs:
           sudo apt-get install -y ninja-build ccache pkg-config libavformat-dev libavutil-dev zlib1g-dev \
             libsecret-1-dev libpulse-dev libssl-dev libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 \
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 \
-            libxcb-xkb1 gnome-keyring dbus-x11 libglib2.0-bin fonts-noto-cjk libpipewire-0.3-0
+            libxcb-xkb1 gnome-keyring dbus-x11 libglib2.0-bin fonts-noto-cjk libpipewire-0.3-0 \
+            extra-cmake-modules libxkbcommon-dev libxcb1-dev libx11-dev
       - name: Install Linux Qt
         if: runner.os == 'Linux'
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
@@ -61,6 +62,20 @@ jobs:
           version: '6.8.3'
           modules: 'qtmultimedia qtshadertools'
           cache: true
+      - name: Build Linux Fcitx5-Qt 5.1.9 with the release Qt
+        if: runner.os == 'Linux'
+        run: |
+          git clone https://github.com/fcitx/fcitx5-qt.git .ci-fcitx5-qt
+          git -C .ci-fcitx5-qt checkout 3ade1a680221f3e211adcfb50c323285c4bded77
+          # The distribution uses xcb; no Qt Wayland private API is needed.
+          cmake -S .ci-fcitx5-qt -B .ci-fcitx5-qt/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+            -DENABLE_QT4=OFF -DENABLE_QT5=OFF -DENABLE_QT6=ON \
+            -DBUILD_ONLY_PLUGIN=ON -DENABLE_QT6_WAYLAND_WORKAROUND=OFF \
+            -DCMAKE_SKIP_RPATH=ON \
+            -DCMAKE_INSTALL_QT6PLUGINDIR="$RUNNER_TEMP/fcitx5-qt/plugins"
+          cmake --build .ci-fcitx5-qt/build --parallel 2
+          cmake --install .ci-fcitx5-qt/build
       - name: Build Linux QtKeychain 0.17.0
         if: runner.os == 'Linux'
         run: |
@@ -139,6 +154,7 @@ jobs:
           ctest --test-dir build --output-on-failure --timeout 180 || test_result=$?
           if [[ "$test_result" != 0 ]]; then cat build/tests/nekotune_*.txt; fi
           pnpm --dir extensions check
+          uv run --no-project --python 3.12 -m unittest discover -s scripts/ci/tests
           exit "$test_result"
       - name: Run Windows CTest and check extension types
         if: runner.os == 'Windows'
@@ -172,6 +188,7 @@ jobs:
           cmake --install build --prefix "$PWD/stage"
           uv run --no-project --python 3.12 scripts/ci/package_release.py \
             --stage stage --qt-prefix "$QT_ROOT_DIR" --library-dir "$RUNNER_TEMP/qtkeychain/lib" \
+            --plugin-dir "$RUNNER_TEMP/fcitx5-qt/plugins" --fcitx-source .ci-fcitx5-qt \
             --platform linux --version "$VERSION"
           node scripts/ci/smoke_release.mjs stage
       - name: Bundle and smoke test Windows distribution

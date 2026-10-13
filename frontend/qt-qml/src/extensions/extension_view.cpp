@@ -1,6 +1,5 @@
 #include "extensions/extension_view.h"
 #include "controllers/theme_controller.h"
-#include <QFileInfo>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QTimer>
@@ -55,7 +54,9 @@ void ExtensionView::rebuild() {
     }
     m_engine = new QQmlEngine(this);
     m_engine->addImportPath("qrc:/qt/qml");
-    m_engine->addImportPath(QFileInfo(path).absolutePath());
+    // QML already imports the component's directory implicitly. Adding it as
+    // a module root gives unrelated extensions the same legacy module identity
+    // on Qt 6.8, allowing e.g. Translator.qml to resolve from another package.
     auto *context = m_engine->rootContext();
     context->setContextProperty("controllers", controllers);
     context->setContextProperty("i18n", translator);
