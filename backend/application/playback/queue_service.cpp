@@ -40,4 +40,8 @@ void QueueService::updateMetadata(const SongMetadata &metadata) {
     m_queue.updateSongMetadata(metadata);
     emit changed();
 }
+void QueueService::updateMetadataBatch(const QVector<SongMetadata> &metadata) {
+    for (const auto &song : metadata) m_queue.updateSongMetadata(song);
+    emit changed();
+}
 } // namespace nekotune

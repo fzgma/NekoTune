@@ -16,6 +16,26 @@ Popup {
     function t(key) {
         return translator.text(key, translator.language) || key;
     }
+    component DetailField: ColumnLayout {
+        id: detail
+        required property string modelData
+        readonly property string key: modelData
+        readonly property bool numeric: ["year", "disc_number", "track_number"].indexOf(key) !== -1
+        property alias value: input.text
+        readonly property bool valid: input.acceptableInput
+        Layout.fillWidth: true
+        spacing: Theme.spaceXs
+        Label { text: metadataEditor.t("metadata_" + detail.key); color: Theme.textSecondary; font.pixelSize: Theme.fontCaption }
+        InputField {
+            id: input
+            objectName: "metadata_" + detail.key
+            Layout.fillWidth: true
+            enabled: metadataEditor.editable
+            validator: detail.numeric ? numberValidator : null
+            IntValidator { id: numberValidator; bottom: 0; top: 9999 }
+            Accessible.name: metadataEditor.t("metadata_" + detail.key)
+        }
+    }
     property var original: ({})
     objectName: "metadataEditor"
     property int songId: 0
@@ -56,6 +76,7 @@ Popup {
         titleField.text = "";
         artistField.text = "";
         lyricsField.text = "";
+        for (let i = 0; i < detailFields.count; ++i) (detailFields.itemAt(i) as DetailField).value = "";
         tagNames = [];
         tagInput.currentIndex = -1;
         tagInput.editText = "";
@@ -73,6 +94,15 @@ Popup {
             patch.artist = artistField.text;
         if (lyricsField.text !== String(original.lyrics || ""))
             patch.lyrics = lyricsField.text;
+        for (let i = 0; i < detailFields.count; ++i) {
+            const field = detailFields.itemAt(i) as DetailField;
+            if (field.numeric && field.value && !field.valid) {
+                saveError = t("metadata_invalid_number");
+                return;
+            }
+            const value = field.numeric ? Number(field.value || 0) : field.value;
+            if (value !== (original[field.key] || (field.numeric ? 0 : ""))) patch[field.key] = value;
+        }
         const oldTags = (original.tags || []).map(tag => tag.name);
         if (JSON.stringify(tagNames) !== JSON.stringify(oldTags))
             patch.tags = tagNames;
@@ -167,6 +197,7 @@ Popup {
         }
         ScrollView {
             id: formScroll
+            objectName: "metadataFormScroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: availableWidth
@@ -356,6 +387,11 @@ Popup {
                         color: Theme.statusError
                         font.pixelSize: Theme.fontCaption
                     }
+                    Repeater {
+                        id: detailFields
+                        model: ["album", "album_artist", "genre", "year", "disc_number", "track_number"]
+                        delegate: DetailField {}
+                    }
                 }
                 ScrollView {
                     Layout.fillWidth: true
@@ -429,6 +465,10 @@ Popup {
             titleField.text = String(metadataEditor.controller.editing.custom_title || "");
             artistField.text = String(metadataEditor.controller.editing.artist || "");
             lyricsField.text = String(metadataEditor.controller.editing.lyrics || "");
+            for (let i = 0; i < detailFields.count; ++i) {
+                const field = detailFields.itemAt(i) as DetailField;
+                field.value = String(metadataEditor.original[field.key] || "");
+            }
             metadataEditor.tagNames = (metadataEditor.controller.editing.tags || []).map(tag => tag.name);
             metadataEditor.tagsReady = true;
         }

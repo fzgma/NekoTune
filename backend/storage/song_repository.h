@@ -11,13 +11,13 @@ class SongRepository final : public ISongRepository {
                                                 const QString &customTitle = {},
                                                 const QString &artist = {},
                                                 const QString &sourceName = {}, qint64 durationMs = 0,
-                                                const QString &importSource = QStringLiteral("local")) override;
+                                                const QString &importSource = QStringLiteral("local"),
+                                                        const EmbeddedMetadata &metadata = {}) override;
     QVector<SongMetadata> songs() const override;
     std::optional<SongMetadata> getOrCreateRemote(const SongMetadata &) override;
     std::optional<SongMetadata> songById(int songId) const override;
     std::optional<SongMetadata> songByHash(const QString &hash) const override;
-    std::optional<SongMetadata> updateMetadata(int songId, const QString &customTitle, const QString &artist,
-                                               const QString &lyrics) override;
+    std::optional<SongMetadata> updateMetadata(const SongMetadata &metadata) override;
     QVector<QString> pathsForSong(int songId) const override;
     QHash<int, QVector<QString>> songPaths() const override;
     bool updateDuration(int songId, qint64 durationMs) override;

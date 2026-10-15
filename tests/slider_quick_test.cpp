@@ -32,7 +32,7 @@ class ComponentTestSetup : public QObject {
         m_library.setSelectedTagIds({-1});
         m_library.setSelectedTagIds({});
         m_library.setSearchText({});
-        m_library.clearSelection();
+        m_library.resetFilters();
     }
   public slots:
     // Each QuickTest engine receives the same fixture/controller objects through explicit context names.

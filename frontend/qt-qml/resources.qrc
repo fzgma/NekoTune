@@ -29,6 +29,7 @@
         <file>qml/components/LyricsDebugPanel.qml</file>
         <file>qml/components/LyricsPanel.qml</file>
         <file>qml/components/LibraryPanel.qml</file>
+        <file>qml/components/LibraryAlbums.qml</file>
         <file>qml/components/PlayerPanel.qml</file>
         <file>qml/components/PlayerSlider.qml</file>
         <file>qml/components/SeekSlider.qml</file>
@@ -52,6 +53,7 @@
         <file>qml/shell/PageRegistry.js</file>
         <file>qml/shell/Sidebar.qml</file>
         <file>qml/dialogs/MetadataEditor.qml</file>
+        <file>qml/dialogs/BatchMetadataEditor.qml</file>
         <file>qml/dialogs/TagEditor.qml</file>
     </qresource>
 </RCC>

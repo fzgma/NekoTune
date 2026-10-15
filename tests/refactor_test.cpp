@@ -708,6 +708,219 @@ class RefactorTest final : public QObject {
         QCOMPARE(status.value("song").toObject().value("cover_url").toString(), document.coverUrl);
         runtime.stop();
     }
+    void embeddedImportAlbumAndBatchEditingOverIpc() {
+        const auto tagged = m_directory.filePath("embedded.flac");
+        QVERIFY(QFile::copy(QStringLiteral(NEKOTUNE_SOURCE_DIR "/tests/fixtures/tagged.flac"), tagged));
+        const auto second = m_directory.filePath("album-second.wav");
+        writeAudio(second, char(119), 32);
+        BackendRuntime runtime(makeFakeAudio);
+        QVERIFY(runtime.start());
+        RpcPeer peer;
+        QVERIFY(peer.connect(m_socket));
+        peer.call("lyrics.set_offline", {{"offline", true}});
+        QVariantList ids;
+        for (const auto &path : {tagged, second}) {
+            const auto result = peer.call("library.import", {{"path", path}});
+            QCOMPARE(result.value("status").toString(), QString("ok"));
+            ids.append(result.value("data").toObject().value("song_id").toInt());
+        }
+        const auto metadata = peer.call("song.metadata", {{"song_id", ids[0].toInt()}}).value("data").toObject();
+        QCOMPARE(metadata.value("album").toString(), QString("月光专辑"));
+        QCOMPARE(metadata.value("album_artist").toString(), QString("Various Artists"));
+        QCOMPARE(metadata.value("year").toInt(), 2024);
+        QCOMPARE(metadata.value("track_number").toInt(), 2);
+        for (const auto &patch : {QJsonObject{{"year", 2024.5}}, QJsonObject{{"year", "2024"}},
+                                  QJsonObject{{"play_count", 999}}, QJsonObject{{"album", true}}}) {
+            QCOMPARE(peer.call("library.update_metadata", {{"song_ids", QJsonArray::fromVariantList(ids)}, {"patch", patch}})
+                         .value("status").toString(), QString("error"));
+        }
+        IpcClient client;
+        AppControllers controllers(client);
+        auto *library = controllers.library;
+        QTRY_VERIFY(client.connected());
+        QTRY_VERIFY(library->loaded() && !library->loading());
+        library->setSearchText("月光专辑");
+        QCOMPARE(library->filteredSongs()->count(), 1);
+        library->playSongs(ids);
+        QTRY_COMPARE(controllers.queue->model()->count(), 2);
+        QCOMPARE(peer.call("player.seek", {{"position", 50}}).value("status").toString(), QString("ok"));
+        QSignalSpy saved(library, &LibraryController::batchMetadataSaved);
+        library->saveBatchMetadata(ids, {{"album", "月光专辑"}, {"album_artist", "Various Artists"},
+            {"genre", "Ambient"}, {"year", 2026}, {"tags", QStringList{"Album batch integration"}}}, "add");
+        QTRY_COMPARE(saved.count(), 1);
+        QCOMPARE(saved.first().first().toInt(), 2);
+        QTRY_COMPARE(library->filteredSongs()->count(), 2);
+        QTRY_COMPARE(controllers.queue->model()->get(0).value("year").toInt(), 2026);
+        QCOMPARE(controllers.queue->model()->get(0).value("album").toString(), QString("月光专辑"));
+        QCOMPARE(controllers.queue->model()->get(0).value("track_number").toInt(), 2);
+        const auto state = peer.call("player.status").value("data").toObject();
+        QCOMPARE(state.value("position").toInt(), 50);
+        QCOMPARE(state.value("song").toObject().value("song_id").toInt(), ids[0].toInt());
+        QCOMPARE(peer.call("song.metadata", {{"song_id", ids[0].toInt()}}).value("data").toObject().value("lyrics").toString(), QString("Embedded lyrics"));
+        library->setAlbumView(true);
+        QCOMPARE(library->albums()->count(), 1);
+        I18n translator;
+        QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("ipcClient", &client);
+        engine.rootContext()->setContextProperty("controllers", &controllers);
+        engine.rootContext()->setContextProperty("i18n", &translator);
+        engine.rootContext()->setContextProperty("lyricsDebugEnabled", false);
+        engine.load(QUrl("qrc:/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTRY_VERIFY(window->isVisible());
+        window->setProperty("viewMode", "library");
+        QVariant pageValue;
+        QVERIFY(QMetaObject::invokeMethod(window, "pageItem", Q_RETURN_ARG(QVariant, pageValue), Q_ARG(QVariant, QVariant("library"))));
+        auto *page = pageValue.value<QObject *>();
+        QVERIFY(page);
+        auto *panel = page->findChild<QQuickItem *>("libraryPanel");
+        QVERIFY(panel);
+        const auto screenshots = qEnvironmentVariable("NEKOTUNE_METADATA_SCREENSHOT_DIR");
+        for (const QString language : {"zh", "en"}) {
+            translator.setLanguage(language);
+            window->setWidth(language == "zh" ? 1360 : 1000);
+            window->setHeight(language == "zh" ? 860 : 640);
+            library->closeAlbum();
+            QTest::qWait(150);
+            auto capture = [&](const QString &name) {
+                if (!screenshots.isEmpty()) {
+                    QTest::qWait(150);
+                    QVERIFY(window->grabWindow().save(screenshots + "/" + name + "-" + language + ".png"));
+                }
+            };
+            capture("albums");
+            auto *card = visualItem(panel, "libraryAlbum0");
+            QVERIFY(card && card->isVisible());
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint());
+            QTRY_VERIFY(!library->selectedAlbumId().isEmpty());
+            library->toggleSelectAll();
+            QCOMPARE(library->selectedSongIds().size(), 2);
+            capture("album-tracks");
+            auto *button = panel->findChild<QQuickItem *>("libraryBatchEditButton");
+            QVERIFY(button);
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+            auto *dialog = panel->findChild<QObject *>("batchMetadataEditor");
+            QVERIFY(dialog);
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            capture("batch-metadata");
+            QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        }
+        runtime.stop();
+    }
+    void libraryViewOrderSurvivesPlaybackRefresh() {
+        BackendRuntime runtime(makeFakeAudio);
+        QVERIFY(runtime.start());
+        RpcPeer peer;
+        QVERIFY(peer.connect(m_socket));
+        QCOMPARE(peer.call("lyrics.set_offline", {{"offline", true}}).value("status").toString(), QString("ok"));
+        QVariantList ids;
+        for (int index = 0; index < 3; ++index) {
+            const auto path = m_directory.filePath(QString("library-view-%1.wav").arg(index));
+            // Distinct bytes and duration avoid reusing earlier tests' hash-deduplicated songs.
+            writeAudio(path, char(110 + index), 31);
+            const auto result = peer.call("library.import", {{"path", path}});
+            QCOMPARE(result.value("status").toString(), QString("ok"));
+            const int id = result.value("data").toObject().value("song_id").toInt();
+            ids.append(id);
+            QCOMPARE(peer.call("song.update_metadata", {{"song_id", id},
+                {"custom_title", QString("Library view · 夜空 %1").arg(index + 1)},
+                {"artist", "NekoTune"}, {"tags", QJsonArray{"Library view"}}}).value("status").toString(), QString("ok"));
+        }
+        IpcClient client;
+        AppControllers controllers(client);
+        auto *library = controllers.library;
+        QTRY_VERIFY(client.connected());
+        QTRY_VERIFY(library->loaded() && !library->loading());
+        int tagId = 0;
+        for (const auto &tag : library->tags()->items())
+            if (tag.toMap().value("name").toString() == "Library view") tagId = tag.toMap().value("id").toInt();
+        QVERIFY(tagId > 0);
+        library->setSelectedTagIds({tagId});
+        library->setImportSource("local");
+        library->setPlayFilter("never_played");
+        library->setSortOrder("added_desc");
+        QCOMPARE(library->filteredSongs()->count(), 3);
+        library->selectRow(ids[0].toInt());
+        QSignalSpy played(library, &LibraryController::libraryPlaybackSkipped);
+        library->playLibrary({tagId});
+        QTRY_COMPARE(played.count(), 1);
+        QTRY_COMPARE(library->filteredSongs()->count(), 2);
+        auto queueIds = [&] {
+            QVariantList result;
+            for (const auto &song : controllers.queue->model()->items()) result.append(song.toMap().value("song_id"));
+            return result;
+        };
+        const QVariantList expectedQueue{ids[2], ids[1], ids[0]};
+        QTRY_COMPARE(queueIds(), expectedQueue);
+        QTRY_COMPARE(controllers.playback->song().value("song_id").toInt(), ids[2].toInt());
+        QCOMPARE(library->selectedSongIds(), QVariantList{ids[0]});
+        QCOMPARE(library->sortOrder(), QString("added_desc"));
+        QCOMPARE(library->importSource(), QString("local"));
+        QCOMPARE(library->playFilter(), QString("never_played"));
+        library->setPlayFilter("all");
+        library->setSortOrder("most_played");
+        QCOMPARE(library->filteredSongs()->get(0).value("song_id").toInt(), ids[2].toInt());
+        QCOMPARE(library->filteredSongs()->get(0).value("play_count").toLongLong(), 1);
+        QCOMPARE(peer.call("player.seek", {{"position", 12000}}).value("status").toString(), QString("ok"));
+
+        I18n translator;
+        QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("ipcClient", &client);
+        engine.rootContext()->setContextProperty("controllers", &controllers);
+        engine.rootContext()->setContextProperty("i18n", &translator);
+        engine.rootContext()->setContextProperty("lyricsDebugEnabled", false);
+        engine.load(QUrl("qrc:/qml/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTRY_VERIFY(window->isVisible());
+        window->setProperty("viewMode", "library");
+        QVariant pageValue;
+        QVERIFY(QMetaObject::invokeMethod(window, "pageItem", Q_RETURN_ARG(QVariant, pageValue),
+                                          Q_ARG(QVariant, QVariant("library"))));
+        auto *page = pageValue.value<QObject *>();
+        QVERIFY(page);
+        auto *panel = page->findChild<QQuickItem *>("libraryPanel");
+        QVERIFY(panel);
+        const auto screenshotDirectory = qEnvironmentVariable("NEKOTUNE_LIBRARY_SCREENSHOT_DIR");
+        for (const QString language : {"zh", "en"}) {
+            translator.setLanguage(language);
+            for (int width : {1360, 1000}) {
+                window->setWidth(width);
+                window->setHeight(width == 1000 ? 640 : 860);
+                QTest::qWait(100);
+                QQuickItem *previous = nullptr;
+                for (const QString name : {"librarySortPicker", "libraryPlayFilterPicker", "librarySourcePicker"}) {
+                    auto *picker = panel->findChild<QQuickItem *>(name);
+                    QVERIFY(picker && picker->isVisible());
+                    QVERIFY(picker->width() >= 150);
+                    const auto point = picker->mapToItem(panel, QPointF());
+                    QVERIFY(point.x() >= 0 && point.x() + picker->width() <= panel->width() + 1);
+                    if (previous) QVERIFY(point.x() >= previous->mapToItem(panel, QPointF()).x() + previous->width());
+                    previous = picker;
+                }
+                if (!screenshotDirectory.isEmpty()) {
+                    QTest::qWait(150);
+                    QVERIFY(window->grabWindow().save(screenshotDirectory + "/library-" + language + "-" + QString::number(width) + ".png"));
+                }
+            }
+        }
+        window->setProperty("viewMode", "home");
+        window->setProperty("viewMode", "library");
+        QCOMPARE(library->sortOrder(), QString("most_played"));
+        QCOMPARE(library->selectedSongIds(), QVariantList{ids[0]});
+        QCOMPARE(queueIds(), expectedQueue);
+        auto state = peer.call("player.status").value("data").toObject();
+        QCOMPARE(state.value("position").toInt(), 12000);
+        QCOMPARE(state.value("state").toString(), QString("playing"));
+        QCOMPARE(peer.call("player.next").value("status").toString(), QString("ok"));
+        QTRY_COMPARE(library->filteredSongs()->get(0).value("song_id").toInt(), ids[1].toInt());
+        QCOMPARE(library->selectedSongIds(), QVariantList{ids[0]});
+        QCOMPARE(queueIds(), expectedQueue);
+        runtime.stop();
+    }
     // Home owns its recent/all-library playback context independently of another page.
     // Existing library text/tag filters must not narrow the home-requested sequence.
     // Single-click selection does not replace queue state before explicit activation.
@@ -745,6 +958,9 @@ class RefactorTest final : public QObject {
         QVERIFY(loads.count() >= 2);
         library->setSearchText("No matching song for this filter");
         library->setSelectedTagIds({tagId});
+        library->setImportSource("nonmatching.provider");
+        library->setPlayFilter("never_played");
+        library->setSortOrder("most_played");
         QCOMPARE(library->filteredSongs()->count(), 0);
         library->playSongs(ids, ids.first().toInt());
         QTRY_COMPARE(skipped.count(), 1);

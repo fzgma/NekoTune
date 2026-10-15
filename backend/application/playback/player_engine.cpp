@@ -1,6 +1,7 @@
 #include "application/playback/player_engine.h"
 #include <QFileInfo>
 #include <QPointer>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 namespace nekotune {
@@ -454,6 +455,16 @@ void PlayerEngine::metadataUpdated(const SongMetadata &metadata) {
     m_queue.updateMetadata(metadata);
     auto state = snapshot();
     if (state.song && state.song->metadata.id == metadata.id) {
+        emit trackChanged();
+        emit lyricsNeeded(m_metadataReady);
+    }
+}
+void PlayerEngine::metadataBatchUpdated(const QVector<SongMetadata> &metadata) {
+    m_queue.updateMetadataBatch(metadata);
+    const auto state = snapshot();
+    if (state.song && std::any_of(metadata.cbegin(), metadata.cend(), [&](const auto &song) {
+            return song.id == state.song->metadata.id;
+        })) {
         emit trackChanged();
         emit lyricsNeeded(m_metadataReady);
     }

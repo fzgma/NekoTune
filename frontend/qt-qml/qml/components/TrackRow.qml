@@ -22,6 +22,7 @@ Rectangle {
     property bool downloadEnabled: false
     signal downloadRequested()
     property bool showCheckbox: false
+    property bool showPlayCount: false
     property string playObjectName: ""
     property string checkboxObjectName: ""
     property var menuActions: []
@@ -166,6 +167,13 @@ Rectangle {
                 color: row.available ? Theme.textMuted : Theme.statusWarning
                 font.pixelSize: Theme.fontCaption
             }
+        }
+        Label {
+            objectName: "trackPlayCount"
+            visible: row.showPlayCount
+            text: i18n.text("library_play_count", i18n.language).replace("%1", Number(row.song.play_count || 0))
+            color: Theme.textMuted
+            font.pixelSize: Theme.fontCaption
         }
         Label {
             objectName: "trackDuration"

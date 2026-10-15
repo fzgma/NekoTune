@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../dialogs" as Dialogs
 
 // Presentation state complements controller-owned filtering/selection.
 // Rows identify songs by song_id; current playback is a separate marker.
@@ -29,6 +30,17 @@ Item {
     signal deleteRequested(var songIds, bool cleanFiles)
 
     readonly property var filteredSongs: controller.filteredSongs.items
+    readonly property bool showingAlbums: controller.albumView && !controller.selectedAlbumId
+    readonly property bool hasFilters: Boolean(controller.searchText.trim()) || selectedTagIds.length > 0
+        || controller.playFilter !== "all" || controller.importSource !== "" || controller.selectedAlbumId !== ""
+    readonly property var sourceOptions: {
+        const sources = controller.importSources.slice()
+        if (controller.importSource && sources.indexOf(controller.importSource) === -1)
+            sources.push(controller.importSource)
+        return [{value: "", label: i18n.text("library_all_sources", i18n.language)}].concat(
+            sources.map(source => ({value: source, label: source === "local"
+                ? i18n.text("library_local_source", i18n.language) : source})))
+    }
     readonly property int playableCount: filteredSongs.filter(song => Boolean(song.available)).length
     readonly property bool allFilteredSelected: filteredSongs.length > 0
         && filteredSongs.every(song => selectedSongIds.indexOf(Number(song.song_id)) !== -1)
@@ -138,8 +150,17 @@ Item {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 6
-                Label { Layout.fillWidth: true; text: i18n.text("local_music", i18n.language); color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.weight: Font.DemiBold }
+                Label { Layout.fillWidth: true; text: root.controller.selectedAlbumId ? root.controller.selectedAlbum.title || i18n.text("library_unknown_album", i18n.language) : i18n.text("local_music", i18n.language); textFormat: Text.PlainText; elide: Text.ElideRight; color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.weight: Font.DemiBold }
                 Label { Layout.fillWidth: true; text: i18n.countText("tracks", root.filteredSongs.length, i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontBodySecondary }
+            }
+            TextButton { objectName: "libraryAlbumsBack"; visible: Boolean(root.controller.selectedAlbumId); text: i18n.text("library_all_albums", i18n.language); subtle: true; onClicked: root.controller.closeAlbum() }
+            ChoiceField {
+                objectName: "libraryViewPicker"
+                Layout.preferredWidth: 110
+                model: [i18n.text("library_songs_view", i18n.language), i18n.text("library_albums_view", i18n.language)]
+                currentIndex: root.controller.albumView ? 1 : 0
+                onActivated: root.controller.albumView = currentIndex === 1
+                Accessible.name: i18n.text("library_view", i18n.language)
             }
             TextButton { objectName: "playFilteredButton"; text: i18n.text("play_all", i18n.language); enabled: root.playableCount > 0 && root.connected; onClicked: root.requestPlay(0) }
             TextButton { text: i18n.text("import_music", i18n.language); subtle: true; enabled: root.connected; onClicked: root.importRequested() }
@@ -163,14 +184,90 @@ Item {
                 subtle: true
                 onClicked: { const point = tagButton.mapToItem(Overlay.overlay, 0, height); tagPopup.x = Math.min(point.x, Overlay.overlay.width - tagPopup.width - 12); tagPopup.y = point.y + 8; tagPopup.open() }
             }
+            TextButton {
+                objectName: "libraryResetFiltersButton"
+                text: i18n.text("library_reset_view", i18n.language)
+                subtle: true
+                visible: root.hasFilters || root.controller.sortOrder !== "added_asc"
+                onClicked: root.controller.resetFilters()
+            }
             Item { Layout.fillWidth: true }
-            TextButton { objectName: "librarySelectAllButton"; text: i18n.text(root.allFilteredSelected ? "deselect_all" : "select_all_filtered", i18n.language); subtle: true; enabled: root.filteredSongs.length > 0 && !root.deletePending; onClicked: root.toggleSelectAll() }
+            TextButton { objectName: "librarySelectAllButton"; text: i18n.text(root.allFilteredSelected ? "deselect_all" : "select_all_filtered", i18n.language); subtle: true; enabled: !root.showingAlbums && root.filteredSongs.length > 0 && !root.deletePending; onClicked: root.toggleSelectAll() }
+            IconButton {
+                objectName: "libraryBatchEditButton"
+                kind: "edit"
+                tooltipText: i18n.text("batch_metadata_title", i18n.language).replace("%1", root.selectedSongIds.length)
+                enabled: root.selectedSongIds.length > 0 && root.connected && !root.deletePending
+                onClicked: batchEditor.openForSongs(root.selectedSongIds)
+            }
             IconButton {
                 objectName: "libraryDeleteSelectedButton"
                 kind: "trash"
                 enabled: root.selectedSongIds.length > 0 && !root.deletePending && root.connected
                 tooltipText: i18n.text("delete_selected", i18n.language).replace("%1", root.selectedSongIds.length)
                 onClicked: root.openDelete()
+            }
+        }
+        GridLayout {
+            Layout.fillWidth: true
+            columns: width < 580 ? 1 : 3
+            columnSpacing: Theme.spaceMd
+            rowSpacing: Theme.spaceSm
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: Theme.spaceXs
+                Label { text: i18n.text("library_sort", i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+                ChoiceField {
+                    id: sortPicker
+                    objectName: "librarySortPicker"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    textRole: "label"
+                    valueRole: "value"
+                    model: ["added_asc", "added_desc", "title", "artist", "album", "duration_asc", "duration_desc", "most_played", "least_played", "track"]
+                        .map(value => ({value: value, label: i18n.text("library_sort_" + value, i18n.language)}))
+                    currentIndex: model.findIndex(option => option.value === root.controller.sortOrder)
+                    onActivated: root.controller.sortOrder = currentValue
+                    Accessible.name: i18n.text("library_sort", i18n.language)
+                }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: Theme.spaceXs
+                Label { text: i18n.text("library_play_filter", i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+                ChoiceField {
+                    objectName: "libraryPlayFilterPicker"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    textRole: "label"
+                    valueRole: "value"
+                    model: ["all", "played", "never_played"]
+                        .map(value => ({value: value, label: i18n.text("library_play_" + value, i18n.language)}))
+                    currentIndex: model.findIndex(option => option.value === root.controller.playFilter)
+                    onActivated: root.controller.playFilter = currentValue
+                    Accessible.name: i18n.text("library_play_filter", i18n.language)
+                }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: Theme.spaceXs
+                Label { text: i18n.text("song_import_source", i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+                ChoiceField {
+                    objectName: "librarySourcePicker"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    textRole: "label"
+                    valueRole: "value"
+                    model: root.sourceOptions
+                    currentIndex: root.sourceOptions.findIndex(option => option.value === root.controller.importSource)
+                    onActivated: root.controller.importSource = currentValue
+                    Accessible.name: i18n.text("song_import_source", i18n.language)
+                    ToolTip.visible: hovered
+                    ToolTip.text: currentText
+                }
             }
         }
         RowLayout {
@@ -194,9 +291,16 @@ Item {
             wrapMode: Text.WrapAnywhere
         }
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.borderSubtle }
+        LibraryAlbums {
+            Layout.fillWidth: true; Layout.fillHeight: true
+            visible: root.showingAlbums
+            controller: root.controller
+            translator: i18n
+        }
         ListView {
             id: songList
             objectName: "librarySongList"
+            visible: !root.showingAlbums
             Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: Theme.spaceSm
             header: Item { height: 4 }
             footer: Item { height: 4 }
@@ -215,6 +319,7 @@ Item {
                 selected: root.selectedSongIds.indexOf(Number(modelData.song_id)) !== -1
                 current: Number(root.currentSong.song_id || 0) === Number(modelData.song_id)
                 playing: root.playing; showCheckbox: true
+                showPlayCount: true
                 playObjectName: "playLibrarySongButton" + modelData.song_id
                 checkboxObjectName: "librarySelectSong" + modelData.song_id
                 menuActions: root.songActions(modelData)
@@ -228,14 +333,16 @@ Item {
                 anchors.centerIn: parent; visible: songList.count === 0; spacing: Theme.spaceLg
                 EmptyStateCat {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    visible: !root.controller.searchText && !root.selectedTagIds.length
+                    visible: !root.hasFilters
                     width: 120; height: 120
                 }
-                Label { anchors.horizontalCenter: parent.horizontalCenter; text: i18n.text(root.controller.searchText ? "no_search_results" : root.selectedTagIds.length ? "no_tag_matches" : "empty_library", i18n.language); color: Theme.textMuted }
-                TextButton { anchors.horizontalCenter: parent.horizontalCenter; visible: !root.controller.searchText && !root.selectedTagIds.length; text: i18n.text("import_music", i18n.language); enabled: root.connected; onClicked: root.importRequested() }
+                Label { objectName: "libraryEmptyMessage"; anchors.horizontalCenter: parent.horizontalCenter; text: i18n.text(root.hasFilters ? "library_no_filter_matches" : "empty_library", i18n.language); color: Theme.textMuted }
+                TextButton { objectName: "libraryEmptyResetButton"; anchors.horizontalCenter: parent.horizontalCenter; visible: root.hasFilters; text: i18n.text("library_reset_view", i18n.language); subtle: true; onClicked: root.controller.resetFilters() }
+                TextButton { anchors.horizontalCenter: parent.horizontalCenter; visible: !root.hasFilters; text: i18n.text("import_music", i18n.language); enabled: root.connected; onClicked: root.importRequested() }
             }
         }
     }
+    Dialogs.BatchMetadataEditor { id: batchEditor; controller: root.controller; translator: i18n }
     Popup {
         id: tagPopup
         parent: Overlay.overlay

@@ -15,6 +15,14 @@ class LibraryController final : public FeatureController {
     Q_PROPERTY(QVariantList selectedTagIds READ selectedTagIds WRITE setSelectedTagIds NOTIFY filterChanged)
     Q_PROPERTY(QVariantList selectedSongIds READ selectedSongIds NOTIFY selectionChanged)
     Q_PROPERTY(QString searchText READ searchText WRITE setSearchText NOTIFY filterChanged)
+    Q_PROPERTY(QString sortOrder READ sortOrder WRITE setSortOrder NOTIFY filterChanged)
+    Q_PROPERTY(QString playFilter READ playFilter WRITE setPlayFilter NOTIFY filterChanged)
+    Q_PROPERTY(QString importSource READ importSource WRITE setImportSource NOTIFY filterChanged)
+    Q_PROPERTY(QStringList importSources READ importSources NOTIFY importSourcesChanged)
+    Q_PROPERTY(RecordModel *albums READ albums CONSTANT)
+    Q_PROPERTY(bool albumView READ albumView WRITE setAlbumView NOTIFY filterChanged)
+    Q_PROPERTY(QString selectedAlbumId READ selectedAlbumId NOTIFY filterChanged)
+    Q_PROPERTY(QVariantMap selectedAlbum READ selectedAlbum NOTIFY filterChanged)
     Q_PROPERTY(QVariantMap editing READ editing NOTIFY editingChanged)
     Q_PROPERTY(bool metadataReady READ metadataReady NOTIFY editingChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadStateChanged)
@@ -28,6 +36,22 @@ class LibraryController final : public FeatureController {
     QVariantList selectedSongIds() const { return m_songIds; }
     QString searchText() const { return m_searchText; }
     void setSearchText(const QString &text);
+    QString sortOrder() const { return m_sortOrder; }
+    QString playFilter() const { return m_playFilter; }
+    QString importSource() const { return m_importSource; }
+    QStringList importSources() const { return m_importSources; }
+    void setSortOrder(const QString &order);
+    void setPlayFilter(const QString &filter);
+    void setImportSource(const QString &source);
+    Q_INVOKABLE void resetFilters();
+    RecordModel *albums() { return &m_albums; }
+    bool albumView() const { return m_albumView; }
+    QString selectedAlbumId() const { return m_albumId; }
+    QVariantMap selectedAlbum() const { return m_selectedAlbum; }
+    void setAlbumView(bool enabled);
+    Q_INVOKABLE void openAlbum(const QString &id);
+    Q_INVOKABLE void closeAlbum();
+    Q_INVOKABLE void saveBatchMetadata(const QVariantList &ids, const QVariantMap &patch, const QString &tagMode);
     QVariantMap editing() const { return m_editing; }
     bool metadataReady() const { return m_metadataReady; }
     bool loading() const { return m_loading; }
@@ -79,9 +103,11 @@ class LibraryController final : public FeatureController {
     Q_INVOKABLE void saveMetadata(const QVariantMap &patch);
   signals:
     void filterChanged();
+    void importSourcesChanged();
     void selectionChanged();
     void editingChanged();
     void songMetadataSaved(int id);
+    void batchMetadataSaved(int count);
     void libraryPlaybackSkipped(int count);
     void libraryDeletionFinished(const QStringList &cleanupErrors);
     void loadStateChanged();
@@ -92,6 +118,12 @@ class LibraryController final : public FeatureController {
     RecordModel m_songs{"song_id"}, m_tags{"id"}, m_filtered{"song_id"};
     QVariantList m_tagIds, m_songIds;
     QString m_searchText;
+    QString m_sortOrder = "added_asc", m_playFilter = "all", m_importSource;
+    QStringList m_importSources;
+    RecordModel m_albums{"album_id"};
+    bool m_albumView = false;
+    QString m_albumId;
+    QVariantMap m_selectedAlbum;
     int m_selectionAnchor = 0;
     QVariantMap m_editing;
     bool m_metadataReady = false;

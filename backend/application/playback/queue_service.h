@@ -18,6 +18,7 @@ class QueueService final : public QObject {
     Result<void> commit(PlayerQueue next);
     void adoptCommitted(PlayerQueue next);
     void updateMetadata(const SongMetadata &metadata);
+    void updateMetadataBatch(const QVector<SongMetadata> &metadata);
   signals:
     void changed();
 

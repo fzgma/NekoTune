@@ -9,6 +9,7 @@ ComboBox {
     leftPadding: Theme.spaceMd
     rightPadding: 32
     contentItem: Text {
+        textFormat: Text.PlainText
         text: control.displayText
         font: control.font
         color: control.enabled ? Theme.textPrimary : Theme.textDisabled
@@ -30,6 +31,7 @@ ComboBox {
         width: control.width - 8
         highlighted: control.highlightedIndex === index
         contentItem: Text {
+            textFormat: Text.PlainText
             text: typeof option.modelData === "object" ? option.modelData[control.textRole] : option.modelData
             color: Theme.textPrimary; font: control.font; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
         }

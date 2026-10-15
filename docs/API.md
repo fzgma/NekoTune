@@ -260,11 +260,27 @@ Linux 编入 libpulse 支持时，设备对象还包含 `ports`（每项为 `id,
 
 `library.import` 传入本地音频 `path`，按文件内容 hash 记录歌曲并持久保存该路径，只更新曲库，不加入队列或开始播放。返回 `song_id` 和绝对路径；曲库变化广播 `library.changed`。
 
+首次导入在工作线程通过 FFmpeg 同时提取时长与内嵌资料：`title`、`artist`、`album`、`album_artist`、`genre`、`date/year`、`track/tracknumber`、`disc/discnumber` 和 `lyrics/unsyncedlyrics`。写入歌曲对象的 `custom_title`、`artist`、`album`、`album_artist`、`genre`、`year`、`track_number`、`disc_number`、`lyrics`；日期取年份，`2/12` 等编号取分子。数字 `0` 表示未知；没有标签或探测失败时仍按原有文件名／未知时长规则导入。曲库、歌单、队列和扫描发现新歌曲使用相同资料。重复 hash 保留已有文本、编号和手工清空的字段，不自动覆盖旧曲库；已有资料可在编辑器中补全。此功能不改写原音频标签，不提取内嵌图片。
+
 ```json
 {"id":25,"method":"library.import","params":{"path":"/home/user/Music/NekoTune/song.mp3"}}
 ```
 
 `library.list` 返回 `data.library`，其中 `songs` 按 `song_id` 升序列出全部历史歌曲，`tags` 列出全局标签。每首歌曲包含 `song_id`、标题、作者、`tags`（`{id,name}` 数组）、`path`、`available` 和 `cover_url`；后端依次从队列、歌单和持久化的导入路径寻找仍存在的文件。不可用歌曲仍会列出，`path` 为空、`available` 为 `false`。曲库变化会广播 `library.changed`，客户端应重新请求 `library.list`。
+
+桌面曲库通过 `LibraryController` 对完整快照排序与组合筛选：默认最早加入，也可选最近加入、歌名、歌手、专辑、时长升降序、播放最多或最少；相同排序值按 `song_id` 升序，未知时长始终排末尾。播放记录筛选支持全部、已播放（`play_count > 0`）和从未播放（`play_count == 0`），来源筛选使用 `import_source`，与文字搜索及标签交集同时生效。来源选项来自完整曲库，不因其他筛选隐藏。歌曲行展示播放次数，旧歌曲未记录的历史播放无法追溯。
+
+排序与筛选在当前应用会话内跨页面保留，不写入数据库或更改正在播放的队列；显式播放时才把当前可见顺序作为 `library.play.song_ids` 提交。播放计数刷新可以重新排序或移出“从未播放”列表，已经建立的队列继续保留。首页仍使用自己的歌曲列表，不继承曲库视图条件。
+
+曲库的「专辑」视图从满足当前搜索／来源／播放记录／标签条件的歌曲归组。专辑标识使用去首尾空白、忽略大小写的专辑名与专辑歌手；专辑歌手为空时回退歌曲歌手，无专辑名的记录集中到「未知专辑」。同名不同专辑歌手不会合并，合集可设置共同专辑歌手。进入专辑后默认按碟号、音轨号、`song_id` 排序，未知编号排末尾；搜索也匹配专辑和专辑歌手。返回专辑页或改资料不会重建正在播放的队列。
+
+`song.update_metadata` 额外支持 `album`、`album_artist`、`genre` 字符串和 `year`、`track_number`、`disc_number` 整数（范围 0–9999）。省略保留原值，空字符串／数字 0 清空对应资料。歌曲信息窗口使用相同的稀疏补丁语义。
+
+`library.update_metadata` 批量更新资料：必填非空且无重复的正整数 `song_ids`、非空对象 `patch`；`patch` 支持单曲接口的标题、歌手、歌词、标签及以上字段，不接受播放次数等只读字段。可选 `tag_mode` 为 `replace`（默认）、`add`、`remove`，分别替换全部标签、追加或移除指定名称；不传 `patch.tags` 时不改标签。所有目标和字段先校验，整批写入一个事务；任一歌曲不存在、标签无效或存储失败都会回滚全部修改，不发成功事件。成功返回 `updated_count` 并同步曲库、队列、歌单及当前歌曲资料，保留当前曲目和播放进度。界面打开批量编辑时固定目标 ID，只提交勾选的字段，失败保留草稿以便重试。
+
+```json
+{"id":27,"method":"library.update_metadata","params":{"song_ids":[7,9],"patch":{"album":"Moonlight","album_artist":"Various Artists","year":2024,"tags":["收藏"]},"tag_mode":"add"}}
+```
 
 曲库、歌单、队列和播放状态中的歌曲对象统一提供 `cover_url`：优先使用同目录同名 `.jpg`、`.jpeg`、`.png`、`.webp` 的 `file:` URL，其次使用按音频 hash 关联的已选歌词／歌词缓存封面，无封面时为空字符串。离线模式仅返回本地封面。歌词封面或离线状态变化后，后端同步广播 `library.changed`、`playlist.changed`、`queue.changed` 和 `player.track_changed`，客户端直接使用歌曲对象的 `cover_url`。
 

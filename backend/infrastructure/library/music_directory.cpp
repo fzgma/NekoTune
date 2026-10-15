@@ -150,7 +150,10 @@ Result<ImportedFile> MusicDirectory::manage(const ImportedFile &file) {
                 if (!query.exec())
                     return failure(query.lastError().text(), ErrorCode::Storage);
             }
-            return ImportedFile{path, file.hash, name, file.durationMs};
+            auto managed = file;
+            managed.path = path;
+            managed.sourceName = name;
+            return managed;
         }
     }
     const QFileInfo input(file.path);
@@ -273,7 +276,10 @@ Result<ImportedFile> MusicDirectory::manage(const ImportedFile &file) {
         if (!query.exec())
             return failure(query.lastError().text(), ErrorCode::Storage);
     }
-    return ImportedFile{path, file.hash, name, file.durationMs};
+    auto managed = file;
+    managed.path = path;
+    managed.sourceName = name;
+    return managed;
 }
 Result<bool> MusicDirectory::ignored(const QString &hash) const {
     QSqlQuery query(m_database.database());

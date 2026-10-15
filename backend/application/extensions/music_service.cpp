@@ -115,6 +115,8 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                                 }
                                 const bool existing = guard->m_library.containsAudioHash(file.value().hash);
                                 file.value().importSource = source.section('/', 0, 0);
+                                if (file.value().metadata.album.isEmpty())
+                                    file.value().metadata.album = song.album;
                                 auto saved =
                                     guard->m_library.importFile(file.value(), song.customTitle, song.artist);
                                 done();

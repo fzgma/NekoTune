@@ -61,6 +61,7 @@ class PlayerEngine final : public QObject {
     /// currentChanged controls source reload, and resume preserves the previous play state.
     void applyCommittedQueue(PlayerQueue queue, bool currentChanged, bool resume, bool resetOrder = false);
     void metadataUpdated(const SongMetadata &metadata);
+    void metadataBatchUpdated(const QVector<SongMetadata> &metadata);
     /// Loading counts as intended playback for toggle and deletion-continuation decisions.
     /// This predicate describes user intent while decoding prepares the source.
     /// It must not be substituted for the adapter's actual decoded-audio state.

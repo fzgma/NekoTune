@@ -116,7 +116,7 @@ void ImportExecutor::inspectUnmanaged(const QString &path, Completion completion
                     return failure(file.errorString(), ErrorCode::Io);
                 hash.addData(chunk);
             }
-            const auto duration = readAudioDuration(info.absoluteFilePath(), *cancelled);
+            const auto audio = readAudioFileInfo(info.absoluteFilePath(), *cancelled);
             if (cancelled->load())
                 return failure(QStringLiteral("Import cancelled"), ErrorCode::Cancelled);
             info.refresh();
@@ -126,11 +126,13 @@ void ImportExecutor::inspectUnmanaged(const QString &path, Completion completion
             const auto audioHash = QString::fromLatin1(hash.result().toHex());
             if (reference && reference->hash != audioHash)
                 return failure("Referenced audio content has changed", ErrorCode::Io);
-            return ImportedFile{info.absoluteFilePath(), audioHash,
+            auto imported = ImportedFile{info.absoluteFilePath(), audioHash,
                                 reference ? reference->sourceName
                                           : info.isSymLink() ? QFileInfo(info.symLinkTarget()).completeBaseName()
                                                              : info.completeBaseName(),
-                                duration, reference ? QFileInfo(path).absoluteFilePath() : QString()};
+                                audio.durationMs, reference ? QFileInfo(path).absoluteFilePath() : QString()};
+            imported.metadata = audio.metadata;
+            return imported;
         };
         auto result = inspect();
         if (!guard || cancelled->load())

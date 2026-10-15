@@ -60,6 +60,33 @@ Rectangle {
             verify(combo !== null);
         }
         function cleanup() { editor.close(); editor = null; combo = null; }
+        function detail(name) {
+            function visit(item) {
+                if (item.objectName === name) return item
+                for (const child of item.children || []) {
+                    const found = visit(child)
+                    if (found) return found
+                }
+                return null
+            }
+            return visit(editor.contentItem)
+        }
+        function test_albumDetailsUseSparsePatch() {
+            library.editing = {song_id: 1, custom_title: "夜空", artist: "示例歌手", lyrics: "Saved lyrics", tags: [{name: "收藏"}],
+                album: "Old album", album_artist: "Various", genre: "Pop", year: 2024, track_number: 2, disc_number: 1}
+            compare(detail("metadata_album").text, "Old album")
+            compare(detail("metadata_track_number").text, "2")
+            const path = testFixtures.screenshotPath("metadata-album-details")
+            if (path) {
+                findChild(editor, "metadataFormScroll").contentItem.contentY = 220
+                waitForRendering(scene)
+                grabImage(editor.background.parent).save(path)
+            }
+            detail("metadata_album").text = ""
+            detail("metadata_year").text = "2025"
+            editor.save()
+            compare(JSON.stringify(library.savedPatch), JSON.stringify({album: "", year: 2025}))
+        }
         function test_statisticsAreReadOnlyAndLocalized() {
             const source = findChild(editor, "metadataImportSource");
             const count = findChild(editor, "metadataPlayCount");

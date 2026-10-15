@@ -24,6 +24,11 @@ struct SongMetadata {
     QString coverUrl;
     QString importSource = QStringLiteral("local");
     qint64 playCount = 0;
+    QString albumArtist;
+    QString genre;
+    int year = 0;
+    int trackNumber = 0;
+    int discNumber = 0;
     bool isRemote() const { return !providerId.isEmpty(); }
     QString resourceKey() const {
         return isRemote() ? QStringLiteral("remote-") +
@@ -41,6 +46,19 @@ struct MetadataPatch {
     std::optional<QString> artist;
     std::optional<QString> lyrics;
     std::optional<QStringList> tags;
+    std::optional<QString> album;
+    std::optional<QString> albumArtist;
+    std::optional<QString> genre;
+    std::optional<int> year;
+    std::optional<int> trackNumber;
+    std::optional<int> discNumber;
+};
+
+enum class TagEditMode { Replace, Add, Remove };
+
+struct EmbeddedMetadata {
+    QString title, artist, album, albumArtist, genre, lyrics;
+    int year = 0, trackNumber = 0, discNumber = 0;
 };
 
 /// Value-only inspection result that may cross threads without sharing a database connection.
@@ -53,6 +71,7 @@ struct ImportedFile {
     /// Optional discovery origin; playback still uses path, never the reference document.
     QString managedReferencePath;
     QString importSource = QStringLiteral("local");
+    EmbeddedMetadata metadata;
 };
 
 /// Persisted membership contains a song ID plus the chosen path.

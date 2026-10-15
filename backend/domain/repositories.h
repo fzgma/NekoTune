@@ -35,7 +35,8 @@ class ISongRepository {
                                                         const QString &artist = {},
                                                         const QString &sourceName = {},
                                                         qint64 durationMs = 0,
-                                                        const QString &importSource = QStringLiteral("local")) = 0;
+                                                        const QString &importSource = QStringLiteral("local"),
+                                                        const EmbeddedMetadata &metadata = {}) = 0;
     virtual QVector<SongMetadata> songs() const = 0;
     virtual std::optional<SongMetadata> getOrCreateRemote(const SongMetadata &) { return std::nullopt; }
     virtual std::optional<SongMetadata> songById(int songId) const = 0;
@@ -45,8 +46,7 @@ class ISongRepository {
                 return song;
         return std::nullopt;
     }
-    virtual std::optional<SongMetadata> updateMetadata(int songId, const QString &customTitle,
-                                                       const QString &artist, const QString &lyrics) = 0;
+    virtual std::optional<SongMetadata> updateMetadata(const SongMetadata &metadata) = 0;
     /// Paths are candidates rather than a promise of file availability.
     /// A song may outlive a removed file or a broken managed symlink.
     /// The application chooses the first currently usable candidate.

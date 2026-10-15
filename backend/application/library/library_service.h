@@ -51,6 +51,9 @@ class LibraryService final : public QObject {
     /// @return Committed metadata, or an error with the previous values still authoritative.
     /// Tag assignment and text changes share one transaction and notification boundary.
     Result<SongMetadata> update(int id, const MetadataPatch &patch);
+    /// Freeze and validate every target before one atomic commit; omitted fields remain per-song.
+    Result<QVector<SongMetadata>> updateMany(const QVector<int> &ids, const MetadataPatch &patch,
+                                             TagEditMode tagMode = TagEditMode::Replace);
     /// Return the first remembered path that currently resolves to a regular file.
     /// An empty result means unavailable audio, not a missing metadata record.
     /// The check is a current observation; later playback still handles filesystem changes.
@@ -60,6 +63,7 @@ class LibraryService final : public QObject {
     void durationUpdated(const nekotune::SongMetadata &metadata);
     void statisticsUpdated(const nekotune::SongMetadata &metadata);
     void metadataChanged(const nekotune::SongMetadata &metadata);
+    void metadataBatchChanged(const QVector<nekotune::SongMetadata> &metadata);
 
   private:
     ISongRepository &m_songs;

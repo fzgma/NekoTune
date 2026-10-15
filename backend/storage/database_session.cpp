@@ -303,6 +303,23 @@ bool DatabaseSession::migrate() {
         m_db.rollback();
         return false;
     }
+    QSet<QString> metadataColumns;
+    if (!query.exec("PRAGMA table_info(songs)")) {
+        setError(query.lastError().text());
+        m_db.rollback();
+        return false;
+    }
+    while (query.next()) metadataColumns.insert(query.value(1).toString());
+    query.finish();
+    for (const QString column : {"album_artist", "genre", "year", "track_number", "disc_number"}) {
+        const auto type = column == "album_artist" || column == "genre"
+            ? QStringLiteral("TEXT NOT NULL DEFAULT ''") : QStringLiteral("INTEGER NOT NULL DEFAULT 0 CHECK(%1 BETWEEN 0 AND 9999)").arg(column);
+        if (!metadataColumns.contains(column) && !query.exec("ALTER TABLE songs ADD COLUMN " + column + " " + type)) {
+            setError(query.lastError().text());
+            m_db.rollback();
+            return false;
+        }
+    }
     const QStringList statements{
         QStringLiteral("CREATE TABLE IF NOT EXISTS managed_resources (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                        "hash TEXT UNIQUE, original_path TEXT NOT NULL DEFAULT '', source_name TEXT NOT NULL "

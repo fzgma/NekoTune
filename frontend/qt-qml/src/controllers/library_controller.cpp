@@ -2,7 +2,26 @@
 #include <QJsonArray>
 #include <QSet>
 #include <QFileInfo>
+#include <QCollator>
+#include <QJsonDocument>
+#include <QMap>
 #include <algorithm>
+namespace {
+QString albumKey(const QVariantMap &song) {
+    const auto album = song.value("album").toString().trimmed().toCaseFolded();
+    auto artist = song.value("album_artist").toString().trimmed();
+    if (artist.isEmpty()) artist = song.value("artist").toString().trimmed();
+    return QString::fromUtf8(QJsonDocument(QJsonArray{album, album.isEmpty() ? QString() : artist.toCaseFolded()})
+                                .toJson(QJsonDocument::Compact));
+}
+QString importSourceFor(const QVariantMap &song) {
+    const auto origin = song.value("import_source").toString().trimmed();
+    if (!origin.isEmpty())
+        return origin;
+    const auto provider = song.value("source").toMap().value("provider_id").toString();
+    return provider.isEmpty() ? QStringLiteral("local") : provider.section('/', 0, 0);
+}
+}
 LibraryController::LibraryController(IpcClient &client) : FeatureController(client) {
     connect(&client, &IpcClient::eventReceived, this, [this](const QJsonObject &event) {
         auto name = event.value("event").toString();
@@ -63,8 +82,17 @@ void LibraryController::apply(const QJsonObject &data) {
 // rules independently in the backend or selecting only highlighted rows.
 void LibraryController::filter() {
     QVariantList items;
+    QSet<QString> sources;
+    const auto query = m_searchText.trimmed();
     for (const auto &value : m_songs.items()) {
         auto song = value.toMap();
+        const auto source = importSourceFor(song);
+        sources.insert(source);
+        const auto count = song.value("play_count").toLongLong();
+        if ((!m_importSource.isEmpty() && source != m_importSource)
+            || (m_playFilter == "never_played" && count != 0)
+            || (m_playFilter == "played" && count == 0))
+            continue;
         QSet<int> assigned;
         for (const auto &tag : song.value("tags").toList())
             assigned.insert(tag.toMap().value("id").toInt());
@@ -74,11 +102,83 @@ void LibraryController::filter() {
                 match = false;
                 break;
             }
-        const auto query = m_searchText.trimmed();
         const auto searchable = song.value("title").toString() + " " + song.value("artist").toString()
+                                + " " + song.value("album").toString() + " " + song.value("album_artist").toString()
                                 + " " + QFileInfo(song.value("path").toString()).fileName();
         if (match && (query.isEmpty() || searchable.contains(query, Qt::CaseInsensitive)))
             items.append(value);
+    }
+    auto sourceOptions = sources.values();
+    std::sort(sourceOptions.begin(), sourceOptions.end());
+    if (sourceOptions != m_importSources) {
+        m_importSources = sourceOptions;
+        emit importSourcesChanged();
+    }
+    // The C locale ignores numeric collation; use natural ordering in headless sessions too.
+    QCollator collator(QLocale().language() == QLocale::C ? QLocale(QLocale::English) : QLocale());
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    collator.setNumericMode(true);
+    std::sort(items.begin(), items.end(), [&](const QVariant &left, const QVariant &right) {
+        const auto a = left.toMap(), b = right.toMap();
+        const int aId = a.value("song_id").toInt(), bId = b.value("song_id").toInt();
+        if (m_sortOrder == "added_desc") return aId > bId;
+        if (m_sortOrder == "added_asc") return aId < bId;
+        if (m_sortOrder == "track") {
+            for (const auto *field : {"disc_number", "track_number"}) {
+                const auto aNumber = a.value(field).toInt(), bNumber = b.value(field).toInt();
+                if (aNumber != bNumber) return (aNumber > 0 ? aNumber : 10000) < (bNumber > 0 ? bNumber : 10000);
+            }
+            return aId < bId;
+        }
+        if (m_sortOrder == "title" || m_sortOrder == "artist" || m_sortOrder == "album") {
+            const auto aText = a.value(m_sortOrder).toString().trimmed();
+            const auto bText = b.value(m_sortOrder).toString().trimmed();
+            if (aText.isEmpty() != bText.isEmpty()) return !aText.isEmpty();
+            const auto compared = collator.compare(aText, bText);
+            if (compared != 0) return compared < 0;
+        } else {
+            const bool duration = m_sortOrder.startsWith("duration_");
+            const auto field = duration ? "duration_ms" : "play_count";
+            const auto aValue = a.value(field).toLongLong(), bValue = b.value(field).toLongLong();
+            // Unknown durations stay at the end in both directions.
+            if (duration && (aValue <= 0) != (bValue <= 0)) return aValue > 0;
+            if (aValue != bValue)
+                return m_sortOrder == "duration_desc" || m_sortOrder == "most_played"
+                    ? aValue > bValue : aValue < bValue;
+        }
+        return aId < bId;
+    });
+    QMap<QString, QVariantMap> albums;
+    for (const auto &item : items) {
+        const auto song = item.toMap();
+        const auto key = albumKey(song);
+        auto &album = albums[key];
+        if (album.isEmpty()) {
+            const auto artist = song.value("album_artist").toString().trimmed();
+            album = {{"album_id", key}, {"title", song.value("album").toString().trimmed()},
+                     {"artist", artist.isEmpty() ? song.value("artist").toString() : artist},
+                     {"song_count", 0}, {"cover_url", QString()}};
+            if (album.value("title").toString().isEmpty()) album["artist"] = QString();
+        }
+        album["song_count"] = album.value("song_count").toInt() + 1;
+        if (album.value("cover_url").toString().isEmpty()) album["cover_url"] = song.value("cover_url");
+    }
+    QVariantList albumItems;
+    for (const auto &album : albums) albumItems.append(album);
+    std::sort(albumItems.begin(), albumItems.end(), [&](const auto &a, const auto &b) {
+        const auto left = a.toMap(), right = b.toMap();
+        const auto title = left.value("title").toString(), other = right.value("title").toString();
+        if (title.isEmpty() != other.isEmpty()) return !title.isEmpty();
+        const int compared = collator.compare(title, other);
+        return compared ? compared < 0 : left.value("album_id").toString() < right.value("album_id").toString();
+    });
+    m_albums.update(albumItems);
+    if (!m_albumId.isEmpty()) {
+        if (albums.contains(m_albumId) && m_selectedAlbum != albums.value(m_albumId)) {
+            m_selectedAlbum = albums.value(m_albumId);
+            emit filterChanged();
+        }
+        items.removeIf([this](const auto &song) { return albumKey(song.toMap()) != m_albumId; });
     }
     m_filtered.update(items);
     auto selected = m_songIds;
@@ -91,6 +191,72 @@ void LibraryController::filter() {
         m_songIds = selected;
         emit selectionChanged();
     }
+}
+void LibraryController::setSortOrder(const QString &order) {
+    static const QStringList allowed{"added_asc", "added_desc", "title", "artist", "album",
+                                     "duration_asc", "duration_desc", "most_played", "least_played", "track"};
+    if (order == m_sortOrder || !allowed.contains(order)) return;
+    m_sortOrder = order;
+    filter();
+    emit filterChanged();
+}
+void LibraryController::setPlayFilter(const QString &value) {
+    if (value == m_playFilter || (value != "all" && value != "played" && value != "never_played")) return;
+    m_playFilter = value;
+    filter();
+    emit filterChanged();
+}
+void LibraryController::setImportSource(const QString &source) {
+    if (source == m_importSource) return;
+    m_importSource = source;
+    filter();
+    emit filterChanged();
+}
+void LibraryController::resetFilters() {
+    m_searchText.clear();
+    m_tagIds.clear();
+    m_importSource.clear();
+    m_playFilter = "all";
+    m_sortOrder = "added_asc";
+    m_albumView = false;
+    m_albumId.clear();
+    m_selectedAlbum.clear();
+    clearSelection();
+    filter();
+    emit filterChanged();
+}
+void LibraryController::setAlbumView(bool enabled) {
+    if (m_albumView == enabled) return;
+    m_albumView = enabled;
+    closeAlbum();
+}
+void LibraryController::openAlbum(const QString &id) {
+    for (const auto &value : m_albums.items()) {
+        const auto album = value.toMap();
+        if (album.value("album_id").toString() != id) continue;
+        m_albumView = true;
+        m_albumId = id;
+        m_selectedAlbum = album;
+        m_sortOrder = "track";
+        clearSelection();
+        filter();
+        emit filterChanged();
+        return;
+    }
+}
+void LibraryController::closeAlbum() {
+    m_albumId.clear();
+    m_selectedAlbum.clear();
+    clearSelection();
+    filter();
+    emit filterChanged();
+}
+void LibraryController::saveBatchMetadata(const QVariantList &ids, const QVariantMap &patch, const QString &tagMode) {
+    send("library.update_metadata", {{"song_ids", QJsonArray::fromVariantList(ids)},
+         {"patch", QJsonObject::fromVariantMap(patch)}, {"tag_mode", tagMode}},
+         [this](const QJsonObject &data, const QString &error) {
+             if (error.isEmpty()) emit batchMetadataSaved(data.value("updated_count").toInt());
+         });
 }
 void LibraryController::setSearchText(const QString &text) {
     if (text == m_searchText)

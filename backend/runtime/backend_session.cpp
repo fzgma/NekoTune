@@ -140,6 +140,9 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     connect(&m_library, &LibraryService::durationUpdated, this,
             [playlistsChanged](const SongMetadata &) { playlistsChanged(); });
     connect(&m_library, &LibraryService::metadataChanged, &m_player, &PlayerEngine::metadataUpdated);
+    connect(&m_library, &LibraryService::metadataBatchChanged, &m_player, &PlayerEngine::metadataBatchUpdated);
+    connect(&m_library, &LibraryService::metadataBatchChanged, this,
+            [playlistsChanged](const QVector<SongMetadata> &) { playlistsChanged(); });
     connect(&m_library, &LibraryService::statisticsUpdated, &m_queue, &QueueService::updateMetadata);
     connect(&m_library, &LibraryService::statisticsUpdated, this,
             [playlistsChanged](const SongMetadata &) { playlistsChanged(); });

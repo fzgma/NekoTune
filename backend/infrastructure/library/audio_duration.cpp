@@ -1,5 +1,6 @@
 #include "infrastructure/library/audio_duration.h"
 #include <QElapsedTimer>
+#include <QRegularExpression>
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/mathematics.h>
@@ -21,15 +22,15 @@ struct ProbeContext {
 };
 } // namespace
 
-qint64 readAudioDuration(const QString &path,
+AudioFileInfo readAudioFileInfo(const QString &path,
                          const std::atomic_bool &cancelled) {
   if (cancelled.load())
-    return 0;
+    return {};
   ProbeContext probe{cancelled, {}};
   probe.elapsed.start();
   auto *format = avformat_alloc_context();
   if (!format)
-    return 0;
+    return {};
   format->interrupt_callback = {&ProbeContext::interrupt, &probe};
   AVDictionary *options = nullptr;
   // Imported files are local; probing must never follow a network playlist.
@@ -45,7 +46,8 @@ qint64 readAudioDuration(const QString &path,
       avformat_open_input(&format, filename.constData(), nullptr, &options);
   av_dict_free(&options);
   if (opened < 0)
-    return 0; // avformat_open_input frees the context on failure.
+    return {}; // avformat_open_input frees the context on failure.
+  AudioFileInfo result;
   qint64 duration = 0;
   // Finding a positive duration is useful only if the probe completed within its allowance.
   // An interrupted probe returns unknown timing rather than a partially obtained value.
@@ -56,6 +58,24 @@ qint64 readAudioDuration(const QString &path,
       const auto *stream = format->streams[index];
       if (stream->codecpar->codec_type != AVMEDIA_TYPE_AUDIO)
         continue;
+      auto tag = [&](std::initializer_list<const char *> keys) {
+        for (auto *dictionary : {format->metadata, stream->metadata})
+          for (const char *key : keys)
+            if (const auto *entry = av_dict_get(dictionary, key, nullptr, 0)) {
+              const auto value = QString::fromUtf8(entry->value).trimmed();
+              if (!value.isEmpty()) return value.left(65536);
+            }
+        return QString();
+      };
+      auto number = [](const QString &value) {
+        static const QRegularExpression leading(QStringLiteral("^(\\d{1,4})(?:\\D|$)"));
+        const auto match = leading.match(value);
+        return match.hasMatch() ? match.captured(1).toInt() : 0;
+      };
+      result.metadata = {tag({"title"}), tag({"artist", "author"}), tag({"album"}),
+                         tag({"album_artist", "albumartist"}), tag({"genre"}), tag({"lyrics", "unsyncedlyrics"}),
+                         number(tag({"date", "year"})), number(tag({"track", "tracknumber"})),
+                         number(tag({"disc", "discnumber"}))};
       // Prefer the audio stream over container duration, which may include longer non-audio tracks.
       if (stream->duration != AV_NOPTS_VALUE && stream->duration > 0)
         duration = av_rescale_q(stream->duration, stream->time_base,
@@ -63,11 +83,14 @@ qint64 readAudioDuration(const QString &path,
       else if (format->duration != AV_NOPTS_VALUE && format->duration > 0)
         duration =
             av_rescale_q(format->duration, AV_TIME_BASE_Q, AVRational{1, 1000});
-      if (duration > 0)
-        break;
+      break;
     }
   }
   avformat_close_input(&format);
-  return qMax(qint64(0), duration);
+  result.durationMs = qMax(qint64(0), duration);
+  return result;
+}
+qint64 readAudioDuration(const QString &path, const std::atomic_bool &cancelled) {
+  return readAudioFileInfo(path, cancelled).durationMs;
 }
 } // namespace nekotune

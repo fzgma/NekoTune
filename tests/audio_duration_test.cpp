@@ -81,6 +81,103 @@ public:
 class AudioDurationTest final : public QObject {
   Q_OBJECT
 private slots:
+  void embeddedTagsSurviveManagedImportAndUserEdits() {
+    QTemporaryDir dir;
+    const auto source = dir.filePath("tags.flac");
+    QVERIFY(QFile::copy(QFINDTESTDATA("fixtures/tagged.flac"), source));
+    const std::atomic_bool cancelled{false};
+    const auto probed = readAudioFileInfo(source, cancelled);
+    QVERIFY(probed.durationMs > 0);
+    QCOMPARE(probed.metadata.title, QString("夜空 02"));
+    QCOMPARE(probed.metadata.artist, QString("示例歌手"));
+    QCOMPARE(probed.metadata.album, QString("月光专辑"));
+    QCOMPARE(probed.metadata.albumArtist, QString("Various Artists"));
+    QCOMPARE(probed.metadata.genre, QString("Pop"));
+    QCOMPARE(probed.metadata.year, 2024);
+    QCOMPARE(probed.metadata.trackNumber, 2);
+    QCOMPARE(probed.metadata.discNumber, 1);
+    QCOMPARE(probed.metadata.lyrics, QString("Embedded lyrics"));
+    StoreFixture store(dir.filePath("songs.sqlite3"));
+    MusicDirectory music(store.db, dir.filePath("music"));
+    ImportExecutor imports;
+    imports.setMapper([&](const ImportedFile &file) { return music.manage(file); });
+    std::optional<ImportedFile> file;
+    imports.inspect(source, [&](Result<ImportedFile> result) { QVERIFY(result); file = result.value(); });
+    QTRY_VERIFY(file.has_value());
+    QCOMPARE(file->metadata.albumArtist, probed.metadata.albumArtist);
+    auto saved = store.library.importFile(*file);
+    QVERIFY(saved);
+    QCOMPARE(saved.value().album, probed.metadata.album);
+    QCOMPARE(saved.value().trackNumber, 2);
+    QCOMPARE(saved.value().lyrics, probed.metadata.lyrics);
+    const auto before = file->hash;
+    MetadataPatch patch;
+    patch.title = "Manual title";
+    patch.album = "Manual album";
+    patch.genre = QString("");
+    patch.trackNumber = 8;
+    QVERIFY(store.library.update(saved.value().id, patch));
+    auto repeated = store.library.importFile(*file);
+    QVERIFY(repeated);
+    QCOMPARE(repeated.value().id, saved.value().id);
+    QCOMPARE(repeated.value().customTitle, QString("Manual title"));
+    QCOMPARE(repeated.value().album, QString("Manual album"));
+    QCOMPARE(repeated.value().genre, QString());
+    QCOMPARE(repeated.value().trackNumber, 8);
+    QFile original(source);
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    QCOMPARE(hash(original.readAll()), before);
+    StoreFixture restored(dir.filePath("songs.sqlite3"));
+    QCOMPARE(restored.songById(saved.value().id)->album, QString("Manual album"));
+    QCOMPARE(restored.songById(saved.value().id)->albumArtist, QString("Various Artists"));
+    QCOMPARE(restored.songById(saved.value().id)->year, 2024);
+    const std::atomic_bool stopped{true};
+    QCOMPARE(readAudioFileInfo(source, stopped).metadata.title, QString());
+    QCOMPARE(readAudioFileInfo(dir.filePath("missing.flac"), cancelled).durationMs, 0);
+  }
+
+  void metadataBatchIsAtomicAndKeepsPerSongFields() {
+    QTemporaryDir dir;
+    StoreFixture store(dir.filePath("songs.sqlite3"));
+    auto a = store.getOrCreateSong("a", "/a.flac", "A", "First");
+    auto b = store.getOrCreateSong("b", "/b.flac", "B", "Second");
+    QVERIFY(a && b);
+    QVERIFY(store.updateMetadata(a->id, "A", "First", "Lyrics A", QStringList{"Keep", "Old"}));
+    QVERIFY(store.updateMetadata(b->id, "B", "Second", "Lyrics B", QStringList{"Other"}));
+    QSignalSpy changed(&store.library, &LibraryService::metadataBatchChanged);
+    MetadataPatch patch;
+    patch.album = "Shared album";
+    patch.albumArtist = "Various Artists";
+    patch.year = 2025;
+    patch.tags = QStringList{"New"};
+    QSqlQuery query(store.db.database());
+    QVERIFY(query.exec(QString("CREATE TRIGGER reject_batch BEFORE UPDATE ON songs WHEN NEW.id=%1 BEGIN SELECT RAISE(FAIL,'rejected'); END").arg(b->id)));
+    QVERIFY(!store.library.updateMany({a->id, b->id}, patch, TagEditMode::Add));
+    QCOMPARE(store.songById(a->id)->album, QString());
+    QCOMPARE(store.tags().size(), 3);
+    QCOMPARE(changed.count(), 0);
+    QVERIFY(query.exec("DROP TRIGGER reject_batch"));
+    QVERIFY(!store.library.updateMany({a->id, 999999}, patch));
+    QVERIFY(!store.library.updateMany({a->id, a->id}, patch));
+    QVERIFY(store.library.updateMany({a->id, b->id}, patch, TagEditMode::Add));
+    QCOMPARE(changed.count(), 1);
+    QCOMPARE(store.songById(a->id)->customTitle, QString("A"));
+    QCOMPARE(store.songById(b->id)->lyrics, QString("Lyrics B"));
+    QCOMPARE(store.songById(b->id)->albumArtist, QString("Various Artists"));
+    QCOMPARE(store.library.tagsFor(a->id).size(), 3);
+    patch = {};
+    patch.tags = QStringList{"OLD"};
+    QVERIFY(store.library.updateMany({a->id, b->id}, patch, TagEditMode::Remove));
+    QCOMPARE(store.library.tagsFor(a->id).size(), 2);
+    QCOMPARE(store.library.tagsFor(b->id).size(), 2);
+    patch.tags = QStringList{};
+    patch.album = QString("");
+    QVERIFY(store.library.updateMany({a->id, b->id}, patch));
+    QCOMPARE(store.library.tagsFor(a->id).size(), 0);
+    QCOMPARE(store.songById(a->id)->album, QString());
+    QCOMPARE(store.songById(a->id)->year, 2025);
+  }
+
   void restoredPlaybackAndEventsUseStoredDuration() {
     QTemporaryDir dir;
     const auto database = dir.filePath("db.sqlite3");

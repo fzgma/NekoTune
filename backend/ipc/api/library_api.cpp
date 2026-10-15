@@ -17,6 +17,36 @@ Result<std::optional<QVector<int>>> requestedSongs(const QJsonObject &params) {
     }
     return std::optional<QVector<int>>{ids};
 }
+Result<MetadataPatch> metadataPatch(const QJsonObject &params) {
+    MetadataPatch patch;
+    const QString titleKey = params.contains("custom_title") ? "custom_title" : "title";
+    const QString artistKey = params.contains("artist") ? "artist" : "author";
+    for (const auto &entry : {qMakePair(titleKey, &patch.title), qMakePair(artistKey, &patch.artist),
+                             qMakePair(QString("lyrics"), &patch.lyrics), qMakePair(QString("album"), &patch.album),
+                             qMakePair(QString("album_artist"), &patch.albumArtist), qMakePair(QString("genre"), &patch.genre)}) {
+        if (!params.contains(entry.first)) continue;
+        if (!params.value(entry.first).isString()) return failure(entry.first + " must be a string");
+        *entry.second = params.value(entry.first).toString();
+    }
+    for (const auto &entry : {qMakePair(QString("year"), &patch.year), qMakePair(QString("track_number"), &patch.trackNumber),
+                             qMakePair(QString("disc_number"), &patch.discNumber)}) {
+        if (!params.contains(entry.first)) continue;
+        const auto value = params.value(entry.first);
+        if (!value.isDouble() || value.toDouble() < 0 || value.toDouble() > 9999 || value.toDouble() != value.toInt())
+            return failure(entry.first + " must be an integer between 0 and 9999");
+        *entry.second = value.toInt();
+    }
+    if (params.contains("tags")) {
+        if (!params.value("tags").isArray()) return failure("tags must be an array");
+        QStringList names;
+        for (const auto &tag : params.value("tags").toArray()) {
+            if (!tag.isString()) return failure("Each tag must be a string");
+            names.append(tag.toString());
+        }
+        patch.tags = names;
+    }
+    return patch;
+}
 }
 // Library, playlists and tags share validation helpers and typed services.
 // Collection writes are serialized across asynchronous file inspection.
@@ -73,41 +103,9 @@ void registerLibraryApi(IpcRouter &router, ApiContext &api) {
                 done(error(id.error()));
                 return;
             }
-            // Compatibility aliases are resolved before constructing the domain patch.
-            // Presence checks preserve the distinction between omitted and empty values.
-            // Passing an empty title/artist/lyrics string requests an explicit clear.
-            // Passing an empty tags array requests removal of all assignments.
-            // Type validation happens before any repository mutation is attempted.
-            MetadataPatch patch;
-            const QString titleKey = params.contains("custom_title") ? "custom_title" : "title",
-                          artistKey = params.contains("artist") ? "artist" : "author";
-            for (const auto &key : {titleKey, artistKey, QString("lyrics")})
-                if (params.contains(key) && !params.value(key).isString()) {
-                    done(error(failure(key + " must be a string")));
-                    return;
-                }
-            if (params.contains(titleKey))
-                patch.title = params.value(titleKey).toString();
-            if (params.contains(artistKey))
-                patch.artist = params.value(artistKey).toString();
-            if (params.contains("lyrics"))
-                patch.lyrics = params.value("lyrics").toString();
-            if (params.contains("tags")) {
-                if (!params.value("tags").isArray()) {
-                    done(error(failure("tags must be an array")));
-                    return;
-                }
-                QStringList names;
-                for (const auto &tag : params.value("tags").toArray()) {
-                    if (!tag.isString()) {
-                        done(error(failure("Each tag must be a string")));
-                        return;
-                    }
-                    names.append(tag.toString());
-                }
-                patch.tags = names;
-            }
-            auto result = api.library.update(id.value(), patch);
+            const auto patch = metadataPatch(params);
+            if (!patch) { done(error(patch.error())); return; }
+            auto result = api.library.update(id.value(), patch.value());
             if (!result) {
                 done(error(result.error()));
                 return;
@@ -117,6 +115,27 @@ void registerLibraryApi(IpcRouter &router, ApiContext &api) {
             done(success(data));
         },
         true);
+    router.registerMethod("library.update_metadata", [&api](const QJsonObject &params, auto done) {
+        const auto ids = requestedSongs(params);
+        if (!ids) { done(error(ids.error())); return; }
+        if (!ids.value()) { done(error(failure("song_ids is required"))); return; }
+        const auto fields = params.value("patch");
+        if (!fields.isObject() || fields.toObject().isEmpty()) { done(error(failure("patch must be a non-empty object"))); return; }
+        static const QStringList allowed{"custom_title", "title", "artist", "author", "lyrics", "tags", "album",
+                                         "album_artist", "genre", "year", "track_number", "disc_number"};
+        for (const auto &key : fields.toObject().keys())
+            if (!allowed.contains(key)) { done(error(failure("Unsupported metadata field: " + key))); return; }
+        const auto patch = metadataPatch(fields.toObject());
+        if (!patch) { done(error(patch.error())); return; }
+        const auto mode = params.value("tag_mode").toString("replace");
+        if ((params.contains("tag_mode") && !params.value("tag_mode").isString()) ||
+            (mode != "replace" && mode != "add" && mode != "remove")) {
+            done(error(failure("Invalid tag_mode"))); return;
+        }
+        const auto result = api.library.updateMany(*ids.value(), patch.value(),
+            mode == "add" ? TagEditMode::Add : mode == "remove" ? TagEditMode::Remove : TagEditMode::Replace);
+        done(result ? success({{"updated_count", result.value().size()}}) : error(result.error()));
+    }, true);
     router.registerMethod(
         "library.delete",
         [&api](const QJsonObject &params, auto done) {

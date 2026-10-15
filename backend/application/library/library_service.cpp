@@ -1,6 +1,7 @@
 #include "application/library/library_service.h"
 #include "application/library/audio_availability.h"
 #include "application/transaction.h"
+#include <QSet>
 namespace nekotune {
 LibraryService::LibraryService(ISongRepository &songs, ITagRepository &tags, ITransaction &transaction)
     : m_songs(songs), m_tags(tags), m_transaction(transaction) {}
@@ -47,7 +48,7 @@ Result<SongMetadata> LibraryService::importFile(const ImportedFile &file, const 
     if (!tx)
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     auto song = m_songs.getOrCreateSong(file.hash, file.path, title, artist, file.sourceName, file.durationMs,
-                                      file.importSource);
+                                      file.importSource, file.metadata);
     if (!song || !tx.commit())
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     emit durationUpdated(*song);
@@ -79,21 +80,58 @@ Result<void> LibraryService::backfillDuration(int id, const QString &hash, qint6
     return {};
 }
 Result<SongMetadata> LibraryService::update(int id, const MetadataPatch &patch) {
-    auto current = metadata(id);
-    if (!current)
-        return current.error();
+    const auto current = metadata(id);
+    if (!current) return current.error();
+    auto result = updateMany({id}, patch);
+    return result ? Result<SongMetadata>(result.value().first()) : Result<SongMetadata>(result.error());
+}
+Result<QVector<SongMetadata>> LibraryService::updateMany(const QVector<int> &ids, const MetadataPatch &patch,
+                                                         TagEditMode tagMode) {
+    if (ids.isEmpty()) return failure("No songs selected");
+    if (patch.tags)
+        for (const auto &tag : *patch.tags)
+            if (tag.trimmed().isEmpty() || tag.trimmed().size() > 64) return failure("Tag name must contain 1 to 64 characters");
+    for (const auto &number : {patch.year, patch.trackNumber, patch.discNumber})
+        if (number && (*number < 0 || *number > 9999)) return failure("Metadata number must be between 0 and 9999");
+    QSet<int> seen;
+    QVector<SongMetadata> songs;
+    for (int id : ids) {
+        const auto song = m_songs.songById(id);
+        if (id <= 0 || seen.contains(id) || !song) return failure("Invalid or missing song id");
+        seen.insert(id);
+        songs.append(*song);
+    }
     Transaction tx(m_transaction);
-    if (!tx)
-        return failure(m_transaction.errorString(), ErrorCode::Storage);
-    const auto &song = current.value();
-    // Omitted fields reuse the stored metadata; empty supplied values still mean clear.
-    auto updated =
-        m_songs.updateMetadata(id, patch.title.value_or(song.customTitle), patch.artist.value_or(song.artist),
-                               patch.lyrics.value_or(song.lyrics));
-    if (!updated || (patch.tags && !m_tags.replaceSongTags(id, *patch.tags)) || !tx.commit())
-        return failure(m_transaction.errorString(), ErrorCode::Storage);
-    emit metadataChanged(*updated);
+    if (!tx) return failure(m_transaction.errorString(), ErrorCode::Storage);
+    const auto memberships = patch.tags && tagMode != TagEditMode::Replace ? m_tags.songTags() : QHash<int, QVector<SongTag>>{};
+    for (auto &song : songs) {
+        song.customTitle = patch.title.value_or(song.customTitle);
+        song.artist = patch.artist.value_or(song.artist);
+        song.lyrics = patch.lyrics.value_or(song.lyrics);
+        song.album = patch.album.value_or(song.album);
+        song.albumArtist = patch.albumArtist.value_or(song.albumArtist);
+        song.genre = patch.genre.value_or(song.genre);
+        song.year = patch.year.value_or(song.year);
+        song.trackNumber = patch.trackNumber.value_or(song.trackNumber);
+        song.discNumber = patch.discNumber.value_or(song.discNumber);
+        if (!m_songs.updateMetadata(song)) return failure(m_songs.errorString(), ErrorCode::Storage);
+        if (patch.tags) {
+            QStringList tags = *patch.tags;
+            if (tagMode != TagEditMode::Replace) {
+                QSet<QString> requested;
+                for (const auto &tag : *patch.tags) requested.insert(tag.trimmed().toCaseFolded());
+                tags.clear();
+                for (const auto &tag : memberships.value(song.id))
+                    if (tagMode == TagEditMode::Add || !requested.contains(tag.name.toCaseFolded())) tags.append(tag.name);
+                if (tagMode == TagEditMode::Add) tags.append(*patch.tags);
+            }
+            if (!m_tags.replaceSongTags(song.id, tags)) return failure(m_tags.errorString(), ErrorCode::Storage);
+        }
+    }
+    if (!tx.commit()) return failure(m_transaction.errorString(), ErrorCode::Storage);
+    if (songs.size() == 1) emit metadataChanged(songs.first());
+    else emit metadataBatchChanged(songs);
     emit changed();
-    return *updated;
+    return songs;
 }
 } // namespace nekotune

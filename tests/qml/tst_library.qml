@@ -50,6 +50,132 @@ Rectangle {
 
         function cleanup() { panel = null }
 
+        function visibleIds() { return panel.filteredSongs.map(song => song.song_id).join(",") }
+
+        function choose(name, value) {
+            const picker = findChild(panel, name)
+            const index = picker.model.findIndex(option => option.value === value)
+            verify(index >= 0)
+            mouseClick(picker)
+            tryCompare(picker.popup, "opened", true)
+            keyClick(Qt.Key_Home)
+            for (let i = 0; i < index; ++i) keyClick(Qt.Key_Down)
+            keyClick(Qt.Key_Return)
+            tryCompare(picker.popup, "opened", false)
+            compare(picker.currentValue, value)
+        }
+
+        function test_sortingAndCombinedFilters() {
+            testFixtures.seedLibrary({tags: [{id: 1, name: "Rock"}], songs: [
+                {song_id: 3, title: "Track 10", artist: "Beta", album: "B", duration_ms: 100000, play_count: 7, import_source: "demo", available: true, tags: [{id: 1}]},
+                {song_id: 1, title: "Track 2", artist: "Alpha", album: "A", duration_ms: 200000, play_count: 7, import_source: "local", available: true, tags: [{id: 1}]},
+                {song_id: 2, title: "Track 3", artist: "", album: "", duration_ms: 0, play_count: 0, import_source: "demo", available: false, tags: [{id: 1}]},
+                {song_id: 4, title: "Other", duration_ms: 50000, play_count: 0, available: true}
+            ]})
+            compare(visibleIds(), "1,2,3,4")
+            testLibrary.selectRow(1)
+            choose("librarySortPicker", "most_played")
+            compare(visibleIds(), "1,3,2,4")
+            compare(testLibrary.selectedSongIds.join(","), "1")
+            testLibrary.selectRow(2, false, true)
+            compare(testLibrary.selectedSongIds.join(","), "1,3,2")
+            choose("librarySortPicker", "added_desc")
+            compare(visibleIds(), "4,3,2,1")
+            choose("librarySortPicker", "title")
+            compare(visibleIds(), "4,1,2,3")
+            choose("librarySortPicker", "artist")
+            compare(visibleIds(), "1,3,2,4")
+            choose("librarySortPicker", "album")
+            compare(visibleIds(), "1,3,2,4")
+            choose("librarySortPicker", "duration_asc")
+            compare(visibleIds(), "4,3,1,2")
+            choose("librarySortPicker", "duration_desc")
+            compare(visibleIds(), "1,3,4,2")
+            choose("librarySortPicker", "least_played")
+            compare(visibleIds(), "2,4,1,3")
+            choose("librarySourcePicker", "demo")
+            compare(visibleIds(), "2,3")
+            compare(testLibrary.selectedSongIds.join(","), "3,2")
+            choose("libraryPlayFilterPicker", "never_played")
+            compare(visibleIds(), "2")
+            compare(panel.playableCount, 0)
+            verify(!findChild(panel, "playFilteredButton").enabled)
+            testLibrary.selectedTagIds = [1]
+            testLibrary.searchText = "track 3"
+            compare(visibleIds(), "2")
+            // Available source choices come from the whole library, even with no matches.
+            choose("librarySourcePicker", "local")
+            compare(visibleIds(), "")
+            compare(testLibrary.importSources.join(","), "demo,local")
+            compare(findChild(panel, "libraryEmptyMessage").text, "library no filter matches")
+            tryCompare(findChild(panel, "libraryEmptyResetButton"), "visible", true)
+            mouseClick(findChild(panel, "libraryEmptyResetButton"))
+            compare(visibleIds(), "1,2,3,4")
+            compare(testLibrary.sortOrder, "added_asc")
+            compare(testLibrary.importSource, "")
+            compare(testLibrary.searchText, "")
+            choose("libraryPlayFilterPicker", "played")
+            compare(visibleIds(), "1,3")
+            compare(testLibrary.songs.items.map(song => song.song_id).join(","), "3,1,2,4")
+            compare(playSpy.count, 0)
+        }
+
+        function test_sourceFallbackAndInvalidOptions() {
+            testFixtures.seedLibrary({tags: [], songs: [
+                {song_id: 1, title: "Downloaded", import_source: "demo", source: {kind: "local"}, play_count: 3000000000},
+                {song_id: 2, title: "Legacy remote", source: {provider_id: "demo/tracks"}, play_count: 2},
+                {song_id: 3, title: "Legacy local"}
+            ]})
+            testLibrary.importSource = "demo"
+            testLibrary.sortOrder = "most_played"
+            compare(visibleIds(), "1,2")
+            testLibrary.sortOrder = "invalid"
+            testLibrary.playFilter = "invalid"
+            compare(testLibrary.sortOrder, "most_played")
+            compare(testLibrary.playFilter, "all")
+            testLibrary.importSource = "removed.provider"
+            compare(visibleIds(), "")
+            compare(findChild(panel, "librarySourcePicker").currentValue, "removed.provider")
+            testLibrary.importSource = "local"
+            testLibrary.playFilter = "never_played"
+            compare(visibleIds(), "3")
+        }
+
+        function test_albumGroupingAndTrackOrder() {
+            testFixtures.seedLibrary({tags: [], songs: [
+                {song_id: 1, title: "Finale", artist: "Singer A", album: "Moon", album_artist: "Various", disc_number: 2, track_number: 1, available: true},
+                {song_id: 2, title: "Opening", artist: "Singer B", album: "moon", album_artist: "Various", disc_number: 1, track_number: 8, available: true},
+                {song_id: 3, title: "Different record", artist: "Other", album: "Moon", disc_number: 1, track_number: 1, available: true},
+                {song_id: 4, title: "Untitled album", available: false}
+            ]})
+            testLibrary.albumView = true
+            compare(testLibrary.albums.count, 3)
+            verify(findChild(panel, "libraryAlbumGrid").visible)
+            const album = testLibrary.albums.items.find(item => item.artist === "Various")
+            compare(album.song_count, 2)
+            testLibrary.openAlbum(album.album_id)
+            compare(visibleIds(), "2,1")
+            compare(testLibrary.sortOrder, "track")
+            verify(!findChild(panel, "libraryAlbumGrid").visible)
+            testLibrary.selectRow(2)
+            waitForRendering(panel)
+            mouseClick(findChild(panel, "libraryAlbumsBack"))
+            compare(testLibrary.selectedAlbumId, "")
+            compare(testLibrary.selectedSongIds.length, 0)
+            compare(visibleIds(), "3,2,1,4")
+            testLibrary.searchText = "Moon"
+            compare(testLibrary.albums.count, 2)
+            const grid = findChild(panel, "libraryAlbumGrid")
+            waitForRendering(panel)
+            tryVerify(() => grid.itemAtIndex(0) !== null)
+            mouseClick(grid.itemAtIndex(0))
+            verify(testLibrary.selectedAlbumId !== "")
+            compare(playSpy.count, 0)
+            testLibrary.albumView = false
+            compare(testLibrary.selectedAlbumId, "")
+            compare(testLibrary.albums.count, 2)
+        }
+
         function test_focusRingIsNotClippedByList() {
             waitForRendering(panel)
             const list = findChild(panel, "librarySongList")
