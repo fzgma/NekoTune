@@ -149,14 +149,14 @@ Item {
             spacing: Theme.spaceLg
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: Theme.spaceXs
                 Label { Layout.fillWidth: true; text: root.controller.selectedAlbumId ? root.controller.selectedAlbum.title || i18n.text("library_unknown_album", i18n.language) : i18n.text("local_music", i18n.language); textFormat: Text.PlainText; elide: Text.ElideRight; color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.weight: Font.DemiBold }
                 Label { Layout.fillWidth: true; text: i18n.countText("tracks", root.filteredSongs.length, i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontBodySecondary }
             }
             TextButton { objectName: "libraryAlbumsBack"; visible: Boolean(root.controller.selectedAlbumId); text: i18n.text("library_all_albums", i18n.language); subtle: true; onClicked: root.controller.closeAlbum() }
             ChoiceField {
                 objectName: "libraryViewPicker"
-                Layout.preferredWidth: 110
+                Layout.preferredWidth: 140
                 model: [i18n.text("library_songs_view", i18n.language), i18n.text("library_albums_view", i18n.language)]
                 currentIndex: root.controller.albumView ? 1 : 0
                 onActivated: root.controller.albumView = currentIndex === 1
@@ -208,66 +208,52 @@ Item {
                 onClicked: root.openDelete()
             }
         }
-        GridLayout {
+        RowLayout {
             Layout.fillWidth: true
-            columns: width < 580 ? 1 : 3
-            columnSpacing: Theme.spaceMd
-            rowSpacing: Theme.spaceSm
-            ColumnLayout {
+            spacing: Theme.spaceMd
+            ChoiceField {
+                id: sortPicker
+                objectName: "librarySortPicker"
                 Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                spacing: Theme.spaceXs
-                Label { text: i18n.text("library_sort", i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
-                ChoiceField {
-                    id: sortPicker
-                    objectName: "librarySortPicker"
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    textRole: "label"
-                    valueRole: "value"
-                    model: ["added_asc", "added_desc", "title", "artist", "album", "duration_asc", "duration_desc", "most_played", "least_played", "track"]
-                        .map(value => ({value: value, label: i18n.text("library_sort_" + value, i18n.language)}))
-                    currentIndex: model.findIndex(option => option.value === root.controller.sortOrder)
-                    onActivated: root.controller.sortOrder = currentValue
-                    Accessible.name: i18n.text("library_sort", i18n.language)
-                }
+                Layout.preferredWidth: 1
+                Layout.minimumWidth: 150
+                prefix: i18n.text("library_sort", i18n.language)
+                textRole: "label"
+                valueRole: "value"
+                model: ["added_asc", "added_desc", "title", "artist", "album", "duration_asc", "duration_desc", "most_played", "least_played", "track"]
+                    .map(value => ({value: value, label: i18n.text("library_sort_" + value, i18n.language)}))
+                currentIndex: model.findIndex(option => option.value === root.controller.sortOrder)
+                onActivated: root.controller.sortOrder = currentValue
+                Accessible.name: i18n.text("library_sort", i18n.language)
             }
-            ColumnLayout {
+            ChoiceField {
+                objectName: "libraryPlayFilterPicker"
                 Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                spacing: Theme.spaceXs
-                Label { text: i18n.text("library_play_filter", i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
-                ChoiceField {
-                    objectName: "libraryPlayFilterPicker"
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    textRole: "label"
-                    valueRole: "value"
-                    model: ["all", "played", "never_played"]
-                        .map(value => ({value: value, label: i18n.text("library_play_" + value, i18n.language)}))
-                    currentIndex: model.findIndex(option => option.value === root.controller.playFilter)
-                    onActivated: root.controller.playFilter = currentValue
-                    Accessible.name: i18n.text("library_play_filter", i18n.language)
-                }
+                Layout.preferredWidth: 1
+                Layout.minimumWidth: 150
+                prefix: i18n.text("library_play_filter", i18n.language)
+                textRole: "label"
+                valueRole: "value"
+                model: ["all", "played", "never_played"]
+                    .map(value => ({value: value, label: i18n.text("library_play_" + value, i18n.language)}))
+                currentIndex: model.findIndex(option => option.value === root.controller.playFilter)
+                onActivated: root.controller.playFilter = currentValue
+                Accessible.name: i18n.text("library_play_filter", i18n.language)
             }
-            ColumnLayout {
+            ChoiceField {
+                objectName: "librarySourcePicker"
                 Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                spacing: Theme.spaceXs
-                Label { text: i18n.text("song_import_source", i18n.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
-                ChoiceField {
-                    objectName: "librarySourcePicker"
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    textRole: "label"
-                    valueRole: "value"
-                    model: root.sourceOptions
-                    currentIndex: root.sourceOptions.findIndex(option => option.value === root.controller.importSource)
-                    onActivated: root.controller.importSource = currentValue
-                    Accessible.name: i18n.text("song_import_source", i18n.language)
-                    ToolTip.visible: hovered
-                    ToolTip.text: currentText
-                }
+                Layout.preferredWidth: 1
+                Layout.minimumWidth: 150
+                prefix: i18n.text("song_import_source", i18n.language)
+                textRole: "label"
+                valueRole: "value"
+                model: root.sourceOptions
+                currentIndex: root.sourceOptions.findIndex(option => option.value === root.controller.importSource)
+                onActivated: root.controller.importSource = currentValue
+                Accessible.name: i18n.text("song_import_source", i18n.language)
+                ToolTip.visible: hovered
+                ToolTip.text: currentText
             }
         }
         RowLayout {
@@ -320,6 +306,8 @@ Item {
                 current: Number(root.currentSong.song_id || 0) === Number(modelData.song_id)
                 playing: root.playing; showCheckbox: true
                 showPlayCount: true
+                showAlbum: songList.width >= 900
+                selectionActive: root.selectedSongIds.length > 0
                 playObjectName: "playLibrarySongButton" + modelData.song_id
                 checkboxObjectName: "librarySelectSong" + modelData.song_id
                 menuActions: root.songActions(modelData)

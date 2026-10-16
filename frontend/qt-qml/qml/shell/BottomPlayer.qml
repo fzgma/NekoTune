@@ -15,17 +15,11 @@ Rectangle {
     property bool addPending: false
     property string addError: ""
     readonly property int leftWidth: shell.width < 1200 ? 220 : 280
-    readonly property int rightWidth: shell.width < 1200 ? 160 : 264
+    readonly property int rightWidth: shell.width < 1200 ? 160 : 220
     readonly property string coverUrl: String(shell.song.cover_url || "")
     Layout.fillWidth: true
     Layout.preferredHeight: Theme.bottomBarHeight
     color: Theme.bgSidebar
-    // Slight lift from the canvas above toward a darker floor at the bottom.
-    gradient: Gradient {
-        GradientStop { position: 0.0; color: Theme.bgCanvasTop }
-        GradientStop { position: 0.6; color: Theme.bgSidebar }
-        GradientStop { position: 1.0; color: Qt.darker(Theme.bgSidebar, 1.06) }
-    }
     function t(key) { return translator.text(key, translator.language) }
     // An unknown duration needs a placeholder, while a current position of zero is a valid time.
     // Both values arrive in milliseconds and are displayed at whole-second precision.
@@ -140,16 +134,15 @@ Rectangle {
         objectName: "playerSecondaryControls"
         anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
         width: bar.rightWidth
-        readonly property bool compact: bar.shell.width < 1200
-        height: compact ? 80 : 44
-        // Two rows preserve both the volume hit area and view buttons within the 160px compact column.
+        height: 80
+        // Two rows keep the volume hit area and view buttons clear of each other within the 160–220px column.
         RowLayout {
             anchors.left: parent.left
-            y: rightControls.compact ? 0 : (parent.height - height) / 2
-            width: rightControls.compact ? parent.width : parent.width - viewControls.width - 8
-            height: rightControls.compact ? 32 : 40
+            y: 0
+            width: parent.width
+            height: 32
             spacing: Theme.spaceXs
-            IconButton { objectName: "volumeMuteButton"; kind: bar.shell.volume > 0 ? "volume" : "mute"; tooltipText: bar.t("volume"); enabled: bar.shell.transport.connected; implicitWidth: 32; implicitHeight: rightControls.compact ? 32 : 40; onClicked: bar.controller.toggleMute() }
+            IconButton { objectName: "volumeMuteButton"; kind: bar.shell.volume > 0 ? "volume" : "mute"; tooltipText: bar.t("volume"); enabled: bar.shell.transport.connected; implicitWidth: 32; implicitHeight: 32; onClicked: bar.controller.toggleMute() }
             // Volume follows every moved event; seeking retains its separate release-only behavior.
             PlayerSlider {
                 objectName: "volumeSlider"
@@ -176,10 +169,39 @@ Rectangle {
                 enabled: bar.shell.hasSong
                 onClicked: bar.shell.nowPlayingOpen ? bar.shell.closeNowPlaying() : bar.shell.openNowPlaying()
             }
-            Item {
-                Layout.preferredWidth: 44; Layout.preferredHeight: 44
-                IconButton { objectName: "queueToggleButton"; anchors.fill: parent; kind: "queue"; tooltipText: bar.t("queue") + " (" + bar.shell.queue.length + ")"; glyphColor: bar.shell.queueOpen ? Theme.accentPrimary : Theme.textMuted; onClicked: bar.shell.queueOpen = !bar.shell.queueOpen }
-                Label { anchors.right: parent.right; anchors.top: parent.top; text: String(bar.shell.queue.length); color: Theme.accentPrimary; font.pixelSize: 10; visible: bar.shell.queue.length > 0 }
+            Button {
+                id: queueToggle
+                objectName: "queueToggleButton"
+                hoverEnabled: true
+                implicitHeight: Theme.iconButtonSize
+                implicitWidth: queueContent.implicitWidth + Theme.spaceSm * 2
+                Accessible.role: Accessible.Button
+                Accessible.name: bar.t("queue") + " (" + bar.shell.queue.length + ")"
+                ToolTip.visible: hovered && ToolTip.text.length > 0
+                ToolTip.text: bar.t("queue") + " (" + bar.shell.queue.length + ")"
+                ToolTip.delay: 400
+                onClicked: bar.shell.queueOpen = !bar.shell.queueOpen
+                contentItem: RowLayout {
+                    id: queueContent
+                    spacing: Theme.spaceXs
+                    Glyph { Layout.preferredWidth: 20; Layout.preferredHeight: 20; size: 20; kind: "queue"; color: bar.shell.queueOpen ? Theme.accentPrimary : queueToggle.hovered ? Theme.textPrimary : Theme.textMuted }
+                    Label {
+                        visible: bar.shell.queue.length > 0
+                        text: String(bar.shell.queue.length)
+                        color: bar.shell.queueOpen ? Theme.accentPrimary : Theme.textSecondary
+                        font.pixelSize: Theme.fontCaption
+                        font.weight: Font.DemiBold
+                    }
+                }
+                background: Rectangle {
+                    radius: Theme.radiusSm
+                    color: queueToggle.down ? Theme.bgSelected : queueToggle.hovered || bar.shell.queueOpen ? Theme.bgHover : "transparent"
+                    Rectangle {
+                        anchors.fill: parent; anchors.margins: -4; radius: parent.radius + 4
+                        color: "transparent"; border.color: Theme.accentPrimary; border.width: 2
+                        visible: queueToggle.activeFocus
+                    }
+                }
             }
         }
     }

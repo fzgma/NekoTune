@@ -104,7 +104,7 @@ Item {
                 spacing: page.theme.spaceLg
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 6
+                    spacing: page.theme.spaceXs
                     Label { text: page.t("home"); color: page.theme.textPrimary; font.pixelSize: page.theme.fontTitle; font.weight: Font.DemiBold }
                     Label {
                         objectName: "homeSummary"
@@ -129,32 +129,10 @@ Item {
                 objectName: "homeNowPlaying"
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(page.compact ? 176 : 192, heroContent.implicitHeight + 48)
-                radius: 16
-                color: page.theme.bgRaised
+                radius: page.theme.radiusLg
+                color: page.theme.bgSurface
                 border.color: page.theme.borderSubtle
                 clip: true
-                // Layered wash: a lavender-to-rose diagonal gives the hero its
-                // "night radio" mood while staying under the text contrast target.
-                gradient: Gradient {
-                    orientation: Gradient.Horizontal
-                    GradientStop { position: 0.0; color: page.theme.bgElevated }
-                    GradientStop { position: 0.62; color: page.theme.bgRaised }
-                    GradientStop { position: 1.0; color: Qt.rgba(page.theme.roseGlow.r, page.theme.roseGlow.g, page.theme.roseGlow.b, 0.72) }
-                }
-                // Soft ambient orb hugging the right edge, behind the text.
-                Rectangle {
-                    width: parent.height * 1.9
-                    height: width
-                    radius: width / 2
-                    x: parent.width - width * 0.58
-                    anchors.verticalCenter: parent.verticalCenter
-                    opacity: page.theme.glowOpacity * 0.7
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: page.theme.accentPrimary }
-                        GradientStop { position: 0.55; color: Qt.rgba(page.theme.accentPrimary.r, page.theme.accentPrimary.g, page.theme.accentPrimary.b, 0.35) }
-                        GradientStop { position: 1.0; color: "transparent" }
-                    }
-                }
                 RowLayout {
                     id: heroContent
                     anchors.fill: parent
@@ -168,13 +146,13 @@ Item {
                             anchors.centerIn: parent
                             width: parent.width + 20
                             height: parent.height + 20
-                            radius: 22
+                            radius: page.theme.radiusLg + 4
                             opacity: page.theme.glowOpacity * 0.9
                             color: page.theme.accentPrimary
                         }
                         Rectangle {
                             anchors.fill: parent
-                            radius: 16
+                            radius: page.theme.radiusLg
                             color: page.theme.bgSurface
                             clip: true
                             Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }
@@ -308,7 +286,7 @@ Item {
                                 ToolTip.visible: hovered || activeFocus
                                 ToolTip.text: String(modelData.name)
                                 background: Rectangle {
-                                    radius: 12
+                                    radius: page.theme.radiusMd
                                     color: card.hovered ? page.theme.bgHover : page.theme.bgSurface
                                     border.color: card.activeFocus ? page.theme.accentPrimary
                                                 : card.hovered ? Qt.rgba(page.theme.accentPrimary.r, page.theme.accentPrimary.g, page.theme.accentPrimary.b, 0.45)
@@ -325,7 +303,7 @@ Item {
                                             Layout.preferredWidth: 48; Layout.preferredHeight: 48
                                             Rectangle {
                                                 anchors.fill: parent
-                                                radius: 10
+                                                radius: page.theme.radiusSm
                                                 color: page.theme.bgRaised
                                                 clip: true
                                                 Image { anchors.fill: parent; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop; mipmap: true }

@@ -1146,7 +1146,7 @@ class RefactorTest final : public QObject {
                 window->resize(width, width == 1000 ? 640 : 860);
                 QTRY_COMPARE(window->width(), width);
                 QTest::qWait(60);
-                QCOMPARE(secondary->width(), width == 1000 ? 160.0 : 264.0);
+                QCOMPARE(secondary->width(), width == 1000 ? 160.0 : 220.0);
                 QCOMPARE(transport->mapToScene(QPointF(transport->width() / 2, 0)).x(), width / 2.0);
                 const QRectF bounds(0, 0, secondary->width(), secondary->height());
                 QList<QRectF> controlRects;

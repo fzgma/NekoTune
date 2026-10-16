@@ -22,6 +22,8 @@ Rectangle {
     property bool downloadEnabled: false
     signal downloadRequested()
     property bool showCheckbox: false
+    property bool showAlbum: false
+    property bool selectionActive: false
     property bool showPlayCount: false
     property string playObjectName: ""
     property string checkboxObjectName: ""
@@ -93,13 +95,14 @@ Rectangle {
         CheckBox {
             id: selectionBox
             visible: row.showCheckbox
+            opacity: row.selected || row.selectionActive || hover.hovered || activeFocus ? 1 : 0
             checked: row.selected
             objectName: row.checkboxObjectName
             Accessible.name: i18n.text("select_song", i18n.language).replace("%1", String(row.song.title || ""))
             Layout.preferredWidth: 28
             onClicked: row.checkboxRequested()
             indicator: Rectangle {
-                width: 18; height: 18; radius: 4
+                width: 20; height: 20; radius: Theme.radiusSm / 2
                 anchors.centerIn: parent
                 color: selectionBox.checked ? Theme.accentPrimary : Theme.bgSurface
                 border.color: Theme.borderControl
@@ -145,6 +148,8 @@ Rectangle {
         ColumnLayout {
             id: trackMetadata
             Layout.fillWidth: true
+            Layout.preferredWidth: 3
+            Layout.minimumWidth: 0
             spacing: Theme.spaceXs
             Label {
                 Layout.fillWidth: true
@@ -167,6 +172,18 @@ Rectangle {
                 color: row.available ? Theme.textMuted : Theme.statusWarning
                 font.pixelSize: Theme.fontCaption
             }
+        }
+        Label {
+            objectName: "trackAlbum"
+            visible: row.showAlbum
+            Layout.fillWidth: true
+            Layout.preferredWidth: 2
+            Layout.minimumWidth: 0
+            text: String(row.song.album || "")
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.pixelSize: Theme.fontBodySecondary
+            elide: Text.ElideRight
         }
         Label {
             objectName: "trackPlayCount"

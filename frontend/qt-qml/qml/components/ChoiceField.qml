@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 ComboBox {
     id: control
@@ -7,18 +8,35 @@ ComboBox {
     font.family: Theme.fontFamily
     font.pixelSize: Theme.fontBody
     leftPadding: Theme.spaceMd
-    rightPadding: 32
-    contentItem: Text {
-        textFormat: Text.PlainText
-        text: control.displayText
-        font: control.font
-        color: control.enabled ? Theme.textPrimary : Theme.textDisabled
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
+    rightPadding: 36
+    property string prefix: ""
+    contentItem: RowLayout {
+        spacing: Theme.spaceSm
+        Text {
+            visible: control.prefix !== ""
+            textFormat: Text.PlainText
+            text: control.prefix
+            font.family: control.font.family
+            font.pixelSize: Theme.fontBodySecondary
+            color: control.enabled ? Theme.textMuted : Theme.textDisabled
+            verticalAlignment: Text.AlignVCenter
+        }
+        Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: control.displayText
+            font: control.font
+            color: control.enabled ? Theme.textPrimary : Theme.textDisabled
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
     }
-    indicator: Text {
-        anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
-        text: "⌄"; color: Theme.textMuted; font.pixelSize: Theme.fontDialogTitle
+    indicator: Glyph {
+        x: control.width - width - Theme.spaceMd
+        y: (control.height - height) / 2
+        width: 18; height: 18; size: 18
+        kind: "chevron_down"
+        color: Theme.textMuted
     }
     background: Rectangle {
         color: Theme.bgRaised; radius: Theme.radiusSm

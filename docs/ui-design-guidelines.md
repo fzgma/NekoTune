@@ -353,6 +353,7 @@
 | `frontend/qt-qml/qml/components/LyricsPanel.qml` | 歌词状态、来源、搜索与候选选择 |
 | `frontend/qt-qml/qml/components/LrcLyrics.qml` | 歌词排版、高亮、跟随与手动滚动 |
 | `frontend/qt-qml/qml/components/IconButton.qml`、`TextButton.qml` | 按钮外观、状态、焦点与可访问名称 |
+| `frontend/qt-qml/qml/components/Glyph.qml`、`NavItem.qml` | 统一线性图标绘制；侧栏导航项（左对齐图标＋文字、3 宽当前标记） |
 | `frontend/qt-qml/qml/components/SeekSlider.qml`、`PlayerSlider.qml` | 进度与音量反馈，保留已有跳转同步保护 |
 | `frontend/qt-qml/i18n/zh.json`、`en.json` | 文案与语言一致性 |
 

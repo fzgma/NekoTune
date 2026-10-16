@@ -258,14 +258,7 @@ ApplicationWindow {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        color: root.color
-                        // A faint top-down wash keeps the browsing canvas from
-                        // reading as a single flat black surface.
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: Theme.bgCanvasTop }
-                            GradientStop { position: 0.55; color: Theme.bgCanvas }
-                            GradientStop { position: 1.0; color: Qt.darker(Theme.bgCanvas, 1.08) }
-                        }
+                        color: Theme.bgCanvas
                         ThemeBackground { anchors.fill: parent; controllers: root.app; translator: root.translator; hostWindow: root }
                         ColumnLayout {
                             anchors.fill: parent

@@ -16,44 +16,29 @@ Rectangle {
     Layout.preferredWidth: shell.width < 1200 ? Theme.sidebarWidthCompact : Theme.sidebarWidthWide
     Layout.fillHeight: true
     color: Theme.bgSidebar
-    // A vertical wash keeps the rail from reading as one flat black column.
-    gradient: Gradient {
-        GradientStop { position: 0.0; color: Theme.bgCanvasTop }
-        GradientStop { position: 0.32; color: Theme.bgSidebar }
-        GradientStop { position: 1.0; color: Qt.darker(Theme.bgSidebar, 1.08) }
-    }
     function t(key) { return translator.text(key, translator.language) }
+    function pageLabel(page) {
+        return page.extensionId && controllers.extensions ? controllers.extensions.label(page.title || page.id, translator.language) : t(page.title)
+    }
+    function pageIcon(page) {
+        const icons = {home: "home", library: "music", music_sources: "cloud", extensions: "extension", settings: "settings"}
+        return icons[page.id] || (page.extensionId ? "cloud" : "music")
+    }
+    Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.borderSubtle }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Theme.spaceLg
-        spacing: 20
+        spacing: Theme.spaceLg
         RowLayout {
-            Layout.topMargin: 10; Layout.bottomMargin: 8
-            spacing: 10
+            Layout.topMargin: Theme.spaceSm; Layout.bottomMargin: Theme.spaceSm
+            spacing: Theme.spaceMd
             Item {
-                Layout.preferredWidth: 38
-                Layout.preferredHeight: 34
-                // Ambient halo behind the brand mark (Section 3.2: restrained rose/lavender).
+                Layout.preferredWidth: 32
+                Layout.preferredHeight: 32
                 Rectangle {
-                    anchors.centerIn: parent
-                    width: parent.width + 16
-                    height: parent.height + 12
-                    radius: width / 2
-                    opacity: 0.5
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.rgba(Theme.accentGlow.r, Theme.accentGlow.g, Theme.accentGlow.b, 0.55) }
-                        GradientStop { position: 1.0; color: "transparent" }
-                    }
-                }
-                // Rounded gradient tile that carries the cat-ear note mark.
-                Rectangle {
-                    anchors.centerIn: parent
-                    width: 32; height: 32; radius: 10
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.accentSecondary }
-                        GradientStop { position: 0.55; color: Theme.accentPrimary }
-                        GradientStop { position: 1.0; color: Theme.accentHover }
-                    }
+                    anchors.fill: parent
+                    radius: Theme.radiusMd
+                    color: Theme.accentPrimary
                 }
                 Canvas {
                     anchors.centerIn: parent
@@ -97,45 +82,30 @@ Rectangle {
             Label {
                 text: "NekoTune"
                 color: Theme.textPrimary
-                font.pixelSize: 19
+                font.pixelSize: Theme.fontDialogTitle
                 font.weight: Font.DemiBold
                 font.letterSpacing: 0.6
             }
         }
         ColumnLayout {
-            Layout.fillWidth: true; spacing: 6
+            Layout.fillWidth: true; spacing: Theme.spaceXs
             Repeater {
                 model: sidebar.pages.filter(page => page.group === "primary")
-                delegate: TextButton {
-                    id: primaryNav
+                delegate: NavItem {
                     required property var modelData
                     Layout.fillWidth: true
                     objectName: "nav_" + modelData.id
-                    text: modelData.extensionId && sidebar.controllers.extensions ? sidebar.controllers.extensions.label(modelData.title || modelData.id, sidebar.translator.language) : sidebar.t(modelData.title)
-                    readonly property bool isCurrent: sidebar.shell.viewMode === modelData.id
-                    subtle: true
-                    subtleBg: isCurrent ? Theme.bgSelected : "transparent"
-                    subtleText: isCurrent ? Theme.accentPrimary : Theme.textSecondary
-                    subtleBorder: "transparent"
-                    Accessible.selected: isCurrent
+                    text: sidebar.pageLabel(modelData)
+                    iconKind: sidebar.pageIcon(modelData)
+                    current: sidebar.shell.viewMode === modelData.id
                     onClicked: sidebar.shell.navigate(modelData.id)
-
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 2
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 3
-                        height: 18
-                        radius: 1.5
-                        color: Theme.accentPrimary
-                        visible: primaryNav.isCurrent
-                    }
                 }
             }
         }
         RowLayout {
             Layout.fillWidth: true
-            Label { Layout.fillWidth: true; text: sidebar.t("playlists"); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+            Layout.leftMargin: Theme.spaceMd
+            Label { Layout.fillWidth: true; text: sidebar.t("playlists"); color: Theme.textMuted; font.pixelSize: Theme.fontCaption; font.weight: Font.DemiBold }
             IconButton { kind: "plus"; implicitWidth: 32; implicitHeight: 32; tooltipText: sidebar.t("new_playlist"); enabled: sidebar.transport.connected; onClicked: sidebar.newPlaylistRequested() }
         }
         ListView {
@@ -147,69 +117,37 @@ Rectangle {
                 const index = sidebar.controllers.playlists.model.items.findIndex(list => Number(list.id) === sidebar.currentPlaylist)
                 if (index >= 0) playlists.positionViewAtIndex(index, ListView.Contain)
             })
-            delegate: TextButton {
-                id: playlistNav
+            delegate: NavItem {
                 required property var modelData
                 width: playlists.width
                 objectName: "nav_playlist_" + modelData.id
                 text: modelData.name
-                readonly property bool isCurrent: sidebar.shell.viewMode === "queue" && sidebar.currentPlaylist === Number(modelData.id)
-                subtle: true
-                subtleBg: isCurrent ? Theme.bgSelected : "transparent"
-                subtleText: isCurrent ? Theme.accentPrimary : Theme.textSecondary
-                subtleBorder: "transparent"
-                Accessible.selected: isCurrent
+                iconKind: "playlist"
+                current: sidebar.shell.viewMode === "queue" && sidebar.currentPlaylist === Number(modelData.id)
                 onClicked: sidebar.playlistRequested(Number(modelData.id))
                 ToolTip.visible: hovered || activeFocus
                 ToolTip.text: modelData.name
-
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 3
-                    height: 18
-                    radius: 1.5
-                    color: Theme.accentPrimary
-                    visible: playlistNav.isCurrent
-                }
             }
-            Label { anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.top; anchors.topMargin: 8; visible: playlists.count === 0; text: sidebar.t("no_playlist_short"); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+            Label { anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.top; anchors.topMargin: Theme.spaceSm; visible: playlists.count === 0; text: sidebar.t("no_playlist_short"); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
         }
         ColumnLayout {
-            Layout.fillWidth: true; spacing: 6
+            Layout.fillWidth: true; spacing: Theme.spaceXs
             Repeater {
                 model: sidebar.pages.filter(page => page.group === "utility" || page.debug && sidebar.shell.debugEnabled)
-                delegate: TextButton {
-                    id: utilityNav
+                delegate: NavItem {
                     required property var modelData
                     Layout.fillWidth: true
                     objectName: modelData.debug ? "lyricsDebugNavigation" : "nav_" + modelData.id
-                    text: modelData.extensionId && sidebar.controllers.extensions ? sidebar.controllers.extensions.label(modelData.title || modelData.id, sidebar.translator.language) : sidebar.t(modelData.title)
-                    readonly property bool isCurrent: sidebar.shell.viewMode === modelData.id
-                    subtle: true
-                    subtleBg: isCurrent ? Theme.bgSelected : "transparent"
-                    subtleText: isCurrent ? Theme.accentPrimary : Theme.textSecondary
-                    subtleBorder: "transparent"
-                    Accessible.selected: isCurrent
+                    text: sidebar.pageLabel(modelData)
+                    iconKind: sidebar.pageIcon(modelData)
+                    current: sidebar.shell.viewMode === modelData.id
                     onClicked: sidebar.shell.navigate(modelData.id)
-
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 2
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 3
-                        height: 18
-                        radius: 1.5
-                        color: Theme.accentPrimary
-                        visible: utilityNav.isCurrent
-                    }
                 }
             }
             RowLayout {
-                Layout.fillWidth: true; Layout.topMargin: 6
-                Rectangle { Layout.preferredWidth: 6; Layout.preferredHeight: 6; radius: 3; color: sidebar.transport.connected ? Theme.statusSuccess : Theme.statusError }
-                Label { text: sidebar.t(sidebar.transport.connected ? "connected" : "offline"); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+                Layout.fillWidth: true; Layout.topMargin: Theme.spaceSm; Layout.leftMargin: Theme.spaceMd; spacing: Theme.spaceSm
+                Rectangle { Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4; color: sidebar.transport.connected ? Theme.statusSuccess : Theme.statusError }
+                Label { text: sidebar.t(sidebar.transport.connected ? "connected" : "offline"); color: Theme.textSecondary; font.pixelSize: Theme.fontCaption }
             }
         }
     }
