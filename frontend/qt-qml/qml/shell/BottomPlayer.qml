@@ -111,6 +111,12 @@ Rectangle {
                 onClicked: bar.controller.togglePlayPause()
             }
             IconButton { objectName: "nextTrackButton"; kind: "next"; tooltipText: bar.t("next"); enabled: bar.shell.transport.connected && bar.shell.queue.length > 0; onClicked: bar.controller.next() }
+            PlaybackRateButton {
+                translator: bar.translator
+                playbackRate: bar.controller.playbackRate === undefined ? 1.0 : bar.controller.playbackRate
+                enabled: bar.shell.transport.connected && Boolean(bar.controller.playbackRateSupported)
+                onRateRequested: rate => bar.controller.setPlaybackRate(rate)
+            }
         }
         RowLayout {
             Layout.fillWidth: true
@@ -161,6 +167,29 @@ Rectangle {
             AudioOutputButton {
                 controller: bar.shell.app ? bar.shell.app.audioOutput || null : null
                 translator: bar.translator; connected: bar.shell.transport.connected
+            }
+            IconButton {
+                id: windowModesButton
+                objectName: "windowModesButton"
+                kind: "mini"; tooltipText: bar.t("window_modes")
+                implicitWidth: 32
+                visible: Boolean(bar.shell.windowModes)
+                onClicked: windowModesMenu.openAt(windowModesButton)
+            }
+            ActionMenu {
+                id: windowModesMenu
+                readonly property var manager: bar.shell.windowModes || null
+                actions: [
+                    {key: "mini", label: bar.t("mini_mode"), enabled: manager !== null},
+                    {key: "lyrics", label: bar.t(manager && manager.desktopLyricsVisible ? "desktop_lyrics_hide" : "desktop_lyrics_show"), enabled: manager !== null && manager.desktopLyricsSupported},
+                    {key: "lock", label: bar.t(manager && manager.desktopLyricsLocked ? "desktop_lyrics_unlock" : "desktop_lyrics_lock"), enabled: manager !== null && manager.desktopLyricsVisible && manager.canLockDesktopLyrics}
+                ]
+                onChosen: action => {
+                    if (!manager) return
+                    if (action === "mini") manager.miniMode = true
+                    else if (action === "lyrics") manager.desktopLyricsVisible = !manager.desktopLyricsVisible
+                    else manager.desktopLyricsLocked = !manager.desktopLyricsLocked
+                }
             }
             IconButton {
                 objectName: "nowPlayingButton"

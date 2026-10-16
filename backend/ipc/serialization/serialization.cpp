@@ -23,6 +23,7 @@ QJsonObject toJson(const SongMetadata &song) {
             {"cover_url", song.coverUrl},
             {"import_source", song.importSource},
             {"play_count", song.playCount},
+            {"last_played_at", song.lastPlayedAt},
             {"source", QJsonObject{{"kind", song.isRemote() ? "extension" : "local"},
                                    {"provider_id", song.providerId},
                                    {"track_id", song.providerTrackId}}}};
@@ -46,6 +47,7 @@ QJsonObject toJson(const QueueItem &item, int position, bool includeLyrics) {
     if (position >= 0) {
         result.insert("position", position);
         result.insert("state", item.state);
+        result.insert("play_next", item.playNext);
     }
     return result;
 }
@@ -96,6 +98,8 @@ QJsonObject toJson(const PlaybackSnapshot &state) {
         song.insert("album", state.metadata.album);
     }
     return {{"playback_mode", toString(state.playbackMode)},
+            {"playback_rate", state.playbackRate},
+            {"playback_rate_supported", state.playbackRateSupported},
             {"capabilities", toJson(state.capabilities)},
             {"state", toString(state.state)},
             {"position", state.position},

@@ -65,6 +65,47 @@ Rectangle {
             compare(picker.currentValue, value)
         }
 
+        function test_recentlyPlayedSortAndTimeFilters() {
+            const now = Date.now()
+            const day = 24 * 60 * 60 * 1000
+            const stamp = days => new Date(now - days * day).toISOString()
+            testFixtures.seedLibrary({tags: [{id: 1, name: "Rock"}], songs: [
+                {song_id: 1, title: "Never recorded", play_count: 8, last_played_at: "", available: true},
+                {song_id: 2, title: "Yesterday", play_count: 1, last_played_at: stamp(1), available: true, tags: [{id: 1}]},
+                {song_id: 3, title: "Two weeks", play_count: 1, last_played_at: stamp(14), available: true, tags: [{id: 1}]},
+                {song_id: 4, title: "Older", play_count: 1, last_played_at: stamp(31), available: true},
+                {song_id: 5, title: "Invalid time", play_count: 1, last_played_at: "invalid", available: true},
+                {song_id: 6, title: "Same instant", play_count: 2, last_played_at: stamp(1), available: true},
+                {song_id: 7, title: "Different offset", play_count: 1, last_played_at: new Date(now - 2 * day).toISOString().replace("Z", "+00:00"), available: true}
+            ]})
+            const original = testLibrary.songs.items.map(song => song.last_played_at).join(",")
+            choose("librarySortPicker", "recently_played")
+            compare(visibleIds(), "2,6,7,3,4,1,5")
+            choose("libraryPlayFilterPicker", "last_7_days")
+            compare(visibleIds(), "2,6,7")
+            choose("libraryPlayFilterPicker", "last_30_days")
+            compare(visibleIds(), "2,6,7,3")
+            testLibrary.searchText = "weeks"
+            compare(visibleIds(), "3")
+            testLibrary.searchText = ""
+            testLibrary.toggleTag(1)
+            compare(visibleIds(), "2,3")
+            compare(testLibrary.songs.items.map(song => song.last_played_at).join(","), original)
+        }
+        function test_recentFiltersExcludeOutOfWindowAndFutureTimes() {
+            const now = Date.now(), day = 24 * 60 * 60 * 1000
+            testFixtures.seedLibrary({tags: [], songs: [
+                {song_id: 1, title: "Within seven", last_played_at: new Date(now - 7 * day + 60000).toISOString()},
+                {song_id: 2, title: "Outside seven", last_played_at: new Date(now - 7 * day - 60000).toISOString()},
+                {song_id: 3, title: "Within thirty", last_played_at: new Date(now - 30 * day + 60000).toISOString()},
+                {song_id: 4, title: "Outside thirty", last_played_at: new Date(now - 30 * day - 60000).toISOString()},
+                {song_id: 5, title: "Future", last_played_at: new Date(now + day).toISOString()}
+            ]})
+            testLibrary.playFilter = "last_7_days"
+            compare(visibleIds(), "1")
+            testLibrary.playFilter = "last_30_days"
+            compare(visibleIds(), "1,2,3")
+        }
         function test_sortingAndCombinedFilters() {
             testFixtures.seedLibrary({tags: [{id: 1, name: "Rock"}], songs: [
                 {song_id: 3, title: "Track 10", artist: "Beta", album: "B", duration_ms: 100000, play_count: 7, import_source: "demo", available: true, tags: [{id: 1}]},

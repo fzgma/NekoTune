@@ -4,6 +4,7 @@
 #include "ipc_client.h"
 #include "platform/system_media_bridge.h"
 #include "platform/system_tray_controller.h"
+#include "platform/playback_window_controller.h"
 #ifdef NEKOTUNE_MPRIS
 #include "platform/linux/mpris_service.h"
 #endif
@@ -23,6 +24,7 @@
 #include <QQmlContext>
 #include <QQmlNetworkAccessManagerFactory>
 #include <QQuickStyle>
+#include <QQuickWindow>
 #include <QStandardPaths>
 #include <QWindow>
 
@@ -73,6 +75,7 @@ int main(int argc, char *argv[]) {
     QString directoryError;
     if (!nekotune::AppPaths::prepare(&directoryError)) { qCritical() << directoryError; return 1; }
     QQuickStyle::setStyle(QStringLiteral("Fusion"));
+    QQuickWindow::setDefaultAlphaBuffer(true);
     if (app.arguments().contains("--safe-mode"))
         qputenv("NEKOTUNE_SAFE_MODE", "1");
 
@@ -111,11 +114,15 @@ int main(int argc, char *argv[]) {
 #endif
 
     QQmlApplicationEngine engine;
+    // Destroy auxiliary QML windows before the engine they were created in.
+    PlaybackWindowController playbackWindows;
+    desktopIntegration.setPlaybackWindows(&playbackWindows);
     engine.setNetworkAccessManagerFactory(new CoverNetworkManagerFactory);
     engine.rootContext()->setContextProperty(QStringLiteral("ipcClient"), &ipcClient);
     engine.rootContext()->setContextProperty(QStringLiteral("i18n"), &i18n);
     engine.rootContext()->setContextProperty(QStringLiteral("controllers"), &controllers);
     engine.rootContext()->setContextProperty(QStringLiteral("desktopIntegration"), &desktopIntegration);
+    engine.rootContext()->setContextProperty(QStringLiteral("playbackWindows"), &playbackWindows);
     engine.rootContext()->setContextProperty(QStringLiteral("lyricsDebugEnabled"),
                                              commandLine.isSet(QStringLiteral("lyrics-debug")) ||
                                                  commandLine.isSet(QStringLiteral("debug-lyrics")));
@@ -142,6 +149,7 @@ int main(int argc, char *argv[]) {
 
     const auto window = qobject_cast<QWindow *>(engine.rootObjects().first());
     if (!window) return 1;
+    playbackWindows.initialize(&engine, window);
     desktopIntegration.attachWindow(window);
 
     return app.exec();

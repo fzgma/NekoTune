@@ -12,18 +12,45 @@ bool PlayerQueue::setCurrentIndex(int index) {
     }
 
     m_currentIndex = index;
+    if (index >= 0)
+        m_items[index].playNext = false;
     return true;
 }
 
 int PlayerQueue::add(const QString &path, const SongMetadata &metadata) {
+    return insert(m_items.size(), path, metadata);
+}
+
+int PlayerQueue::insert(int position, const QString &path, const SongMetadata &metadata) {
+    if (position < 0 || position > m_items.size())
+        return 0;
     const int id = m_nextQueueId++;
-    m_items.append({
+    m_items.insert(position, {
         id,
         metadata,
         path,
         QStringLiteral("queued"),
     });
+    if (m_currentIndex >= position)
+        ++m_currentIndex;
     return id;
+}
+
+int PlayerQueue::insertAfterCurrent(const QString &path, const SongMetadata &metadata) {
+    const int position = m_currentIndex + 1;
+    const int id = insert(position, path, metadata);
+    m_items[position].playNext = true;
+    return id;
+}
+
+bool PlayerQueue::move(int queueId, int position) {
+    const int from = indexById(queueId);
+    if (from < 0 || position < 0 || position >= m_items.size())
+        return false;
+    const int currentId = m_currentIndex < 0 ? 0 : m_items.at(m_currentIndex).id;
+    m_items.move(from, position);
+    m_currentIndex = currentId ? indexById(currentId) : -1;
+    return true;
 }
 
 bool PlayerQueue::removeAt(int index) {
@@ -88,7 +115,7 @@ QVector<QueueRecord> PlayerQueue::records() const {
     QVector<QueueRecord> records;
     records.reserve(m_items.size());
     for (const auto &item : m_items) {
-        records.append({item.path, item.metadata.id});
+        records.append({item.path, item.metadata.id, item.playNext});
     }
     return records;
 }

@@ -13,7 +13,8 @@ class PlayerEngine final : public QObject {
     PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
                  std::unique_ptr<IShuffleStrategy> strategy = std::make_unique<ShuffleBagStrategy>(),
                  PlaybackMode mode = PlaybackMode::Sequential,
-                 PlaybackOrderService::ModeSaver saveMode = {});
+                 PlaybackOrderService::ModeSaver saveMode = {}, double playbackRate = 1.0,
+                 std::function<bool(double)> saveRate = {});
     /// Persist a mode before making it authoritative for navigation or UI state.
     /// The injected mode saver may reject the change without consuming shuffle history.
     /// No change notification is emitted when the requested mode is already active.
@@ -45,6 +46,7 @@ class PlayerEngine final : public QObject {
     /// NaN and infinities are rejected before reaching the decoder.
     /// The notification contains the adapter's resulting value rather than an assumed input echo.
     Result<void> setVolume(double volume);
+    Result<void> setPlaybackRate(double rate);
     /// The argument is a queue occurrence ID, not a library song ID.
     /// Selecting it reloads the source and resets navigation history.
     /// Use collection playback when starting from a library/playlist row.
@@ -78,6 +80,7 @@ class PlayerEngine final : public QObject {
     void capabilitiesChanged();
     void durationChanged(qint64 duration);
     void volumeChanged(double volume);
+    void playbackRateChanged(double rate);
     void trackChanged();
     void songStarted(int songId);
     void playbackModeChanged(nekotune::PlaybackMode mode);
@@ -108,5 +111,6 @@ class PlayerEngine final : public QObject {
     PlayerState m_idleState = PlayerState::Paused;
     QSet<QString> m_reloadingExtensions;
     PlaybackCapabilities m_capabilities;
+    std::function<bool(double)> m_saveRate;
 };
 } // namespace nekotune

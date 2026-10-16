@@ -10,6 +10,8 @@ class PlayerQueueTest final : public QObject {
 
   private slots:
     void addAndRemoveQueueItems();
+    void moveKeepsOccurrenceAndSelection();
+    void insertKeepsSelectionAndDuplicates();
 };
 
 // A song may occur more than once in the playback queue.
@@ -76,6 +78,56 @@ void PlayerQueueTest::addAndRemoveQueueItems() {
     QCOMPARE(items.at(1).toObject().value(QStringLiteral("id")).toInt(), repeatedSecondId);
 
     QCOMPARE(queue.indexById(firstId), -1);
+}
+
+void PlayerQueueTest::moveKeepsOccurrenceAndSelection() {
+    nekotune::PlayerQueue queue;
+    const nekotune::SongMetadata song{17, "duplicate"};
+    const int first = queue.add("a", song), current = queue.add("a", song), last = queue.add("a", song);
+    QVERIFY(queue.setCurrentIndex(1));
+    QVERIFY(queue.move(current, 2));
+    QCOMPARE(queue.currentIndex(), 2);
+    QCOMPARE(queue.at(2).id, current);
+    QVERIFY(queue.move(current, 0));
+    QCOMPARE(queue.currentIndex(), 0);
+    QVERIFY(queue.move(last, 0)); // Cross the current item from behind.
+    QCOMPARE(queue.currentIndex(), 1);
+    QVERIFY(queue.move(last, 2)); // Cross it in the other direction.
+    QCOMPARE(queue.currentIndex(), 0);
+    QCOMPARE(queue.at(1).id, first);
+    QCOMPARE(queue.at(2).id, last);
+    QVERIFY(!queue.move(17, 0)); // Library identity is not an occurrence identity.
+    QVERIFY(!queue.move(first, -1));
+    QVERIFY(!queue.move(first, queue.size()));
+    QCOMPARE(queue.at(queue.currentIndex()).id, current);
+    queue.setCurrentIndex(-1);
+    QVERIFY(queue.move(first, 0));
+    QCOMPARE(queue.currentIndex(), -1);
+}
+
+void PlayerQueueTest::insertKeepsSelectionAndDuplicates() {
+    nekotune::PlayerQueue queue;
+    const nekotune::SongMetadata song{17, "duplicate"};
+    const int current = queue.add("a", song);
+    QVERIFY(queue.setCurrentIndex(0));
+    QVERIFY(!queue.insert(-1, "a", song));
+    QVERIFY(!queue.insert(2, "a", song));
+    const int before = queue.insert(0, "a", song);
+    QCOMPARE(before, current + 1);
+    QCOMPARE(queue.currentIndex(), 1);
+    const int next = queue.insertAfterCurrent("a", song);
+    QCOMPARE(queue.at(2).id, next);
+    QVERIFY(queue.at(2).playNext);
+    QCOMPARE(queue.at(queue.currentIndex()).id, current);
+    queue.markCurrent();
+    QCOMPARE(queue.at(1).state, QString("current"));
+    QVERIFY(queue.setCurrentIndex(2));
+    QVERIFY(!queue.at(2).playNext);
+    queue.clear();
+    const int first = queue.insertAfterCurrent("a", song);
+    QCOMPARE(queue.at(0).id, first);
+    QCOMPARE(queue.currentIndex(), -1);
+    QVERIFY(queue.records().at(0).playNext);
 }
 
 QTEST_APPLESS_MAIN(PlayerQueueTest)

@@ -45,6 +45,15 @@ ApplicationWindow {
     palette.highlight: Theme.accentPrimary
     palette.highlightedText: Theme.textOnAccent
     property var desktop: typeof desktopIntegration !== "undefined" ? desktopIntegration : null
+    property var windowModes: typeof playbackWindows !== "undefined" ? playbackWindows : null
+    Connections {
+        target: root.windowModes
+        function onErrorOccurred(key) {
+            playbackWindowError.text = root.translator.text(key, root.translator.language)
+            playbackWindowError.open()
+        }
+    }
+    MessageDialog { id: playbackWindowError; title: "NekoTune"; buttons: MessageDialog.Ok }
     property var app: controllers
     property var transport: ipcClient
     property var translator: i18n
@@ -347,6 +356,7 @@ ApplicationWindow {
                         onPlayRequested: id => root.app.queue.playQueueItem(id)
                         onTogglePlayPauseRequested: root.app.playback.togglePlayPause()
                         onRemoveRequested: id => root.app.queue.removeQueueItem(id)
+                        onMoveRequested: (id, position) => root.app.queue.moveQueueItem(id, position)
                         onEditRequested: song => metadataEditor.openForSong(song)
                         onPlaylistRequested: (action, params) => root.app.playlists.managePlaylist(action, params)
                         onLibraryRequested: root.navigate("library")

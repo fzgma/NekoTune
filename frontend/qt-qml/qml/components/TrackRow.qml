@@ -20,6 +20,11 @@ Rectangle {
     property bool compact: false
     property bool downloadRow: false
     property bool downloadEnabled: false
+    property bool reorderEnabled: false
+    signal reorderStarted()
+    signal reorderMoved(real sceneY)
+    signal reorderFinished()
+    signal reorderCancelled()
     signal downloadRequested()
     property bool showCheckbox: false
     property bool showAlbum: false
@@ -92,6 +97,24 @@ Rectangle {
         anchors.leftMargin: 8
         anchors.rightMargin: 8
         spacing: Theme.spaceMd
+        Item {
+            visible: row.reorderEnabled
+            Layout.preferredWidth: 24
+            Layout.fillHeight: true
+            Accessible.role: Accessible.Button
+            Accessible.name: i18n.text("reorder_queue", i18n.language)
+            Glyph { anchors.centerIn: parent; width: 18; height: 18; size: 18; kind: "queue"; color: Theme.textMuted }
+            MouseArea {
+                objectName: "queueDragHandle"
+                anchors.fill: parent
+                preventStealing: true
+                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                onPressed: mouse => { row.reorderStarted(); row.reorderMoved(mapToItem(null, mouse.x, mouse.y).y) }
+                onPositionChanged: mouse => { if (pressed) row.reorderMoved(mapToItem(null, mouse.x, mouse.y).y) }
+                onReleased: { row.reorderFinished() }
+                onCanceled: row.reorderCancelled()
+            }
+        }
         CheckBox {
             id: selectionBox
             visible: row.showCheckbox
@@ -209,11 +232,12 @@ Rectangle {
         IconButton {
             visible: row.menuActions.length > 0
             id: more
+            objectName: "trackMoreButton"
             kind: "more"
             implicitWidth: 32; implicitHeight: 36
             tooltipText: i18n.text("track_actions", i18n.language)
             onClicked: row.openMenu(more)
         }
     }
-    ActionMenu { id: contextMenu; actions: row.menuActions; extensionContext: "song"; contextData: ({song: row.song}); onChosen: action => row.actionRequested(action) }
+    ActionMenu { id: contextMenu; objectName: "trackActionMenu"; actions: row.menuActions; extensionContext: "song"; contextData: ({song: row.song}); onChosen: action => row.actionRequested(action) }
 }

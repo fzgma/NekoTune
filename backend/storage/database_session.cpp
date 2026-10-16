@@ -184,6 +184,18 @@ bool DatabaseSession::migrate() {
         return false;
     }
 
+    if (!query.exec("PRAGMA table_info(queue_items)")) {
+        setError(query.lastError().text());
+        return false;
+    }
+    bool hasPlayNext = false;
+    while (query.next())
+        hasPlayNext |= query.value(1).toString() == "play_next";
+    if (!hasPlayNext && !query.exec("ALTER TABLE queue_items ADD COLUMN play_next INTEGER NOT NULL DEFAULT 0")) {
+        setError(query.lastError().text());
+        return false;
+    }
+
     if (!query.exec("PRAGMA table_info(songs)")) {
         setError(query.lastError().text());
         return false;
@@ -311,6 +323,12 @@ bool DatabaseSession::migrate() {
     }
     while (query.next()) metadataColumns.insert(query.value(1).toString());
     query.finish();
+    if (!metadataColumns.contains("last_played_at") &&
+        !query.exec("ALTER TABLE songs ADD COLUMN last_played_at TEXT NOT NULL DEFAULT ''")) {
+        setError(query.lastError().text());
+        m_db.rollback();
+        return false;
+    }
     for (const QString column : {"album_artist", "genre", "year", "track_number", "disc_number"}) {
         const auto type = column == "album_artist" || column == "genre"
             ? QStringLiteral("TEXT NOT NULL DEFAULT ''") : QStringLiteral("INTEGER NOT NULL DEFAULT 0 CHECK(%1 BETWEEN 0 AND 9999)").arg(column);

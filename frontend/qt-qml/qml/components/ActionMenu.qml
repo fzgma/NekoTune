@@ -46,7 +46,7 @@ Popup {
             model: menu.displayedActions
             delegate: TextButton {
                 required property var modelData
-                width: parent.width
+                width: menuContent.width
                 objectName: modelData.objectName || "menu_" + modelData.key
                 text: modelData.label
                 enabled: modelData.enabled === undefined || Boolean(modelData.enabled)

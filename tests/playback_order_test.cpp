@@ -13,6 +13,7 @@
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <limits>
 
 using namespace nekotune;
 
@@ -111,6 +112,195 @@ class PlaybackOrderTest final : public QObject {
         return id;
     }
   private slots:
+    void playbackRatePreservesPositionAndQueueAndRejectsInvalidChanges() {
+        QTemporaryDir directory;
+        StoreFixture store(directory.filePath("rate.sqlite3"));
+        QueueService queues(store.queueRepo, store.songRepo, store.db);
+        OrderAudio audio;
+        bool saveAllowed = true;
+        double saved = 1.5;
+        PlayerEngine player(audio, queues, std::make_unique<ShuffleBagStrategy>(), PlaybackMode::Sequential,
+                            {}, saved, [&](double rate) {
+                                if (!saveAllowed) return false;
+                                saved = rate;
+                                return true;
+                            });
+        QCOMPARE(player.snapshot().playbackRate, 1.5);
+        QVERIFY(player.replaceQueue(storedQueue(store)));
+        audio.seek(12345);
+        const auto id = selected(player);
+        const auto loads = audio.loads;
+        QSignalSpy changed(&player, &PlayerEngine::playbackRateChanged);
+        for (double rate : {.5, .75, 1.0, 1.25, 1.5, 1.75, 2.0}) {
+            QVERIFY(player.setPlaybackRate(rate));
+            QCOMPARE(player.snapshot().playbackRate, rate);
+            QCOMPARE(saved, rate);
+            QCOMPARE(audio.clock, 12345);
+            QCOMPARE(audio.loads, loads);
+            QCOMPARE(selected(player), id);
+            QVERIFY(audio.playing);
+        }
+        const auto notifications = changed.count();
+        for (double bad : {0.0, .49, 2.01, -1.0, std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()})
+            QVERIFY(!player.setPlaybackRate(bad));
+        saveAllowed = false;
+        QVERIFY(!player.setPlaybackRate(.75));
+        QCOMPARE(player.snapshot().playbackRate, 2.0);
+        QCOMPARE(changed.count(), notifications);
+        QCOMPARE(saved, 2.0);
+        saveAllowed = true;
+        QVERIFY(player.next());
+        QCOMPARE(player.snapshot().playbackRate, 2.0);
+        QVERIFY(player.pause());
+        QVERIFY(player.setPlaybackRate(.5));
+        QVERIFY(!audio.playing);
+        QVERIFY(player.stop());
+        QVERIFY(player.setPlaybackRate(1.0));
+        QVERIFY(player.clear());
+        QVERIFY(player.setPlaybackRate(1.5));
+        QVERIFY(player.snapshot().playbackRateSupported);
+    }
+    void playbackRateFallbackAndResetWithoutPitchSupport() {
+        QTemporaryDir directory;
+        StoreFixture store(directory.filePath("rate.sqlite3"));
+        QueueService queues(store.queueRepo, store.songRepo, store.db);
+        OrderAudio audio;
+        audio.rateSupported = false;
+        double saved = 1.5;
+        PlayerEngine player(audio, queues, std::make_unique<ShuffleBagStrategy>(), PlaybackMode::Sequential,
+                            {}, saved, [&](double rate) { saved = rate; return true; });
+        QCOMPARE(player.snapshot().playbackRate, 1.0);
+        QVERIFY(!player.snapshot().playbackRateSupported);
+        QVERIFY(!player.setPlaybackRate(1.5));
+        QCOMPARE(saved, 1.5);
+        QVERIFY(player.setPlaybackRate(1.0));
+        QCOMPARE(saved, 1.0);
+    }
+    void playbackRateIpcPersistenceAndClientSync() {
+        QVERIFY(AppPaths::saveSetting("playback_rate", 9.0));
+        BackendRuntime runtime([] { return std::make_unique<OrderAudio>(); });
+        QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+        OrderPeer first, second;
+        QVERIFY(first.connect(runtime.serverName()));
+        QVERIFY(second.connect(runtime.serverName()));
+        auto initial = first.event("server.connected").value("data").toObject();
+        QCOMPARE(initial.value("playback_rate").toDouble(), 1.0);
+        QVERIFY(initial.value("playback_rate_supported").toBool());
+        IpcClient client;
+        PlaybackController controller(client);
+        client.connectBackend();
+        QTRY_VERIFY(controller.playbackRateSupported());
+        for (double rate : {.5, .75, 1.0, 1.25, 1.5, 1.75, 2.0}) {
+            const auto reply = first.call("player.set_playback_rate", {{"rate", rate}});
+            QCOMPARE(reply.value("status").toString(), "ok");
+            QCOMPARE(reply.value("data").toObject().value("playback_rate").toDouble(), rate);
+            QCOMPARE(second.event("player.playback_rate_changed").value("playback_rate").toDouble(), rate);
+            QTRY_COMPARE(controller.playbackRate(), rate);
+        }
+        for (const auto &bad : {QJsonValue(), QJsonValue("1.5"), QJsonValue(true), QJsonValue(.49), QJsonValue(2.01)})
+            QCOMPARE(first.call("player.set_playback_rate", {{"rate", bad}}).value("status").toString(), "error");
+        controller.setPlaybackRate(1.5);
+        QTRY_COMPARE(controller.playbackRate(), 1.5);
+        controller.apply({{"position", 12345}});
+        QCOMPARE(controller.playbackRate(), 1.5);
+        QCOMPARE(AppPaths::setting("playback_rate").toDouble(), 1.5);
+        QVERIFY(AppPaths::setting("lyrics_offline").toBool());
+        runtime.stop();
+        QVERIFY(runtime.start());
+        OrderPeer restored;
+        QVERIFY(restored.connect(runtime.serverName()));
+        QCOMPARE(restored.event("server.connected").value("data").toObject().value("playback_rate").toDouble(), 1.5);
+        QFile settings(AppPaths::configFile("settings.json"));
+        QVERIFY(settings.open(QIODevice::ReadOnly));
+        const auto previousSettings = settings.readAll();
+        settings.close();
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write("broken"); settings.close();
+        QCOMPARE(restored.call("player.set_playback_rate", {{"rate", .75}}).value("status").toString(), "error");
+        QCOMPARE(restored.call("player.status").value("data").toObject().value("playback_rate").toDouble(), 1.5);
+        runtime.stop();
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        QCOMPARE(settings.write(previousSettings), previousSettings.size());
+        settings.close();
+    }
+    void reorderingPersistsWithoutReloadingAndRollsBack() {
+        QTemporaryDir directory;
+        const auto database = directory.filePath("reorder.sqlite3");
+        QList<QString> expected;
+        {
+            StoreFixture store(database);
+            QueueService queues(store.queueRepo, store.songRepo, store.db);
+            OrderAudio audio;
+            PlayerEngine player(audio, queues);
+            auto list = storedQueue(store, 4);
+            list.setCurrentIndex(1);
+            QVERIFY(player.replaceQueue(list));
+            audio.seek(12345);
+            const int loads = audio.loads;
+            for (const auto &move : {qMakePair(2, 3), qMakePair(2, 0), qMakePair(4, 0), qMakePair(4, 3)}) {
+                QVERIFY(queues.move(move.first, move.second));
+                QCOMPARE(selected(player), 2);
+                QCOMPARE(audio.loads, loads);
+                QCOMPARE(audio.clock, 12345);
+                QVERIFY(audio.playing);
+            }
+            const auto before = queues.queue();
+            QSqlQuery sql(store.db.database());
+            QVERIFY(sql.exec("CREATE TRIGGER fail_move BEFORE INSERT ON queue_items BEGIN SELECT RAISE(FAIL, 'injected'); END"));
+            QSignalSpy changes(&queues, &QueueService::changed);
+            QVERIFY(!queues.move(1, 0));
+            QCOMPARE(changes.count(), 0);
+            for (int i = 0; i < before.size(); ++i) {
+                QCOMPARE(queues.queue().at(i).id, before.at(i).id);
+                expected.append(before.at(i).path);
+                QCOMPARE(store.queueRepo.loadQueue().items.at(i).path, before.at(i).path);
+            }
+            QCOMPARE(audio.clock, 12345);
+            QCOMPARE(audio.loads, loads);
+            QVERIFY(sql.exec("DROP TRIGGER fail_move"));
+        }
+        StoreFixture reopened(database);
+        QueueService restored(reopened.queueRepo, reopened.songRepo, reopened.db);
+        QCOMPARE(restored.queue().currentIndex(), 0);
+        for (int i = 0; i < expected.size(); ++i)
+            QCOMPARE(restored.queue().at(i).path, expected.at(i));
+    }
+    void playNextPrecedesShuffleAndFailedSaveRetainsPriority() {
+        QTemporaryDir directory;
+        StoreFixture store(directory.filePath("priority.sqlite3"));
+        QueueService queues(store.queueRepo, store.songRepo, store.db);
+        OrderAudio audio;
+        PlayerEngine player(audio, queues, std::make_unique<ShuffleBagStrategy>(42));
+        auto list = storedQueue(store);
+        QVERIFY(player.replaceQueue(list));
+        QVERIFY(player.setPlaybackMode(PlaybackMode::Shuffle));
+        QVERIFY(player.next());
+        QVERIFY(player.previous()); // Priority must also override forward shuffle history.
+        auto next = queues.queue();
+        const int priority = next.insertAfterCurrent("/music/priority.wav", next.at(0).metadata);
+        const int second = next.insert(next.currentIndex() + 2, "/music/second.wav", next.at(0).metadata);
+        next[next.indexById(second)].playNext = true;
+        QVERIFY(queues.commit(next));
+        QueueService restored(store.queueRepo, store.songRepo, store.db);
+        QVERIFY(restored.queue().at(restored.queue().currentIndex() + 1).playNext);
+        QSqlQuery sql(store.db.database());
+        QVERIFY(sql.exec("CREATE TRIGGER fail_next BEFORE DELETE ON queue_items BEGIN SELECT RAISE(FAIL, 'injected'); END"));
+        QVERIFY(!player.next());
+        QVERIFY(queues.queue().at(queues.queue().indexById(priority)).playNext);
+        QVERIFY(sql.exec("DROP TRIGGER fail_next"));
+        QVERIFY(player.next());
+        QCOMPARE(selected(player), priority);
+        QVERIFY(!queues.queue().at(queues.queue().currentIndex()).playNext);
+        emit audio.ended();
+        QCOMPARE(selected(player), second);
+        QVERIFY(player.previous());
+        QCOMPARE(selected(player), priority);
+        QVERIFY(player.next());
+        QCOMPARE(selected(player), second);
+        QVERIFY(player.next());
+        QVERIFY(selected(player) != second);
+    }
     void countsSuccessfulPlaybackStarts() {
         QTemporaryDir directory;
         StoreFixture store(directory.filePath("counts.sqlite3"));
@@ -125,16 +315,22 @@ class PlaybackOrderTest final : public QObject {
         auto list = storedQueue(store, 2);
         const int songId = list.at(0).metadata.id;
         auto count = [&] { return store.songById(songId)->playCount; };
+        auto lastPlayed = [&] { return store.songById(songId)->lastPlayedAt; };
         QVERIFY(player.replaceQueue(list, false));
         QCOMPARE(count(), 0);
+        QVERIFY(lastPlayed().isEmpty());
         QVERIFY(player.play());
         QCOMPARE(count(), 1);
+        const auto firstPlayedAt = lastPlayed();
+        QVERIFY(!firstPlayedAt.isEmpty());
+        QCOMPARE(player.snapshot().song->metadata.lastPlayedAt, firstPlayedAt);
         QCOMPARE(player.snapshot().song->metadata.playCount, 1);
         QVERIFY(player.pause());
         QVERIFY(player.play());
         emit audio.stateChanged(PlayerState::Loading);
         emit audio.stateChanged(PlayerState::Playing);
         QCOMPARE(count(), 1);
+        QCOMPARE(lastPlayed(), firstPlayedAt);
         QVERIFY(player.stop());
         QVERIFY(player.play());
         QCOMPARE(count(), 2);
@@ -145,11 +341,14 @@ class PlaybackOrderTest final : public QObject {
         QCOMPARE(count(), 4);
         QVERIFY(player.playItem(player.snapshot().song->id));
         QCOMPARE(count(), 5);
+        const auto lastStartedAt = lastPlayed();
         emit audio.failed("decode failed");
         QCOMPARE(count(), 5);
+        QCOMPARE(lastPlayed(), lastStartedAt);
         audio.suspendAudioOutput();
         QVERIFY(!player.play());
         QCOMPARE(count(), 5);
+        QCOMPARE(lastPlayed(), lastStartedAt);
         QVERIFY(saved);
     }
     void initTestCase() {

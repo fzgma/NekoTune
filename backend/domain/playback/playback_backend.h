@@ -50,6 +50,9 @@ class IPlaybackBackend : public QObject {
     virtual void seek(qint64 position) = 0;
     virtual bool seekable() const { return false; }
     virtual void setVolume(double volume) = 0;
+    virtual void setPlaybackRate(double rate) = 0;
+    virtual double playbackRate() const = 0;
+    virtual bool supportsPlaybackRate() const = 0;
     virtual qint64 position() const = 0;
     virtual qint64 duration() const = 0;
     virtual double volume() const = 0;

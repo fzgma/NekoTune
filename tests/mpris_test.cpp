@@ -129,6 +129,19 @@ class MprisTest final : public QObject {
         QCOMPARE(art.value("mpris:artUrl").toString(), "file:///tmp/test-cover.png");
         QCOMPARE(art.value("xesam:album").toString(), "专辑");
     }
+    void playbackRateIsReadOnlyAndFollowsBackend() {
+        QCOMPARE(property("MinimumRate").toDouble(), .5);
+        QCOMPARE(property("MaximumRate").toDouble(), 2.0);
+        m_playback->setPlaybackRate(1.5);
+        QTRY_COMPARE(property("Rate").toDouble(), 1.5);
+        QTRY_VERIFY(std::any_of(m_changes.cbegin(), m_changes.cend(), [](const auto &change) {
+            return change.value("Rate").toDouble() == 1.5;
+        }));
+        QCOMPARE(setProperty("Rate", 1.0).errorName(), "org.freedesktop.DBus.Error.PropertyReadOnly");
+        QCOMPARE(property("Rate").toDouble(), 1.5);
+        const auto xml = call("org.freedesktop.DBus.Introspectable", "Introspect");
+        QVERIFY(xml.arguments().first().toString().contains("name=\"Rate\" type=\"d\" access=\"read\""));
+    }
     void playbackNavigationSeekAndVolume() {
         QCOMPARE(control("Play").type(), QDBusMessage::ReplyMessage);
         QTRY_COMPARE(state(), "Playing");
@@ -150,7 +163,9 @@ class MprisTest final : public QObject {
         QTRY_COMPARE(property("Volume").toDouble(), 1.0);
         QCOMPARE(control("PlayPause").type(), QDBusMessage::ReplyMessage);
         QTRY_COMPARE(state(), "Playing");
-        QCOMPARE(setProperty("Rate", 0.0).type(), QDBusMessage::ReplyMessage);
+        QCOMPARE(setProperty("Rate", 0.0).errorName(), "org.freedesktop.DBus.Error.PropertyReadOnly");
+        QCOMPARE(state(), "Playing");
+        QCOMPARE(control("Pause").type(), QDBusMessage::ReplyMessage);
         QTRY_COMPARE(state(), "Paused");
         QCOMPARE(control("Stop").type(), QDBusMessage::ReplyMessage);
         QCOMPARE(control("Next").type(), QDBusMessage::ReplyMessage);
@@ -168,7 +183,7 @@ class MprisTest final : public QObject {
         for (auto target : {qint64(-1), qint64(30000001)})
             QCOMPARE(control("SetPosition", {QVariant::fromValue(QDBusObjectPath(m_bridge->trackId())), target}).type(), QDBusMessage::ReplyMessage);
         QCOMPARE(property("Position").toLongLong(), qint64(0));
-        QCOMPARE(setProperty("Rate", 2.0).errorName(), "org.freedesktop.DBus.Error.NotSupported");
+        QCOMPARE(setProperty("Rate", 2.0).errorName(), "org.freedesktop.DBus.Error.PropertyReadOnly");
         QCOMPARE(setProperty("Volume", std::numeric_limits<double>::quiet_NaN()).errorName(), "org.freedesktop.DBus.Error.InvalidArgs");
         QCOMPARE(setProperty("Volume", 1).errorName(), "org.freedesktop.DBus.Error.InvalidArgs");
         QCOMPARE(setProperty("Position", qint64(0)).errorName(), "org.freedesktop.DBus.Error.PropertyReadOnly");

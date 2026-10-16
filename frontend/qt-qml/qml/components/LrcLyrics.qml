@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import "LyricTiming.js" as Timing
 
 // Consumes already parsed absolute line/word times from backend snapshots.
 // LRC lines follow backend position; KRC can interpolate brief visual progress.
@@ -15,14 +16,12 @@ Item {
     property var lines: []
     property string plainText: ""
     property real position: 0
+    property real playbackRate: 1.0
     property bool playing: false
-    property int activeIndex: -1
+    readonly property int activeIndex: clock.activeIndex
     readonly property real activeTime: activeIndex >= 0 ? Number(lines[activeIndex].time_ms) : -1
-    readonly property bool hasWordTiming: lines && lines.length > 0 && Boolean(lines[0].words)
-    property real displayPosition: position
-    property real anchorPosition: position
-    property real anchorClock: 0
-    readonly property real shownPosition: playing && hasWordTiming && !reducedMotion ? displayPosition : position
+    readonly property bool hasWordTiming: clock.hasWordTiming
+    readonly property real shownPosition: clock.shownPosition
     property color activeColor: Theme.textPrimary
     property color nearColor: Theme.textSecondary
     property color inactiveColor: Theme.textMuted
@@ -45,41 +44,27 @@ Item {
         }
     }
 
-    Timer {
-        interval: 16
-        repeat: true
-        running: root.visible && root.playing && root.hasWordTiming && !root.reducedMotion
-        onTriggered: {
-            // Only extrapolate briefly; a paused or delayed backend must not drift away.
-            const elapsed = Math.min(120, Date.now() - root.anchorClock)
-            root.displayPosition = Math.max(root.displayPosition, root.anchorPosition + elapsed)
-        }
+    LyricsClock {
+        id: clock
+        lines: root.lines || []
+        position: root.position
+        playbackRate: root.playbackRate
+        playing: root.playing
+        running: root.visible && Boolean(root.Window.window && root.Window.window.visible)
+        reducedMotion: root.reducedMotion
     }
-
+    // Owned timers are cancelled with this view when a theme replaces the lyrics surface.
+    Timer { id: recenterTimer; interval: 0; onTriggered: root.recenterActive() }
+    Timer { id: followTimer; interval: 0; onTriggered: root.scrollToActive() }
     onLinesChanged: {
         followScroll.stop()
         lastAutoIndex = -1
-        displayPosition = position
-        updateActiveLine()
         if (activeIndex < 0) lyricsList.positionViewAtBeginning()
+        recenterTimer.restart()
     }
-    onPlayingChanged: {
-        displayPosition = position
-        anchorPosition = position
-        anchorClock = Date.now()
-    }
-    onPositionChanged: {
-        // Preserve interpolation for small updates, but snap on seeks or backward jumps to resync words.
-        if (!playing || Math.abs(position - displayPosition) > 250 || position < anchorPosition - 40)
-            displayPosition = position
-        anchorPosition = position
-        anchorClock = Date.now()
-        updateActiveLine()
-    }
-    onShownPositionChanged: updateActiveLine()
     onActiveIndexChanged: {
         if (!root.userScrolling) {
-            Qt.callLater(scrollToActive)
+            followTimer.restart()
         }
     }
 
@@ -91,11 +76,17 @@ Item {
         anchors.bottomMargin: 20
         clip: true
         spacing: Theme.spaceLg
+        // Leave room to center even the first and last lyric.
+        topMargin: height / 2
+        bottomMargin: height / 2
         cacheBuffer: Math.max(0, height)
         visible: root.lines && root.lines.length > 0
         model: root.lines
         currentIndex: -1
         boundsBehavior: Flickable.DragOverBounds
+        onWidthChanged: recenterTimer.restart()
+        onHeightChanged: recenterTimer.restart()
+        onContentHeightChanged: recenterTimer.restart()
 
         NumberAnimation {
             id: followScroll
@@ -140,7 +131,7 @@ Item {
             readonly property int activeWordIndex: active ? root.wordIndex(words, root.shownPosition) : -1
 
             width: lyricsList.width
-            height: Math.max(40, (hasKrc ? wordFlow.height : lineText.implicitHeight) + 12)
+            height: renderedLine.implicitHeight
 
             Rectangle {
                 anchors.fill: parent
@@ -148,102 +139,20 @@ Item {
                 color: lineMouse.hovered ? Theme.bgHover : "transparent"
             }
 
-            Text {
-                id: lineText
-                anchors.centerIn: parent
-                width: parent.width - 32
-                objectName: "lyricText" + lineDelegate.index
-                visible: !lineDelegate.hasKrc
-                text: lineDelegate.modelData.text || "♪"
-                textFormat: Text.PlainText
-                wrapMode: Text.Wrap
-                horizontalAlignment: Text.AlignHCenter
-                font.family: Theme.fontFamily
-                font.pixelSize: root.width < 500 ? Theme.fontLyricsCompact : Theme.fontLyricsWide
-                font.weight: lineDelegate.active ? Font.DemiBold : Font.Normal
-                lineHeightMode: Text.ProportionalHeight
-                lineHeight: Theme.lineHeightLyrics
-                color: lineDelegate.active ? root.activeColor
-                       : lineMouse.hovered ? Theme.textPrimary
-                       : (lineDelegate.distanceToActive <= 1 ? root.nearColor : root.inactiveColor)
-                opacity: 1.0
-
-                Behavior on color {
-                    ColorAnimation { duration: root.reducedMotion ? 0 : Theme.durationFast }
-                }
-            }
-
-            Flow {
-                id: wordFlow
-                objectName: "krcLine" + lineDelegate.index
-                visible: lineDelegate.hasKrc
-                // Whole-line metrics can omit trailing spaces and differ from separately shaped words.
-                readonly property real unwrappedWidth: {
-                    let total = 0
-                    for (const child of children) {
-                        if (child !== wordRepeater) total += child.width
-                    }
-                    return total
-                }
-                width: Math.max(1, Math.min(parent.width - 32, Math.ceil(unwrappedWidth)))
-                height: childrenRect.height
-                x: (parent.width - width) / 2
-                y: (parent.height - height) / 2
-                spacing: 0
-                // Line focus follows the timestamp immediately; only word reveal and scrolling interpolate.
-                opacity: lineDelegate.active ? 1 : lineDelegate.distanceToActive <= 1 ? 0.82 : 0.62
-
-                Repeater {
-                    id: wordRepeater
-                    model: lineDelegate.words
-                    delegate: Item {
-                        id: wordItem
-                        required property var modelData
-                        required property int index
-                        readonly property real progress: root.wordProgress(modelData, root.shownPosition)
-
-                        objectName: "krcWord" + lineDelegate.index + "_" + index
-                        width: baseWord.implicitWidth
-                        height: baseWord.implicitHeight * 1.35
-
-                        Text {
-                            id: baseWord
-                            objectName: "krcBaseText" + lineDelegate.index + "_" + wordItem.index
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: wordItem.modelData.text
-                            textFormat: Text.PlainText
-                            font.family: Theme.fontFamily
-                font.pixelSize: root.width < 500 ? Theme.fontLyricsCompact : Theme.fontLyricsWide
-                            font.weight: Font.DemiBold
-                            color: lineDelegate.active ? root.inactiveColor
-                                   : lineDelegate.distanceToActive <= 1 ? root.nearColor : root.inactiveColor
-
-                        }
-
-                        Item {
-                            // Reveal a second identically shaped plain-text layer through a clipping rectangle.
-                            // Animating the clip width keeps word layout and line height stable while color advances.
-                            // Changing font weight or replacing text for progress would trigger unwanted reflow.
-                            id: reveal
-                            objectName: "krcReveal" + lineDelegate.index + "_" + wordItem.index
-                            width: wordItem.width * wordItem.progress
-                            height: wordItem.height
-                            clip: true
-
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: wordItem.modelData.text
-                                textFormat: Text.PlainText
-                                font.family: Theme.fontFamily
-                font.pixelSize: root.width < 500 ? Theme.fontLyricsCompact : Theme.fontLyricsWide
-                                font.weight: Font.DemiBold
-                                color: lineDelegate.active ? root.activeColor
-                                       : lineDelegate.distanceToActive <= 1 ? root.nearColor : root.inactiveColor
-
-                            }
-                        }
-                    }
-                }
+            LyricLine {
+                id: renderedLine
+                anchors.fill: parent
+                lyric: lineDelegate.modelData
+                position: root.shownPosition
+                active: lineDelegate.active
+                distanceToActive: lineDelegate.distanceToActive
+                lineIndex: lineDelegate.index
+                pixelSize: root.width < 500 ? Theme.fontLyricsCompact : Theme.fontLyricsWide
+                activeColor: root.activeColor
+                nearColor: root.nearColor
+                inactiveColor: root.inactiveColor
+                hovered: lineMouse.hovered
+                reducedMotion: root.reducedMotion
             }
 
             HoverHandler {
@@ -314,48 +223,12 @@ Item {
         }
     }
 
-    function updateActiveLine() {
-        if (!root.lines || root.lines.length === 0) {
-            root.activeIndex = -1
-            return
-        }
-        // Upper bound chooses the last line at/before playback, including duplicate timestamps;
-        // before the first timestamp, low - 1 deliberately leaves every line inactive.
-        let low = 0
-        let high = root.lines.length
-        while (low < high) {
-            const mid = Math.floor((low + high) / 2)
-            if (Number(root.lines[mid].time_ms) <= root.shownPosition)
-                low = mid + 1
-            else
-                high = mid
-        }
-        root.activeIndex = low - 1
-    }
+    function wordIndex(words, timeMs) { return Timing.wordIndex(words, timeMs) }
+    function wordProgress(word, timeMs) { return Timing.wordProgress(word, timeMs) }
 
-    // Word intervals are half-open: a word stops being active at its exact end timestamp.
-    // Gaps between intervals therefore legitimately have no active word.
-    // Revealed progress is computed separately so completed words stay visible during those gaps.
-    function wordIndex(words, timeMs) {
-        if (!words || words.length === 0) return -1
-        for (let index = 0; index < words.length; index += 1) {
-            const start = Number(words[index].time_ms)
-            if (start <= timeMs && timeMs < start + Number(words[index].duration_ms)) return index
-        }
-        return -1
-    }
+    function recenterActive() { scrollToActive(false, true) }
 
-    // Clamp extrapolated media position to a visible reveal fraction between zero and one.
-    // A zero-duration marker changes instantaneously at its timestamp instead of dividing by zero.
-    // Backward seeking recomputes this fraction directly, without preserving old reveal state.
-    function wordProgress(word, timeMs) {
-        const start = Number(word.time_ms)
-        const duration = Number(word.duration_ms)
-        if (duration <= 0) return timeMs >= start ? 1 : 0
-        return Math.max(0, Math.min(1, (timeMs - start) / duration))
-    }
-
-    function scrollToActive(forceAnimation) {
+    function scrollToActive(forceAnimation, forcePosition) {
         if (root.userScrolling || root.activeIndex < 0 || root.activeIndex >= lyricsList.count)
             return
         // Track the previous automatic target separately from the active timestamp lookup.
@@ -363,13 +236,14 @@ Item {
         // Repeated updates within one lyric line must not restart the same scrolling animation.
         const previous = root.lastAutoIndex
         root.lastAutoIndex = root.activeIndex
-        if (previous === root.activeIndex && !forceAnimation) return
+        if (previous === root.activeIndex && !forceAnimation && !forcePosition) return
+        lyricsList.forceLayout()
         const item = lyricsList.itemAtIndex(root.activeIndex)
         const adjacent = Math.abs(root.activeIndex - previous) === 1
         // Large seeks may target an uninstantiated delegate; let ListView position it directly.
-        if (!root.reducedMotion && item && (adjacent || forceAnimation)) {
-            const targetY = Math.max(0, Math.min(item.y + item.height / 2 - lyricsList.height * 0.42,
-                                                Math.max(0, lyricsList.contentHeight - lyricsList.height)))
+        if (!root.reducedMotion && item && (adjacent || forceAnimation || followScroll.running)) {
+            const targetY = item.y + item.height / 2 - lyricsList.height / 2
+            if (followScroll.running && Math.abs(followScroll.to - targetY) < 0.5) return
             followScroll.stop()
             followScroll.from = lyricsList.contentY
             followScroll.to = targetY

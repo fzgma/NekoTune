@@ -20,11 +20,15 @@ class CollectionService final : public QObject {
     CollectionService(ISongRepository &songs, IQueueRepository &queueRepo, IPlaylistRepository &playlists,
                       ITransaction &transaction, LibraryService &library, QueueService &queue,
                       PlayerEngine &player, IManagedFiles *managedFiles = nullptr);
-    /// @param file Inspected audio to register and append as a new queue occurrence.
+    /// @param file Inspected audio to register and insert as a new queue occurrence.
     /// @param play Select and play that occurrence after both song and queue writes commit.
     /// @return Runtime queue occurrence ID; it is not the persistent song ID.
     /// With play=false, the existing selection and decoder source remain in use.
-    Result<int> enqueue(const ImportedFile &file, bool play);
+    /// position=-1 appends; next=true inserts immediately after the current occurrence.
+    Result<int> enqueue(const ImportedFile &file, bool play, int position = -1, bool next = false);
+    /// Atomically insert existing library songs in the supplied order; duplicates are occurrences.
+    /// next=true inserts after the current item and takes priority over shuffle draws.
+    Result<void> enqueueSongs(const QVector<int> &songIds, int position = -1, bool next = false);
     Result<int> enqueueRemote(const SongMetadata &song, bool play);
     Result<void> addRemoteToPlaylist(int id, const SongMetadata &song);
     /// Register inspected audio and add membership under one transaction.

@@ -7,6 +7,8 @@ GridView {
     id: root
     required property var controller
     required property var translator
+    property bool connected: true
+    signal queueRequested(var songIds, bool next)
     function t(key) { return translator.text(key, translator.language) }
     objectName: "libraryAlbumGrid"
     clip: true
@@ -35,7 +37,29 @@ GridView {
             }
             Label { Layout.fillWidth: true; text: card.text; textFormat: Text.PlainText; color: Theme.textPrimary; elide: Text.ElideRight; font.weight: Font.DemiBold }
             Label { Layout.fillWidth: true; text: card.modelData.artist || root.t("unknown_artist"); textFormat: Text.PlainText; color: Theme.textMuted; elide: Text.ElideRight; font.pixelSize: Theme.fontCaption }
-            Label { text: root.translator.countText("tracks", card.modelData.song_count, root.translator.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { Layout.fillWidth: true; text: root.translator.countText("tracks", card.modelData.song_count, root.translator.language); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+                IconButton {
+                    id: albumMore
+                    objectName: "albumMore" + card.index
+                    kind: "more"
+                    tooltipText: root.t("track_actions")
+                    onClicked: albumMenu.openAt(albumMore)
+                }
+            }
+        }
+        ActionMenu {
+            id: albumMenu
+            objectName: "albumActionMenu"
+            actions: [
+                {key: "next", label: root.t("play_next"), enabled: root.connected},
+                {key: "queue", label: root.t("add_to_queue_end"), enabled: root.connected}
+            ]
+            onChosen: action => {
+                const ids = root.controller.albumSongIds(card.modelData.album_id)
+                if (ids.length) root.queueRequested(ids, action === "next")
+            }
         }
         ToolTip.visible: hovered
         ToolTip.text: text + (modelData.artist ? "\n" + modelData.artist : "")

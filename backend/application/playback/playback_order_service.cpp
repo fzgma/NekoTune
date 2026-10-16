@@ -74,6 +74,13 @@ PlaybackOrderService::Selection PlaybackOrderService::propose(const PlayerQueue 
     if (queue.isEmpty())
         return result;
     const int current = currentId(queue);
+    int priority = 0;
+    for (int i = 0; i < queue.size(); ++i) {
+        if (queue.at(i).playNext && queue.at(i).id != current) {
+            priority = queue.at(i).id;
+            break;
+        }
+    }
     if (m_mode == PlaybackMode::Shuffle) {
         result.shuffle = m_shuffle->clone();
         result.history = m_history;
@@ -88,6 +95,12 @@ PlaybackOrderService::Selection PlaybackOrderService::propose(const PlayerQueue 
                 result.cursor = 0;
                 result.shuffle->confirmSelection(result.queueId);
             }
+        } else if (priority) {
+            result.queueId = priority;
+            result.shuffle->confirmSelection(priority);
+            result.history = result.history.mid(0, result.cursor + 1);
+            result.history.append(priority);
+            result.cursor = result.history.size() - 1;
         } else if (result.cursor + 1 < result.history.size()) {
             // After Previous, Next retraces actual history rather than drawing another random item.
             result.queueId = result.history.at(++result.cursor);

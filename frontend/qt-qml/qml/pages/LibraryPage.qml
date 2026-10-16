@@ -26,6 +26,7 @@ Item {
         playing: page.shell.isPlaying
         currentDuration: page.shell.duration
         onQueueAddRequested: path => page.controllers.queue.addPath(path)
+        onQueueSongsRequested: (songIds, next) => page.controllers.queue.addSongs(songIds, next)
         onTogglePlayPauseRequested: page.controllers.playback.togglePlayPause()
         onNewTagRequested: page.newTagRequested()
         onEditTagRequested: tag => page.editTagRequested(tag)

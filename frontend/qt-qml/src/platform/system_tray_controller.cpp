@@ -1,5 +1,6 @@
 #include "platform/system_tray_controller.h"
 #include "platform/system_media_bridge.h"
+#include "platform/playback_window_controller.h"
 #include "app_paths.h"
 #include "i18n.h"
 #include <QAction>
@@ -58,6 +59,16 @@ SystemTrayController::SystemTrayController(SystemMediaBridge &media, I18n &trans
 }
 SystemTrayController::~SystemTrayController() { shutdown(); }
 
+void SystemTrayController::setPlaybackWindows(PlaybackWindowController *windows) {
+    if (m_playbackWindows || !windows || m_stopping) return;
+    m_playbackWindows = windows;
+    windows->setTrayAvailable(m_available);
+    connect(windows, &PlaybackWindowController::changed, this, &SystemTrayController::updateMenu);
+    connect(this, &SystemTrayController::trayAvailableChanged, windows, [this, windows] {
+        windows->setTrayAvailable(m_available);
+    });
+}
+
 void SystemTrayController::attachWindow(QWindow *window) {
     if (!window || m_window || m_stopping) return;
     m_window = window;
@@ -80,6 +91,19 @@ void SystemTrayController::attachWindow(QWindow *window) {
     m_playPause = action("trayPlayPause");
     m_previous = action("trayPrevious");
     m_next = action("trayNext");
+    m_menu->addSeparator();
+    m_mini = action("trayMiniMode"); m_mini->setCheckable(true);
+    m_lyrics = action("trayDesktopLyrics"); m_lyrics->setCheckable(true);
+    m_lockLyrics = action("trayLockDesktopLyrics"); m_lockLyrics->setCheckable(true);
+    connect(m_mini, &QAction::triggered, this, [this] {
+        if (m_playbackWindows) m_playbackWindows->setMiniMode(!m_playbackWindows->miniMode());
+    });
+    connect(m_lyrics, &QAction::triggered, this, [this] {
+        if (m_playbackWindows) m_playbackWindows->setDesktopLyricsVisible(!m_playbackWindows->desktopLyricsVisible());
+    });
+    connect(m_lockLyrics, &QAction::triggered, this, [this] {
+        if (m_playbackWindows) m_playbackWindows->setDesktopLyricsLocked(!m_playbackWindows->desktopLyricsLocked());
+    });
     m_menu->addSeparator();
     m_quit = action("trayQuit");
     connect(m_toggle, &QAction::triggered, this, &SystemTrayController::toggleWindow);
@@ -115,8 +139,9 @@ void SystemTrayController::refreshAvailability() {
     const bool available = m_availability();
     if (m_available == available) return;
     m_available = available;
-    if (!available && m_window && !m_window->isVisible()) showWindow();
     emit trayAvailableChanged();
+    if (!available && m_window && !m_window->isVisible()
+        && (!m_playbackWindows || !m_playbackWindows->presentationVisible())) showWindow();
     updateMenu();
 }
 bool SystemTrayController::eventFilter(QObject *object, QEvent *event) {
@@ -135,12 +160,14 @@ void SystemTrayController::hideWindow() {
     if (!m_window || m_stopping) return;
     refreshAvailability();
     if (!m_available) return;
+    if (m_playbackWindows) { m_playbackWindows->hidePresentation(); return; }
     if (m_window->windowState() != Qt::WindowMinimized) m_restoreState = m_window->windowState();
     m_window->hide();
 }
 void SystemTrayController::showWindow() {
     if (!m_window || m_stopping) return;
     if (m_window->property("appearanceStartupPending").toBool()) return;
+    if (m_playbackWindows) { m_playbackWindows->showMainWindow(); return; }
     // show() chooses the platform's default state and can discard maximization.
     // Use the explicit show variants to retain the state across hiding/minimizing.
     const auto restoreState = m_restoreState;
@@ -152,7 +179,8 @@ void SystemTrayController::showWindow() {
 }
 void SystemTrayController::toggleWindow() {
     if (!m_window || m_stopping) return;
-    if (m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized) hideWindow();
+    if (m_playbackWindows ? m_playbackWindows->presentationVisible()
+                          : m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized) hideWindow();
     else showWindow();
 }
 void SystemTrayController::quit() {
@@ -164,6 +192,7 @@ void SystemTrayController::shutdown() {
     if (m_stopping) return;
     m_stopping = true;
     m_poll.stop();
+    if (m_playbackWindows) m_playbackWindows->shutdown();
     if (m_window) m_window->removeEventFilter(this);
     if (m_icon) m_icon->hide();
 }
@@ -188,7 +217,8 @@ void SystemTrayController::updateMenu() {
     const char *status = !m_media.ready() ? "tray_disconnected" : playing ? "tray_playing"
                         : (state == "paused" || state == "loading") ? "tray_paused" : "tray_stopped";
     m_icon->setToolTip("NekoTune\n" + track + "\n" + text(status));
-    const bool shown = m_window && m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized;
+    const bool shown = m_playbackWindows ? m_playbackWindows->presentationVisible()
+                                        : m_window && m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized;
     m_toggle->setText(text(shown ? "tray_hide" : "tray_show"));
     m_toggle->setEnabled(m_window && (!shown || m_available));
     m_playPause->setText(text(playing ? "tray_pause" : "tray_play"));
@@ -197,5 +227,15 @@ void SystemTrayController::updateMenu() {
     m_previous->setEnabled(m_media.ready() && m_media.capability("can_go_previous"));
     m_next->setText(text("tray_next"));
     m_next->setEnabled(m_media.ready() && m_media.capability("can_go_next"));
+    const bool hasWindows = !m_playbackWindows.isNull();
+    for (auto *item : {m_mini, m_lyrics, m_lockLyrics}) item->setVisible(hasWindows);
+    m_mini->setText(text("mini_mode"));
+    m_mini->setChecked(hasWindows && m_playbackWindows->miniMode());
+    m_lyrics->setText(text("desktop_lyrics"));
+    m_lyrics->setChecked(hasWindows && m_playbackWindows->desktopLyricsVisible());
+    m_lyrics->setEnabled(hasWindows && m_playbackWindows->desktopLyricsSupported());
+    m_lockLyrics->setText(text(hasWindows && m_playbackWindows->desktopLyricsLocked() ? "desktop_lyrics_unlock" : "desktop_lyrics_lock"));
+    m_lockLyrics->setChecked(hasWindows && m_playbackWindows->desktopLyricsLocked());
+    m_lockLyrics->setEnabled(hasWindows && m_playbackWindows->canLockDesktopLyrics() && m_playbackWindows->desktopLyricsVisible());
     m_quit->setText(text("tray_quit"));
 }

@@ -1,6 +1,7 @@
 #include "application/lyrics/lyrics_controller.h"
 #include "application/playback/queue_service.h"
 #include "infrastructure/library/audio_duration.h"
+#include "infrastructure/playback/qt_playback_backend.h"
 #include "infrastructure/lyrics/lyrics_storage.h"
 #include "ipc/serialization/serialization.h"
 #include "runtime/library_scanner.h"
@@ -81,6 +82,34 @@ public:
 class AudioDurationTest final : public QObject {
   Q_OBJECT
 private slots:
+  void nativePlaybackRateRetainsMediaTimeline() {
+    QTemporaryDir dir;
+    const auto path = dir.filePath("rate.wav");
+    write(path, wav(2500));
+    QtPlaybackBackend backend;
+    if (!backend.supportsPlaybackRate()) {
+      backend.setPlaybackRate(1.5);
+      QCOMPARE(backend.playbackRate(), 1.0);
+      QSKIP("This Qt backend has no pitch-preserving playback rate support");
+    }
+    backend.setSource(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(backend.duration(), 2500);
+    QTRY_VERIFY(backend.seekable());
+    backend.seek(1000);
+    QTRY_COMPARE(backend.position(), 1000);
+    for (double rate : {.5, .75, 1.0, 1.25, 1.5, 1.75, 2.0}) {
+      backend.setPlaybackRate(rate);
+      QCOMPARE(backend.playbackRate(), rate);
+      QCOMPARE(backend.position(), 1000);
+      QCOMPARE(backend.duration(), 2500);
+    }
+    backend.stop();
+    backend.setSource({});
+    QCOMPARE(backend.playbackRate(), 2.0);
+    backend.setSource(QUrl::fromLocalFile(path));
+    QTRY_COMPARE(backend.duration(), 2500);
+    QCOMPARE(backend.playbackRate(), 2.0);
+  }
   void embeddedTagsSurviveManagedImportAndUserEdits() {
     QTemporaryDir dir;
     const auto source = dir.filePath("tags.flac");

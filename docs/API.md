@@ -45,7 +45,7 @@ NekoTune 使用基于换行分隔的 JSON 协议，通过 Unix domain socket 进
 
 ## 歌曲身份
 
-队列项的 `id` 仍表示本次入队产生的队列项 ID，用于 `queue.play` 和 `queue.remove`。后端现在还会为每首歌返回：
+队列项的 `id` 仍表示本次入队产生的队列项 ID，用于 `queue.play`、`queue.remove` 和 `queue.move`。后端现在还会为每首歌返回：
 
 - `song_hash`：本地文件内容的 SHA-256；在线曲目为空
 - `song_id`：SQLite 中的持久歌曲 ID；同一份音频内容重复入队会复用同一个 `song_id`
@@ -55,6 +55,7 @@ NekoTune 使用基于换行分隔的 JSON 协议，通过 Unix domain socket 进
 - `cover_url`：统一解析的本地优先封面 URL，各歌曲列表与播放状态均可提供
 - `source`：`{kind:"local"|"extension",provider_id,track_id}`，在线曲目以来源及来源曲目 ID 标识
 - `resource_key`：歌词和封面使用的稳定资源身份，本地为音频 hash，在线为独立命名空间中的缓存键
+- `last_played_at`：最后一次成功开始播放的 UTC ISO 8601 时间，含毫秒，例如 `2026-10-16T12:34:56.789Z`；从未记录时为空字符串，只读
 
 在线曲目沿用数字 `song_id`，`path`/`first_path` 为空；客户端不得用空路径推断在线曲目记录应被删除。`lyrics.*` 请求的 `track_id` 使用 `resource_key`，本地歌曲原有 hash 调用保持兼容。播放地址和鉴权头不包含在歌曲状态中。
 
@@ -148,6 +149,20 @@ Linux MPRIS 位于桌面端的会话总线，对外进度／时长为微秒，�
 
 `player.status` 和首次连接事件均包含 `playback_mode`。模式变更广播 `{"event":"player.playback_mode_changed","playback_mode":"shuffle"}`，供所有客户端同步。
 
+### `player.set_playback_rate`
+
+设置全局播放速度，参数 `rate` 为 0.5–2.0 的有限数值，默认 1.0；非法类型、越界值或保存失败返回错误并保留原速度。成功返回完整状态，包含 `playback_rate` 和 `playback_rate_supported`。速度原子保存至 `config/settings.json` 的 `playback_rate`，不写入歌曲或队列，切歌、暂停和重新连接后沿用。
+
+```json
+{"id":9,"method":"player.set_playback_rate","params":{"rate":1.5}}
+```
+
+速度变化广播 `{"event":"player.playback_rate_changed","playback_rate":1.5,"position":12345}`，其中 `position` 为解码器当前毫秒位置。首次连接与 `player.status` 同样包含速度及支持标记。Qt 6.10+ 且后端支持音高补偿时开放倍速；其他环境保持 1.0 并拒绝非 1.0 请求。非法保存值在启动时回退 1.0，设置页可恢复并保存 1.0。
+
+进度、时长和歌词时间戳始终使用原媒体毫秒位置，不除以倍速；逐字歌词只在解码器更新之间按当前倍速做短暂、有上限的视觉插值，每次位置更新、倍速变化或暂停都会重新校准。歌词行选择始终按解码器位置计算。
+
+Linux MPRIS 的 `Rate` 为只读实际速度，变化发送 `PropertiesChanged`；支持倍速时 `MinimumRate`／`MaximumRate` 为 0.5／2.0，否则均为 1.0。系统端写 `Rate` 返回 `PropertyReadOnly`（包括 0，不作为暂停请求）。
+
 顺序模式播到队尾停止；列表循环在队尾回到队首，上一首可从队首回到队尾。单曲循环只在自然结束时重复，手动切歌仍沿队列顺序。上一首直接切歌，不再根据 3 秒进度重播本曲；顺序和单曲循环在队首重新播放本曲。
 
 随机模式默认使用 `shuffle_bag`：每轮每个队列项播放一次，轮次结束后重新洗牌，至少两项时避免跨轮连续重复同一项。队列显示顺序保持不变，相同歌曲的不同 `queue_id` 分别参与。上一首回到播放历史，下一首先沿历史前进，无历史时上一首重播当前项。直接点播、替换队列或切换模式重建随机轮次；追加项加入本轮待播序列，删除项从待播序列和历史移除。随机历史不跨重启保存。
@@ -190,11 +205,36 @@ Linux 编入 libpulse 支持时，设备对象还包含 `ports`（每项为 `id,
 
 ### `queue.add`
 
-把本地音频文件添加到播放队列。
+把本地音频文件或已有曲库歌曲添加到播放队列。`path`、`song_id`、`song_ids` 三选一；`song_ids` 是非空的有序歌曲 ID 数组，适合整张专辑入队，允许重复歌曲。整批歌曲全部有效且本地文件可用时才提交，否则队列保持原样。
+
+可选的插入选项：
+
+- 省略 `position` 和 `next`，或 `next: false`：追加到队列末尾。
+- `position`：从 0 开始的整数，范围 `0..队列长度`（含末尾），表示插入后的起始位置。
+- `next: true`：插入当前项后面；没有当前项时插入队首。整批歌曲保留输入顺序。最近一次「下一首播放」放在尚未播放的优先项前面。
+- `position` 和 `next` 不可同时出现；`next` 必须是布尔值。
+
+所有插入只改变队列，不自动选中或播放。当前项按队列项身份保持，插入到它前面时仅调整 `current_index`，不重新加载音频。每次入队都分配新的 `queue_id`，即使歌曲已经存在于队列中。
+
+随机模式中，`next: true` 的待播项按其队列顺序优先于随机抽取和历史前进分支；成功切换后才消耗该项的优先标记，上一首不会消耗其他待播项。单曲循环仍在自然结束时重复当前曲目，显式下一首继续按队列导航。
 
 ```json
 {"id":9,"method":"queue.add","params":{"path":"/home/user/Music/song.wav"}}
+{"id":91,"method":"queue.add","params":{"song_id":12,"next":true}}
+{"id":92,"method":"queue.add","params":{"song_ids":[12,13,14],"position":0}}
 ```
+
+成功返回 `data.items` 和 `data.current_index`。队列项的 `play_next` 布尔字段表示尚未消耗的优先待播标记。
+
+### `queue.move`
+
+移动一个已有队列项，参数 `queue_id` 是本次入队产生的项 ID，`position` 是移动完成后的目标索引（从 0 开始，范围 `0..队列长度-1`）。不会添加或删除歌曲，重复歌曲的各个队列项保持独立身份。
+
+```json
+{"id":93,"method":"queue.move","params":{"queue_id":7,"position":2}}
+```
+
+移动当前项或跨越当前项时，`current_index` 跟随原来的 `queue_id`，播放状态、音频源和播放进度保持不变。整个重排在事务内重写位置，失败时内存与数据库均保持原样；成功返回 `data.items`、`data.current_index` 并广播 `queue.changed`。
 
 ### `queue.play`
 
@@ -228,7 +268,7 @@ Linux 编入 libpulse 支持时，设备对象还包含 `ports`（每项为 `id,
 {"id":13,"method":"queue.status","params":{}}
 ```
 
-队列会保存到当前 SQLite 数据库，包含顺序、重复项、文件路径和当前索引。后端重启后恢复最近一次队列；歌曲资料表中的历史歌曲不会自动重新加入队列。
+队列会保存到当前 SQLite 数据库，包含顺序、重复项、文件路径、优先待播标记和当前索引。后端重启后恢复最近一次队列，但不会自动开始播放；运行时 `queue_id` 会重新分配，客户端应重新获取快照。歌曲资料表中的历史歌曲不会自动重新加入队列。
 
 ### 歌单 `playlist.*`
 
@@ -268,7 +308,9 @@ Linux 编入 libpulse 支持时，设备对象还包含 `ports`（每项为 `id,
 
 `library.list` 返回 `data.library`，其中 `songs` 按 `song_id` 升序列出全部历史歌曲，`tags` 列出全局标签。每首歌曲包含 `song_id`、标题、作者、`tags`（`{id,name}` 数组）、`path`、`available` 和 `cover_url`；后端依次从队列、歌单和持久化的导入路径寻找仍存在的文件。不可用歌曲仍会列出，`path` 为空、`available` 为 `false`。曲库变化会广播 `library.changed`，客户端应重新请求 `library.list`。
 
-桌面曲库通过 `LibraryController` 对完整快照排序与组合筛选：默认最早加入，也可选最近加入、歌名、歌手、专辑、时长升降序、播放最多或最少；相同排序值按 `song_id` 升序，未知时长始终排末尾。播放记录筛选支持全部、已播放（`play_count > 0`）和从未播放（`play_count == 0`），来源筛选使用 `import_source`，与文字搜索及标签交集同时生效。来源选项来自完整曲库，不因其他筛选隐藏。歌曲行展示播放次数，旧歌曲未记录的历史播放无法追溯。
+桌面曲库通过 `LibraryController` 对完整快照排序与组合筛选：默认最早加入，也可选最近加入、歌名、歌手、专辑、时长升降序、播放最多或最少，以及最近播放（`recently_played`，按 `last_played_at` 时间倒序）；相同排序值按 `song_id` 升序，未知时长和空播放时间在对应排序中始终排末尾。播放记录筛选支持全部、已播放（`play_count > 0`）、从未播放（`play_count == 0`），以及近 7 天（`last_7_days`）／30 天（`last_30_days`）播放过；时间窗口为当前 UTC 时刻之前的连续 7／30 × 24 小时，包含边界，排除空值、无效值和未来时间，每分钟刷新过期记录。来源筛选使用 `import_source`，与文字搜索及标签交集同时生效。来源选项来自完整曲库，不因其他筛选隐藏。歌曲行展示播放次数，旧歌曲未记录的历史播放无法追溯。
+
+首页的最近歌曲区可切换「最近入库」与「最近播放」。最近播放只显示有有效 `last_played_at` 的歌曲，按时间倒序展示最多五首，播放时提交当前展示的顺序；该区独立于曲库页面的搜索、筛选与排序。
 
 排序与筛选在当前应用会话内跨页面保留，不写入数据库或更改正在播放的队列；显式播放时才把当前可见顺序作为 `library.play.song_ids` 提交。播放计数刷新可以重新排序或移出“从未播放”列表，已经建立的队列继续保留。首页仍使用自己的歌曲列表，不继承曲库视图条件。
 
@@ -411,9 +453,9 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 `player.status`、`player.track_changed`、`player.duration_changed` 和 `player.position_changed` 的 `duration` 使用当前歌曲持久化的 `duration_ms`，不使用解码器时长。恢复队列后即可显示已知时长，扫描补齐当前歌曲时会更新播放状态；库内时长未知时仍返回 `0`。已有歌名、歌手和正数时长时，自动歌词匹配无需等待解码器元数据。
 
-歌曲对象还包含只读的 `import_source` 和 `play_count`，歌曲信息窗口也会显示这两项。`import_source` 为首次入库的插件 ID（不含来源子 ID）或 `local`；插件下载成文件后仍保留插件 ID，原有 `source` 字段继续描述实际播放来源。相同音频重复导入不会覆盖最初的入库来源或播放次数。旧在线曲目从 `source.provider_id` 补回插件 ID；没有来源记录的旧本地文件使用 `local`，历史播放次数从 `0` 开始。
+歌曲对象还包含只读的 `import_source`、`play_count` 和 `last_played_at`，歌曲信息窗口会显示来源和播放次数。`import_source` 为首次入库的插件 ID（不含来源子 ID）或 `local`；插件下载成文件后仍保留插件 ID，原有 `source` 字段继续描述实际播放来源。相同音频重复导入及资料编辑不会覆盖最初的入库来源、播放次数或最近播放时间。旧在线曲目从 `source.provider_id` 补回插件 ID；没有来源记录的旧本地文件使用 `local`，历史播放次数从 `0` 开始。旧数据库通过补列迁移新增 `last_played_at TEXT NOT NULL DEFAULT ''`，即使已有非零播放次数也保持空时间，不补造历史。
 
-`play_count` 在解码器确认成功进入播放状态时累加一次。暂停/继续、缓冲恢复和扩展热重载不重复计数；重新选歌、停止后重新播放、切换到重复队列项及单曲循环再次开始都会累加。仅加载、播放失败或没有音频输出时不累加。统计持久化后通过 `library.changed`、`queue.changed`、`playlist.changed` 和 `player.track_changed` 同步；`song.update_metadata` 不用于修改这两项。
+`play_count` 在解码器确认成功进入播放状态时累加一次，同时在同一条 SQL、同一事务内写入 `last_played_at`，任一写入失败则两者都不更新。暂停/继续、缓冲恢复和扩展热重载不重复计数或更新时间；重新选歌、停止后重新播放、切换到重复队列项及单曲循环再次开始都会更新两项。仅加载、页面切换、搜索、排序、资料预览、播放失败或没有音频输出时不更新。统计持久化后通过 `library.changed`、`queue.changed`、`playlist.changed` 和 `player.track_changed` 同步；`song.update_metadata` 不用于修改这些只读字段。
 
 每首歌曲使用独立的递增编号目录，例如 `000001/000001.flac`。下载音频为真实文件，外部音频为绝对软链接或 `.audio.json` 引用；程序获取的同编号 KRC、LRC 和封面始终为真实文件。成功在线匹配或手动选定后更新配套文件；结果受歌曲 hash 和歌词 revision 约束，过期请求不能覆盖新选择。原音频离线或断链后保留歌曲资料和配套文件，曲库 `available` 为 `false`。
 

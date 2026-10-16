@@ -25,9 +25,18 @@
         <file>qml/components/Glyph.qml</file>
         <file>qml/components/NavItem.qml</file>
         <file>qml/components/PlaybackModeButton.qml</file>
+        <file>qml/components/PlaybackRateButton.qml</file>
         <file>qml/components/AudioOutputPicker.qml</file>
         <file>qml/components/AudioOutputButton.qml</file>
         <file>qml/components/LrcLyrics.qml</file>
+        <file>qml/components/LyricTiming.js</file>
+        <file>qml/components/LyricsClock.qml</file>
+        <file>qml/components/LyricLine.qml</file>
+        <file>qml/components/CompactLyrics.qml</file>
+        <file>qml/components/WindowDragArea.qml</file>
+        <file>qml/components/PlaybackWindowSettings.qml</file>
+        <file>qml/windows/MiniPlayerWindow.qml</file>
+        <file>qml/windows/DesktopLyricsWindow.qml</file>
         <file>qml/components/LyricsDebugPanel.qml</file>
         <file>qml/components/LyricsPanel.qml</file>
         <file>qml/components/LibraryPanel.qml</file>

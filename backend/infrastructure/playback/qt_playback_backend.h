@@ -22,6 +22,9 @@ class QtPlaybackBackend final : public IPlaybackBackend {
     void seek(qint64 value) override;
     bool seekable() const override { return m_player.isSeekable(); }
     void setVolume(double value) override { m_audio.setVolume(float(value)); }
+    void setPlaybackRate(double rate) override;
+    double playbackRate() const override { return m_player.playbackRate(); }
+    bool supportsPlaybackRate() const override;
     qint64 position() const override { return m_player.position(); }
     qint64 duration() const override { return m_player.duration(); }
     double volume() const override { return m_audio.volume(); }

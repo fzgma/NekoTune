@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonObject>
+#include <QDateTime>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
@@ -18,6 +19,8 @@ class StoreFixtureTest final : public QObject {
     void storesAndUpdatesSongMetadata();
     void preservesProvenanceAndPlaybackStatistics();
     void migratesProvenanceAndPlaybackStatistics();
+    void storesLastPlayedAtAtomically();
+    void migratesLastPlayedAt();
     void remembersImportedPathsAcrossRestart();
     void preservesLegacyAsrTables();
     void storesAndRestoresQueue();
@@ -67,6 +70,80 @@ void StoreFixtureTest::preservesProvenanceAndPlaybackStatistics() {
     QVERIFY(local);
     QCOMPARE(local->importSource, "local");
     QCOMPARE(local->playCount, 0);
+}
+
+void StoreFixtureTest::storesLastPlayedAtAtomically() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath("last-played.sqlite3");
+    QString savedAt;
+    int id = 0;
+    {
+        nekotune::StoreFixture store(path);
+        auto song = store.getOrCreateSong("timestamp", "/music/original.wav");
+        QVERIFY(song);
+        id = song->id;
+        QVERIFY(song->lastPlayedAt.isEmpty());
+        const auto before = QDateTime::currentDateTimeUtc();
+        QVERIFY(store.library.recordPlayback(id));
+        savedAt = store.songById(id)->lastPlayedAt;
+        const auto playedAt = QDateTime::fromString(savedAt, Qt::ISODateWithMs);
+        QVERIFY(playedAt.isValid());
+        QVERIFY(savedAt.endsWith('Z'));
+        QVERIFY(playedAt >= before && playedAt <= QDateTime::currentDateTimeUtc());
+        QCOMPARE(store.songs().first().lastPlayedAt, savedAt);
+        QCOMPARE(store.songRepo.songByHash("timestamp")->lastPlayedAt, savedAt);
+        QVERIFY(store.library.importFile({"/music/copy.wav", "timestamp"}));
+        QVERIFY(store.library.update(id, {QString("Renamed")}));
+        QCOMPARE(store.songById(id)->lastPlayedAt, savedAt);
+        QSqlQuery sql(store.db.database());
+        QVERIFY(sql.exec("UPDATE songs SET last_played_at='2001-02-03T04:05:06.000Z'"));
+        QVERIFY(store.library.recordPlayback(id));
+        savedAt = store.songById(id)->lastPlayedAt;
+        QVERIFY(savedAt != "2001-02-03T04:05:06.000Z");
+        QCOMPARE(store.songById(id)->playCount, 2);
+        QVERIFY(sql.exec("CREATE TRIGGER reject_timestamp BEFORE UPDATE OF last_played_at ON songs "
+                         "BEGIN SELECT RAISE(FAIL,'timestamp rejected'); END"));
+        QSignalSpy changes(&store.library, &nekotune::LibraryService::statisticsUpdated);
+        QVERIFY(!store.library.recordPlayback(id));
+        QCOMPARE(changes.count(), 0);
+        QCOMPARE(store.songById(id)->playCount, 2);
+        QCOMPARE(store.songById(id)->lastPlayedAt, savedAt);
+    }
+    nekotune::StoreFixture reopened(path);
+    QVERIFY(reopened.isReady());
+    QCOMPARE(reopened.songById(id)->lastPlayedAt, savedAt);
+    QCOMPARE(reopened.songById(id)->playCount, 2);
+}
+
+void StoreFixtureTest::migratesLastPlayedAt() {
+    QTemporaryDir directory;
+    const auto path = directory.filePath("legacy-last-played.sqlite3");
+    int localId = 0, remoteId = 0;
+    {
+        nekotune::StoreFixture store(path);
+        localId = store.getOrCreateSong("local", "/music/local.wav")->id;
+        nekotune::SongMetadata remote;
+        remote.providerId = "example.music/catalog";
+        remote.providerTrackId = "42";
+        remoteId = store.songRepo.getOrCreateRemote(remote)->id;
+        QVERIFY(store.library.recordPlayback(localId));
+        QSqlQuery sql(store.db.database());
+        QVERIFY(sql.exec("ALTER TABLE songs DROP COLUMN last_played_at"));
+    }
+    QString remoteTimestamp;
+    {
+        nekotune::StoreFixture migrated(path);
+        QVERIFY2(migrated.isReady(), qPrintable(migrated.errorString()));
+        QCOMPARE(migrated.songById(localId)->playCount, 1);
+        QVERIFY(migrated.songById(localId)->lastPlayedAt.isEmpty());
+        QVERIFY(migrated.songById(remoteId)->lastPlayedAt.isEmpty());
+        QVERIFY(migrated.library.recordPlayback(remoteId));
+        remoteTimestamp = migrated.songById(remoteId)->lastPlayedAt;
+        QVERIFY(!remoteTimestamp.isEmpty());
+    }
+    nekotune::StoreFixture reopened(path);
+    QVERIFY(reopened.songById(localId)->lastPlayedAt.isEmpty());
+    QCOMPARE(reopened.songById(remoteId)->lastPlayedAt, remoteTimestamp);
 }
 
 void StoreFixtureTest::migratesProvenanceAndPlaybackStatistics() {
@@ -264,6 +341,7 @@ void StoreFixtureTest::migratesLegacyQueue() {
     QVERIFY2(store.isReady(), qPrintable(store.errorString()));
     QCOMPARE(store.loadQueue().items.size(), 1);
     QCOMPARE(store.loadQueue().currentIndex, 0);
+    QVERIFY(!store.loadQueue().items.first().playNext);
     QVERIFY(store.playlists().isEmpty());
 }
 

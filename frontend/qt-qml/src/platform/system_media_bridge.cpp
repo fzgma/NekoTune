@@ -32,7 +32,8 @@ SystemMediaBridge::SystemMediaBridge(IpcClient &client, PlaybackController &play
     });
     for (auto signal : {&PlaybackController::stateChanged, &PlaybackController::songChanged,
                         &PlaybackController::durationChanged, &PlaybackController::volumeChanged,
-                        &PlaybackController::positionChanged, &PlaybackController::capabilitiesChanged})
+                        &PlaybackController::positionChanged, &PlaybackController::capabilitiesChanged,
+                        &PlaybackController::playbackRateChanged, &PlaybackController::playbackRateSupportedChanged})
         connect(&playback, signal, this, &SystemMediaBridge::snapshotChanged);
     connect(&playback, &PlaybackController::seeked, this, [this](qint64 position, int id) {
         if (m_ready && id == queueId())

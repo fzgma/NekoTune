@@ -12,6 +12,7 @@ Item {
     property var queue: []
     property real duration: 0
     property real position: 0
+    property real playbackRate: 1.0
     property real volume: 0.8
     property string playbackState: "stopped"
     property bool connected: false
@@ -143,6 +144,7 @@ Item {
                 song: root.song
                 lyrics: root.lyrics
                 position: root.position
+                playbackRate: root.playbackRate
                 playing: root.playbackState === "playing"
                 connected: root.connected
                 onSeekRequested: pos => root.seekRequested(pos)

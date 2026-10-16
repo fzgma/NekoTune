@@ -7,8 +7,12 @@
 namespace nekotune {
 PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
                            std::unique_ptr<IShuffleStrategy> strategy, PlaybackMode mode,
-                           PlaybackOrderService::ModeSaver saveMode)
-    : m_backend(backend), m_queue(queue), m_order(std::move(strategy), mode, std::move(saveMode)) {
+                           PlaybackOrderService::ModeSaver saveMode, double playbackRate,
+                           std::function<bool(double)> saveRate)
+    : m_backend(backend), m_queue(queue), m_order(std::move(strategy), mode, std::move(saveMode)),
+      m_saveRate(std::move(saveRate)) {
+    m_backend.setPlaybackRate(std::isfinite(playbackRate) && playbackRate >= .5 && playbackRate <= 2.0
+                                 && m_backend.supportsPlaybackRate() ? playbackRate : 1.0);
     m_order.reset(queue.queue());
     connect(&queue, &QueueService::changed, this, [this] {
         if (!m_navigating)
@@ -111,6 +115,8 @@ PlaybackSnapshot PlayerEngine::snapshot() const {
         m_state, m_backend.position(), 0, m_backend.volume(), {}, m_metadata};
     result.playbackMode = m_order.mode();
     result.capabilities = m_capabilities;
+    result.playbackRate = m_backend.playbackRate();
+    result.playbackRateSupported = m_backend.supportsPlaybackRate();
     const auto &queue = m_queue.queue();
     if (queue.currentIndex() < 0)
         return result;
@@ -385,6 +391,20 @@ Result<void> PlayerEngine::setVolume(double volume) {
         return failure(QStringLiteral("Volume must be between 0 and 1"));
     m_backend.setVolume(volume);
     emit volumeChanged(m_backend.volume());
+    return {};
+}
+Result<void> PlayerEngine::setPlaybackRate(double rate) {
+    if (!std::isfinite(rate) || rate < .5 || rate > 2.0)
+        return failure(QStringLiteral("Playback rate must be between 0.5 and 2.0"));
+    if (rate != 1.0 && !m_backend.supportsPlaybackRate())
+        return failure(QStringLiteral("Pitch-preserving playback rate is unavailable"), ErrorCode::Unavailable);
+    // Persist even an unchanged rate so reset can clear an unsupported saved preference.
+    if (m_saveRate && !m_saveRate(rate))
+        return failure(QStringLiteral("Unable to save playback rate"), ErrorCode::Storage);
+    if (rate == m_backend.playbackRate())
+        return {};
+    m_backend.setPlaybackRate(rate);
+    emit playbackRateChanged(m_backend.playbackRate());
     return {};
 }
 Result<void> PlayerEngine::playItem(int id) {

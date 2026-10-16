@@ -14,6 +14,7 @@ Item {
     property var song: ({})
     property var lyrics: ({})
     property real position: 0
+    property real playbackRate: 1.0
     property bool playing: false
     property bool connected: false
 
@@ -91,6 +92,7 @@ Item {
         lines: root.document.lines || []
         plainText: String(root.document.plain_text || "")
         position: root.position
+        playbackRate: root.playbackRate
         playing: root.playing
         onSeekRequested: pos => root.seekRequested(pos)
     }

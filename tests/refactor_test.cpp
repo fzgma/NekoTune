@@ -12,6 +12,7 @@
 #include "app_paths.h"
 #include <QCryptographicHash>
 #include <QDataStream>
+#include <QDateTime>
 #include <QFile>
 #include <QImage>
 #include <QJSValue>
@@ -1001,11 +1002,147 @@ class RefactorTest final : public QObject {
         QVERIFY(library->loaded());
         runtime.stop();
     }
+    void recentPlaybackTimestampOverIpc() {
+        const auto path = m_directory.filePath("recent-playback.wav");
+        writeAudio(path, char(73), 72);
+        BackendRuntime runtime(makeFakeAudio);
+        QVERIFY(runtime.start());
+        RpcPeer peer;
+        QVERIFY(peer.connect(m_socket));
+        QCOMPARE(peer.call("queue.clear").value("status").toString(), QString("ok"));
+        const auto queued = peer.call("queue.add", {{"path", path}});
+        QCOMPARE(queued.value("status").toString(), QString("ok"));
+        const auto row = queued.value("data").toObject().value("items").toArray().first().toObject();
+        const int id = row.value("song_id").toInt();
+        auto metadata = [&] { return peer.call("song.metadata", {{"song_id", id}}).value("data").toObject(); };
+        QVERIFY(metadata().value("last_played_at").toString().isEmpty());
+        QCOMPARE(metadata().value("play_count").toInt(), 0);
+        IpcClient client;
+        AppControllers controllers(client);
+        client.connectBackend();
+        QTRY_VERIFY(client.connected());
+        auto *library = controllers.library;
+        QTRY_VERIFY(library->loaded());
+        library->setSortOrder("recently_played");
+        library->setSearchText("recent");
+        library->loadMetadata(id); // Loading the editing preview must not count as playback.
+        QTRY_VERIFY(library->metadataReady());
+        QVERIFY(metadata().value("last_played_at").toString().isEmpty());
+        const auto started = peer.call("queue.play", {{"id", row.value("queue_id")}});
+        QCOMPARE(started.value("status").toString(), QString("ok"));
+        const auto stamp = started.value("data").toObject().value("song").toObject().value("last_played_at").toString();
+        QVERIFY(QDateTime::fromString(stamp, Qt::ISODate).isValid());
+        QCOMPARE(metadata().value("last_played_at").toString(), stamp);
+        auto frontendTime = [&] {
+            for (const auto &value : library->songs()->items()) {
+                const auto song = value.toMap();
+                if (song.value("song_id").toInt() == id) return song.value("last_played_at").toString();
+            }
+            return QString();
+        };
+        QTRY_COMPARE(frontendTime(), stamp);
+        library->setPlayFilter("last_7_days");
+        library->setSearchText("");
+        library->loadMetadata(id);
+        QTRY_VERIFY(library->metadataReady());
+        QCOMPARE(peer.call("player.pause").value("status").toString(), QString("ok"));
+        QCOMPARE(peer.call("player.play").value("status").toString(), QString("ok"));
+        QCOMPARE(peer.call("player.seek", {{"position", 500}}).value("status").toString(), QString("ok"));
+        QCOMPARE(metadata().value("last_played_at").toString(), stamp);
+        QCOMPARE(metadata().value("play_count").toInt(), 1);
+        QCOMPARE(peer.call("library.update_metadata", {{"song_ids", QJsonArray{id}},
+                                                       {"patch", QJsonObject{{"last_played_at", "2000-01-01T00:00:00.000Z"}}}})
+                     .value("status").toString(), QString("error"));
+        runtime.stop();
+        QTRY_VERIFY(!client.connected());
+        QVERIFY(runtime.start());
+        RpcPeer restored;
+        QVERIFY(restored.connect(m_socket));
+        const auto saved = restored.call("song.metadata", {{"song_id", id}}).value("data").toObject();
+        QCOMPARE(saved.value("last_played_at").toString(), stamp);
+        QCOMPARE(saved.value("play_count").toInt(), 1);
+        runtime.stop();
+    }
+    // Batch insertion and reordering must use occurrence identities and reject invalid inputs atomically.
+    void queueInsertionAndMoveIpc() {
+        BackendRuntime runtime(makeFakeAudio);
+        QVERIFY(runtime.start());
+        RpcPeer peer;
+        QVERIFY(peer.connect(m_socket));
+        auto call = [&](const QString &method, const QJsonObject &params = {}) {
+            return peer.call(method, params);
+        };
+        QCOMPARE(call("queue.clear").value("status").toString(), QString("ok"));
+        auto added = call("queue.add", {{"path", m_audio}});
+        QCOMPARE(added.value("status").toString(), QString("ok"));
+        const auto first = added.value("data").toObject().value("items").toArray().first().toObject();
+        const int songId = first.value("song_id").toInt(), firstId = first.value("queue_id").toInt();
+        QCOMPARE(call("queue.play", {{"id", firstId}}).value("status").toString(), QString("ok"));
+        auto batch = call("queue.add", {{"song_ids", QJsonArray{songId, songId}}, {"next", true}});
+        QCOMPARE(batch.value("status").toString(), QString("ok"));
+        auto items = batch.value("data").toObject().value("items").toArray();
+        QCOMPARE(items.size(), 3);
+        const int priority = items[1].toObject().value("queue_id").toInt();
+        QVERIFY(priority != firstId);
+        QVERIFY(priority != items[2].toObject().value("queue_id").toInt());
+        QCOMPARE(call("queue.move", {{"queue_id", firstId}, {"position", 2}}).value("status").toString(), QString("ok"));
+        QCOMPARE(call("queue.status").value("data").toObject().value("current_index").toInt(), 2);
+        auto positioned = call("queue.add", {{"song_id", songId}, {"position", 0}});
+        QCOMPARE(positioned.value("status").toString(), QString("ok"));
+        QCOMPARE(positioned.value("data").toObject().value("current_index").toInt(), 3);
+        const int oldSize = positioned.value("data").toObject().value("items").toArray().size();
+        for (const auto &bad : {QJsonObject{{"path", m_audio}, {"position", -1}},
+                               QJsonObject{{"song_id", songId}, {"position", 1.5}},
+                               QJsonObject{{"song_id", songId}, {"position", oldSize + 1}},
+                               QJsonObject{{"song_id", songId}, {"next", "true"}},
+                               QJsonObject{{"song_id", songId}, {"next", true}, {"position", 0}},
+                               QJsonObject{{"path", m_audio}, {"song_id", songId}},
+                               QJsonObject{{"song_ids", QJsonArray{songId, -1}}},
+                               QJsonObject{{"song_ids", QJsonArray{songId, 999999}}},
+                               QJsonObject{{"song_ids", QJsonArray{}}}})
+            QCOMPARE(call("queue.add", bad).value("status").toString(), QString("error"));
+        for (const auto &bad : {QJsonObject{{"queue_id", firstId}, {"position", -1}},
+                               QJsonObject{{"queue_id", firstId}, {"position", .5}},
+                               QJsonObject{{"queue_id", firstId}, {"position", oldSize}},
+                               QJsonObject{{"queue_id", 999999}, {"position", 0}},
+                               QJsonObject{{"id", firstId}, {"position", 0}}})
+            QCOMPARE(call("queue.move", bad).value("status").toString(), QString("error"));
+        QCOMPARE(call("queue.status").value("data").toObject().value("items").toArray().size(), oldSize);
+        IpcClient client;
+        QueueController controller(client);
+        client.connectBackend();
+        QTRY_VERIFY(client.connected());
+        QTRY_COMPARE(controller.model()->count(), oldSize);
+        controller.moveQueueItem(firstId, 0);
+        QTRY_COMPARE(controller.model()->get(0).value("queue_id").toInt(), firstId);
+        auto pathNext = call("queue.add", {{"path", m_audio}, {"next", true}});
+        QCOMPARE(pathNext.value("status").toString(), QString("ok"));
+        const auto beforeRestart = pathNext.value("data").toObject().value("items").toArray();
+        QVERIFY(beforeRestart[1].toObject().value("play_next").toBool());
+        runtime.stop();
+        QTRY_VERIFY(!client.connected());
+        QVERIFY(runtime.start());
+        RpcPeer restored;
+        QVERIFY(restored.connect(m_socket));
+        const auto afterRestart = restored.call("queue.status").value("data").toObject();
+        QCOMPARE(afterRestart.value("current_index").toInt(), 0);
+        const auto restoredItems = afterRestart.value("items").toArray();
+        QCOMPARE(restoredItems.size(), beforeRestart.size());
+        for (int i = 0; i < restoredItems.size(); ++i) {
+            QCOMPARE(restoredItems[i].toObject().value("path"), beforeRestart[i].toObject().value("path"));
+            QCOMPARE(restoredItems[i].toObject().value("play_next"), beforeRestart[i].toObject().value("play_next"));
+        }
+        QCOMPARE(restored.call("player.set_playback_mode", {{"mode", "shuffle"}}).value("status").toString(), QString("ok"));
+        const int restoredPriority = restoredItems[1].toObject().value("queue_id").toInt();
+        const auto advanced = restored.call("player.next");
+        QCOMPARE(advanced.value("status").toString(), QString("ok"));
+        QCOMPARE(advanced.value("data").toObject().value("song").toObject().value("queue_id").toInt(), restoredPriority);
+        runtime.stop();
+    }
     // Playback detail, bottom controls and the queue drawer share one confirmed mode.
     // Opening different surfaces must not reset the current occurrence or progress.
     // Mode request failure/disconnection must leave the previous authoritative selection.
     // Menu behavior is exercised through actual QML bindings and backend state.
-    // This complements domain navigation tests with frontend integration coverage.
     void playbackModePageAndDrawer() {
         BackendRuntime runtime(makeFakeAudio);
         QVERIFY(runtime.start());

@@ -115,6 +115,7 @@ Item {
     property string operationError: ""
     property bool addPending: false
     signal queueAddRequested(string path)
+    signal queueSongsRequested(var songIds, bool next)
     signal togglePlayPauseRequested()
     signal newTagRequested()
     signal editTagRequested(var tag)
@@ -122,7 +123,8 @@ Item {
     function songActions(song) {
         return [
             {key: "play", label: i18n.text("play", i18n.language), enabled: Boolean(song.available) && root.connected},
-            {key: "queue", label: i18n.text("add_to_queue", i18n.language), enabled: Boolean(song.available) && root.connected},
+            {key: "next", label: i18n.text("play_next", i18n.language), enabled: Boolean(song.available) && root.connected},
+            {key: "queue", label: i18n.text("add_to_queue_end", i18n.language), enabled: Boolean(song.available) && root.connected},
             {key: "playlist", label: i18n.text("add_to_playlist", i18n.language), enabled: Boolean(song.available) && root.connected},
             {key: "edit", label: i18n.text("edit_info", i18n.language), enabled: root.connected},
             {key: "delete", label: i18n.text("delete", i18n.language), destructive: true, enabled: root.connected && !root.deletePending}
@@ -130,7 +132,7 @@ Item {
     }
     function songAction(action, song) {
         if (action === "play") requestPlay(Number(song.song_id))
-        else if (action === "queue") queueAddRequested(String(song.path))
+        else if (action === "queue" || action === "next") queueSongsRequested([Number(song.song_id)], action === "next")
         else if (action === "playlist") addToPlaylist(song)
         else if (action === "edit") editRequested(song)
         else if (action === "delete") {
@@ -220,7 +222,7 @@ Item {
                 prefix: i18n.text("library_sort", i18n.language)
                 textRole: "label"
                 valueRole: "value"
-                model: ["added_asc", "added_desc", "title", "artist", "album", "duration_asc", "duration_desc", "most_played", "least_played", "track"]
+                model: ["added_asc", "added_desc", "title", "artist", "album", "duration_asc", "duration_desc", "most_played", "least_played", "track", "recently_played"]
                     .map(value => ({value: value, label: i18n.text("library_sort_" + value, i18n.language)}))
                 currentIndex: model.findIndex(option => option.value === root.controller.sortOrder)
                 onActivated: root.controller.sortOrder = currentValue
@@ -234,7 +236,7 @@ Item {
                 prefix: i18n.text("library_play_filter", i18n.language)
                 textRole: "label"
                 valueRole: "value"
-                model: ["all", "played", "never_played"]
+                model: ["all", "played", "never_played", "last_7_days", "last_30_days"]
                     .map(value => ({value: value, label: i18n.text("library_play_" + value, i18n.language)}))
                 currentIndex: model.findIndex(option => option.value === root.controller.playFilter)
                 onActivated: root.controller.playFilter = currentValue
@@ -282,6 +284,8 @@ Item {
             visible: root.showingAlbums
             controller: root.controller
             translator: i18n
+            connected: root.connected
+            onQueueRequested: (songIds, next) => root.queueSongsRequested(songIds, next)
         }
         ListView {
             id: songList

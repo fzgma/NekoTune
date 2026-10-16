@@ -87,7 +87,9 @@ QVariantMap MprisService::properties(const QString &interface) const {
     if (interface != playerInterface) return {};
     return {{"PlaybackStatus", m_bridge.playbackStatus()}, {"Metadata", metadata()},
             {"Volume", m_bridge.playback().volume()}, {"Position", m_bridge.positionUs()},
-            {"Rate", 1.0}, {"MinimumRate", 1.0}, {"MaximumRate", 1.0}, {"CanControl", true},
+            {"Rate", m_bridge.playback().playbackRate()},
+            {"MinimumRate", m_bridge.playback().playbackRateSupported() ? .5 : 1.0},
+            {"MaximumRate", m_bridge.playback().playbackRateSupported() ? 2.0 : 1.0}, {"CanControl", true},
             {"CanPlay", m_bridge.capability("can_play")}, {"CanPause", m_bridge.capability("can_pause")},
             {"CanSeek", m_bridge.capability("can_seek")}, {"CanGoNext", m_bridge.capability("can_go_next")},
             {"CanGoPrevious", m_bridge.capability("can_go_previous")}};
@@ -139,18 +141,14 @@ bool MprisService::handleMessage(const QDBusMessage &message, const QDBusConnect
         if (member == "Get") {
             connection.send(message.createReply(QVariantList{QVariant::fromValue(QDBusVariant(values.value(property)))})); return true;
         }
-        if (target != playerInterface || (property != "Volume" && property != "Rate")) {
+        if (target != playerInterface || property != "Volume") {
             fail(message, connection, QDBusError::PropertyReadOnly, QStringLiteral("Property is read-only")); return true;
         }
         const auto value = qvariant_cast<QDBusVariant>(args.at(2)).variant();
         if (value.metaType() != QMetaType::fromType<double>() || !std::isfinite(value.toDouble())) {
             invalid(); return true;
         }
-        if (property == "Volume")
-            dispatch(message, connection, "player.set_volume", {{"volume", std::clamp(value.toDouble(), 0.0, 1.0)}});
-        else if (value.toDouble() == 1.0) ok();
-        else if (value.toDouble() == 0.0) dispatch(message, connection, "player.pause");
-        else fail(message, connection, QDBusError::NotSupported, QStringLiteral("Playback rate is fixed at 1"));
+        dispatch(message, connection, "player.set_volume", {{"volume", std::clamp(value.toDouble(), 0.0, 1.0)}});
         return true;
     }
     if (interface == rootInterface) {
@@ -217,7 +215,7 @@ QString MprisService::introspect(const QString &objectPath) const {
  <signal name="Seeked"><arg name="Position" type="x"/></signal>
  <property name="PlaybackStatus" type="s" access="read"/><property name="Metadata" type="a{sv}" access="read"/>
  <property name="Volume" type="d" access="readwrite"/><property name="Position" type="x" access="read"/>
- <property name="Rate" type="d" access="readwrite"/><property name="MinimumRate" type="d" access="read"/>
+ <property name="Rate" type="d" access="read"/><property name="MinimumRate" type="d" access="read"/>
  <property name="MaximumRate" type="d" access="read"/><property name="CanControl" type="b" access="read"/>
  <property name="CanPlay" type="b" access="read"/><property name="CanPause" type="b" access="read"/>
  <property name="CanSeek" type="b" access="read"/><property name="CanGoNext" type="b" access="read"/>

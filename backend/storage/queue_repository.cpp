@@ -18,14 +18,15 @@ bool QueueRepository::saveQueue(const QueueSnapshot &snapshot) {
         return false;
     }
 
-    query.prepare(QStringLiteral("INSERT INTO queue_items (position, path, song_id, current_index) "
-                                 "VALUES (:position, :path, :song_id, :current_index)"));
+    query.prepare(QStringLiteral("INSERT INTO queue_items (position, path, song_id, current_index, play_next) "
+                                 "VALUES (:position, :path, :song_id, :current_index, :play_next)"));
     for (int index = 0; index < snapshot.items.size(); ++index) {
         const auto &item = snapshot.items.at(index);
         query.bindValue(QStringLiteral(":position"), index);
         query.bindValue(QStringLiteral(":path"), item.path.isNull() ? QStringLiteral("") : item.path);
         query.bindValue(QStringLiteral(":song_id"), item.songId);
         query.bindValue(QStringLiteral(":current_index"), snapshot.currentIndex);
+        query.bindValue(QStringLiteral(":play_next"), item.playNext);
         if (!query.exec()) {
             setError(query.lastError().text());
             return false;
@@ -47,12 +48,12 @@ QueueSnapshot QueueRepository::loadQueue() const {
 
     QSqlQuery query(m_db);
     if (!query.exec(
-            QStringLiteral("SELECT path, song_id, current_index FROM queue_items ORDER BY position ASC"))) {
+            QStringLiteral("SELECT path, song_id, current_index, play_next FROM queue_items ORDER BY position ASC"))) {
         return snapshot;
     }
 
     while (query.next()) {
-        snapshot.items.append({query.value(0).toString(), query.value(1).toInt()});
+        snapshot.items.append({query.value(0).toString(), query.value(1).toInt(), query.value(3).toBool()});
         snapshot.currentIndex = query.value(2).toInt();
     }
     if (snapshot.items.isEmpty()) {

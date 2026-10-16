@@ -10,7 +10,9 @@ CollectionService::CollectionService(ISongRepository &songs, IQueueRepository &q
                                      IManagedFiles *managedFiles)
     : m_songs(songs), m_queueRepo(queueRepo), m_playlists(playlists), m_transaction(transaction),
       m_library(library), m_queue(queue), m_player(player), m_managedFiles(managedFiles) {}
-Result<int> CollectionService::enqueue(const ImportedFile &file, bool play) {
+Result<int> CollectionService::enqueue(const ImportedFile &file, bool play, int position, bool playNext) {
+    if (position < -1 || position > m_queue.queue().size() || (playNext && position != -1))
+        return failure("Invalid queue insertion position");
     Transaction tx(m_transaction);
     if (!tx)
         return failure(m_transaction.errorString(), ErrorCode::Storage);
@@ -18,9 +20,10 @@ Result<int> CollectionService::enqueue(const ImportedFile &file, bool play) {
     if (!song)
         return failure(m_songs.errorString(), ErrorCode::Storage);
     auto next = m_queue.queue();
-    auto id = next.add(file.path, *song);
+    auto id = playNext ? next.insertAfterCurrent(file.path, *song)
+                       : next.insert(position < 0 ? next.size() : position, file.path, *song);
     if (play)
-        next.setCurrentIndex(next.size() - 1);
+        next.setCurrentIndex(next.indexById(id));
     next.markCurrent();
     if (!m_queueRepo.saveQueue({next.records(), next.currentIndex()}) || !tx.commit())
         return failure(m_transaction.errorString(), ErrorCode::Storage);
@@ -31,6 +34,24 @@ Result<int> CollectionService::enqueue(const ImportedFile &file, bool play) {
         m_queue.adoptCommitted(next);
     emit libraryChanged();
     return id;
+}
+Result<void> CollectionService::enqueueSongs(const QVector<int> &songIds, int position, bool playNext) {
+    auto next = m_queue.queue();
+    if (songIds.isEmpty() || position < -1 || position > next.size() || (playNext && position != -1))
+        return failure("Invalid songs or queue insertion position");
+    int insertion = playNext ? next.currentIndex() + 1 : position < 0 ? next.size() : position;
+    for (const int songId : songIds) {
+        auto song = m_library.metadata(songId);
+        if (!song)
+            return song.error();
+        const auto path = m_library.availablePath(songId);
+        if (path.isEmpty() && !song.value().isRemote())
+            return failure("Song file is unavailable");
+        next.insert(insertion, path, song.value());
+        next[insertion].playNext = playNext;
+        ++insertion;
+    }
+    return m_queue.commit(std::move(next));
 }
 Result<int> CollectionService::enqueueRemote(const SongMetadata &metadata, bool play) {
     Transaction tx(m_transaction);

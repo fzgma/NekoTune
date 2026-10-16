@@ -26,7 +26,22 @@ Canvas {
         const h = height
         const k = glyph.kind
 
-        if (k === "audio_output") {
+        if (k === "mini" || k === "expand") {
+            ctx.strokeRect(w * .16, h * .2, w * .68, h * .6)
+            if (k === "mini") ctx.fillRect(w * .48, h * .48, w * .28, h * .23)
+            else {
+                ctx.beginPath(); ctx.moveTo(w * .35, h * .4); ctx.lineTo(w * .65, h * .4)
+                ctx.lineTo(w * .65, h * .65); ctx.stroke()
+            }
+        } else if (k === "pin") {
+            ctx.beginPath(); ctx.moveTo(w * .32, h * .18); ctx.lineTo(w * .68, h * .18)
+            ctx.lineTo(w * .62, h * .48); ctx.lineTo(w * .78, h * .62)
+            ctx.lineTo(w * .22, h * .62); ctx.lineTo(w * .38, h * .48); ctx.closePath(); ctx.stroke()
+            ctx.beginPath(); ctx.moveTo(w * .5, h * .62); ctx.lineTo(w * .5, h * .88); ctx.stroke()
+        } else if (k === "lock") {
+            ctx.strokeRect(w * .25, h * .44, w * .5, h * .4)
+            ctx.beginPath(); ctx.arc(w * .5, h * .42, w * .18, Math.PI, 0); ctx.stroke()
+        } else if (k === "audio_output") {
             ctx.beginPath()
             ctx.arc(w * .5, h * .48, w * .32, Math.PI, 0)
             ctx.moveTo(w * .18, h * .48); ctx.lineTo(w * .18, h * .78)

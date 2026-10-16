@@ -38,7 +38,9 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
       m_player(*m_audio, m_queue, std::make_unique<ShuffleBagStrategy>(),
                playbackModeFromString(AppPaths::setting("playback_mode").toString())
                    .value_or(PlaybackMode::Sequential),
-               [](PlaybackMode mode) { return AppPaths::saveSetting("playback_mode", toString(mode)); }),
+               [](PlaybackMode mode) { return AppPaths::saveSetting("playback_mode", toString(mode)); },
+               AppPaths::setting("playback_rate").toDouble(1.0),
+               [](double rate) { return AppPaths::saveSetting("playback_rate", rate); }),
       m_audioOutputs(*m_audio, savedAudioOutput(), [](const AudioOutputSelection &selected) {
           return AppPaths::saveSetting("audio_output", QJsonObject{{"device_id", selected.id},
                                                                  {"device_name", selected.name},
@@ -180,6 +182,10 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     });
     connect(&m_player, &PlayerEngine::volumeChanged, this, [this](double volume) {
         m_server.broadcastEvent({{"event", "player.volume_changed"}, {"volume", volume}});
+    });
+    connect(&m_player, &PlayerEngine::playbackRateChanged, this, [this](double rate) {
+        m_server.broadcastEvent({{"event", "player.playback_rate_changed"}, {"playback_rate", rate},
+                                 {"position", m_player.snapshot().position}});
     });
     auto trackChanged = [this] {
         const auto state = m_api.playbackStatus();

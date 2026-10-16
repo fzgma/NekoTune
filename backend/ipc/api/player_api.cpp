@@ -1,4 +1,5 @@
 #include "ipc/api/api_context.h"
+#include <QJsonArray>
 #include <cmath>
 #include <limits>
 namespace nekotune {
@@ -69,8 +70,29 @@ void registerPlayerApi(IpcRouter &router, ApiContext &api) {
         done(response(result, api.status()));
     }, true);
     router.registerMethod("player.status", [&api](const auto &, auto done) { done(success(api.status())); });
+    router.registerMethod("player.set_playback_rate", [&api](const QJsonObject &params, auto done) {
+        if (!params.value("rate").isDouble()) {
+            done(error(failure("rate must be a number")));
+            return;
+        }
+        const auto result = api.player.setPlaybackRate(params.value("rate").toDouble());
+        done(response(result, api.status()));
+    });
     router.registerMethod("queue.status",
                           [&api](const auto &, auto done) { done(success(api.queueStatus())); });
+    router.registerMethod("queue.move", [&api](const QJsonObject &params, auto done) {
+        auto id = requiredId(params, "queue_id");
+        const auto position = params.value("position");
+        const double number = position.toDouble(-1);
+        if (!id) { done(error(id.error())); return; }
+        if (!position.isDouble() || !std::isfinite(number) || number < 0 ||
+            number >= api.queue.queue().size() || std::trunc(number) != number) {
+            done(error(failure("position must be a zero-based queue index")));
+            return;
+        }
+        const auto result = api.queue.move(id.value(), int(number));
+        done(response(result, api.queueStatus()));
+    }, true);
     router.registerMethod("player.seek", [&api, &router](const QJsonObject &params, auto done) {
         const bool relative = params.contains("offset");
         if (relative == params.contains("position")) {
@@ -142,6 +164,50 @@ void registerPlayerApi(IpcRouter &router, ApiContext &api) {
         router.registerMethod(
             play ? "player.play" : "queue.add",
             [&api, play](const QJsonObject &params, auto done) {
+                int position = -1;
+                const bool playNext = !play && params.value("next").toBool();
+                if (!play) {
+                    if ((params.contains("next") && !params.value("next").isBool()) ||
+                        (params.contains("next") && params.contains("position"))) {
+                        done(error(failure("next must be boolean and cannot be combined with position")));
+                        return;
+                    }
+                    if (params.contains("position")) {
+                        const auto value = params.value("position");
+                        const double number = value.toDouble(-1);
+                        if (!value.isDouble() || !std::isfinite(number) || number < 0 ||
+                            number > api.queue.queue().size() || std::trunc(number) != number) {
+                            done(error(failure("position must be an integer from 0 through queue size")));
+                            return;
+                        }
+                        position = int(number);
+                    }
+                    if (int(params.contains("path")) + int(params.contains("song_id")) +
+                            int(params.contains("song_ids")) != 1) {
+                        done(error(failure("Exactly one of path, song_id or song_ids is required")));
+                        return;
+                    }
+                    if (params.contains("song_id") || params.contains("song_ids")) {
+                        QJsonArray values;
+                        if (params.contains("song_id")) values.append(params.value("song_id"));
+                        else if (params.value("song_ids").isArray()) values = params.value("song_ids").toArray();
+                        QVector<int> ids;
+                        for (const auto &value : values) {
+                            if (!positiveId(value)) {
+                                done(error(failure("song_ids must contain positive integer IDs")));
+                                return;
+                            }
+                            ids.append(value.toInt());
+                        }
+                        if (ids.isEmpty()) {
+                            done(error(failure("song_ids must be a non-empty array")));
+                            return;
+                        }
+                        const auto result = api.collections.enqueueSongs(ids, position, playNext);
+                        done(response(result, api.queueStatus()));
+                        return;
+                    }
+                }
                 const auto path = params.value("path");
                 if (play && (path.isUndefined() || (path.isString() && path.toString().isEmpty()))) {
                     auto result = api.player.play();
@@ -152,12 +218,12 @@ void registerPlayerApi(IpcRouter &router, ApiContext &api) {
                     done(error(failure("path is required")));
                     return;
                 }
-                api.imports.inspect(path.toString(), [&api, play, done](Result<ImportedFile> file) {
+                api.imports.inspect(path.toString(), [&api, play, position, playNext, done](Result<ImportedFile> file) {
                     if (!file) {
                         done(error(file.error()));
                         return;
                     }
-                    auto result = api.collections.enqueue(file.value(), play);
+                    auto result = api.collections.enqueue(file.value(), play, position, playNext);
                     done(result ? success(play ? api.status() : api.queueStatus()) : error(result.error()));
                 });
             },

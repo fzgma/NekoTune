@@ -10,6 +10,9 @@ namespace nekotune {
 // No automatic playlist/shuffle policy is implemented inside this adapter.
 QtPlaybackBackend::QtPlaybackBackend() {
     m_audio.setVolume(.8);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+    m_player.setPitchCompensation(true);
+#endif
     m_seekTimeout.setSingleShot(true);
     m_seekTimeout.setInterval(2000);
     connect(&m_seekTimeout, &QTimer::timeout, this, [this] { m_seekTarget.reset(); });
@@ -72,6 +75,19 @@ QtPlaybackBackend::QtPlaybackBackend() {
         emit failed(message);
     });
 }
+bool QtPlaybackBackend::supportsPlaybackRate() const {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+    return m_player.pitchCompensationAvailability() != QMediaPlayer::PitchCompensationAvailability::Unavailable
+           && m_player.pitchCompensation();
+#else
+    // Older Qt backends cannot guarantee pitch preservation.
+    return false;
+#endif
+}
+void QtPlaybackBackend::setPlaybackRate(double rate) {
+    if (rate == 1.0 || supportsPlaybackRate())
+        m_player.setPlaybackRate(rate);
+}
 void QtPlaybackBackend::setSource(const QUrl &url) {
     m_seekTarget.reset();
     m_seekTimeout.stop();
@@ -101,7 +117,8 @@ void QtPlaybackBackend::confirmSeek(qint64 position) {
         return;
     // Qt may coalesce the seek with a subsequent playback tick. Report the observed
     // clock only after it reaches the target, allowing elapsed playback and codec rounding.
-    const auto elapsed = m_player.playbackState() == QMediaPlayer::PlayingState ? m_seekClock.elapsed() : 0;
+    const auto elapsed = m_player.playbackState() == QMediaPlayer::PlayingState
+                             ? qint64(m_seekClock.elapsed() * m_player.playbackRate()) : 0;
     if (position < *m_seekTarget - 100 || position > *m_seekTarget + elapsed + 100)
         return;
     m_seekTarget.reset();

@@ -48,7 +48,13 @@ Rectangle {
         function togglePlayPause() { toggles++ }
         function play() { plays++ }
     }
-    QtObject { id: app; property var library: libraryObject; property var playlists: playlistController; property var playback: playbackController }
+    QtObject {
+        id: queueController
+        property var lastIds: []
+        property bool lastNext: false
+        function addSongs(ids, next) { lastIds = ids; lastNext = next }
+    }
+    QtObject { id: app; property var library: libraryObject; property var playlists: playlistController; property var playback: playbackController; property var queue: queueController }
     QtObject {
         id: playlistPageStub
         property int created: 0
@@ -110,6 +116,53 @@ Rectangle {
         }
         function cleanup() { page = null }
         function button(name) { const result = findChild(page, name); verify(result !== null, name); return result }
+        function test_recentSongQueueMenu() {
+            const row = button("homeRecentSong6")
+            row.actionRequested("next")
+            compare(queueController.lastIds.join(","), "6")
+            compare(queueController.lastNext, true)
+            row.actionRequested("queue")
+            compare(queueController.lastNext, false)
+        }
+        function test_recentPlayedSwitchAndPlaybackScope() {
+            const now = Date.now(), day = 24 * 60 * 60 * 1000
+            const songs = songModel.items.map(song => Object.assign({}, song))
+            songs[0].last_played_at = new Date(now - day).toISOString()
+            songs[1].last_played_at = new Date(now - 3 * day).toISOString()
+            songs[2].last_played_at = "invalid"
+            songs[4].last_played_at = new Date(now - 2 * day).toISOString()
+            songModel.items = songs
+            const original = songs.map(song => song.last_played_at || "").join(",")
+            const picker = button("homeRecentPicker")
+            mouseClick(picker)
+            tryCompare(picker.popup, "opened", true)
+            keyClick(Qt.Key_End)
+            keyClick(Qt.Key_Return)
+            tryCompare(picker.popup, "opened", false)
+            compare(page.recentView, "played")
+            compare(page.recentSongs.map(song => song.song_id), [1, 5, 2])
+            compare(libraryObject.playCount, 0)
+            compare(songModel.items.map(song => song.last_played_at || "").join(","), original)
+            page.playRecent(songs[4])
+            compare(libraryObject.lastIds, [1, 5, 2])
+            compare(libraryObject.lastStart, 5)
+            page.recentView = "added"
+            compare(page.recentSongs.map(song => song.song_id), [6, 5, 4, 3, 2])
+            const updated = songs.map(song => Object.assign({}, song))
+            updated[1].last_played_at = new Date(now).toISOString()
+            songModel.items = updated
+            page.recentView = "played"
+            compare(page.recentSongs.map(song => song.song_id), [2, 1, 5])
+        }
+        function test_recentPlayedHasOwnEmptyState() {
+            page.recentView = "played"
+            compare(page.recentSongs.length, 0)
+            compare(button("homeLibraryState").text, testTranslator.text("home_empty_recent_played"))
+            compare(page.primaryAction, "home_play_library")
+            page.recentView = "added"
+            compare(page.recentSongs.length, 5)
+            compare(libraryObject.playCount, 0)
+        }
 
         // Creating the page must not start playback as a side effect of choosing a primary action.
         // The action changes with current song, queue and playback state.

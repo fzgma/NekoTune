@@ -22,7 +22,11 @@ Item {
     readonly property bool compact: shell.width < 1200
     readonly property var songs: controllers.library.songs.items
     readonly property var playlists: controllers.playlists.model.items
-    readonly property var recentSongs: songs.slice().sort((a, b) => Number(b.song_id) - Number(a.song_id)).slice(0, 5)
+    property string recentView: "added"
+    readonly property var recentSongs: recentView === "played"
+        ? songs.filter(song => Number.isFinite(Date.parse(String(song.last_played_at || ""))))
+            .sort((a, b) => Date.parse(b.last_played_at) - Date.parse(a.last_played_at) || Number(a.song_id) - Number(b.song_id)).slice(0, 5)
+        : songs.slice().sort((a, b) => Number(b.song_id) - Number(a.song_id)).slice(0, 5)
     readonly property bool hasPlayableSongs: songs.some(song => song.available)
     readonly property bool initialLoading: !controllers.library.loaded && controllers.library.loading
     readonly property bool initialFailed: !controllers.library.loaded && !controllers.library.loading
@@ -366,7 +370,17 @@ Item {
                     spacing: page.theme.spaceSm
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { Layout.fillWidth: true; text: page.t("home_recent"); color: page.theme.textPrimary; font.pixelSize: page.theme.fontDialogTitle; font.weight: Font.DemiBold }
+                        ChoiceField {
+                            objectName: "homeRecentPicker"
+                            Layout.fillWidth: true
+                            Layout.maximumWidth: 200
+                            textRole: "label"; valueRole: "value"
+                            model: [{value: "added", label: page.t("home_recent")}, {value: "played", label: page.t("home_recent_played")}]
+                            currentIndex: page.recentView === "played" ? 1 : 0
+                            onActivated: page.recentView = currentValue
+                            Accessible.name: page.t("home_recent_view")
+                        }
+                        Item { Layout.fillWidth: true }
                         TextButton {
                             objectName: "homeViewAllButton"
                             text: page.t("home_view_all")
@@ -391,6 +405,11 @@ Item {
                             available: Boolean(modelData.available)
                             connected: page.transport.connected && !page.playbackPending
                             playObjectName: "homePlaySong" + modelData.song_id
+                            menuActions: [
+                                {key: "next", label: page.t("play_next"), enabled: Boolean(modelData.available) && page.transport.connected},
+                                {key: "queue", label: page.t("add_to_queue_end"), enabled: Boolean(modelData.available) && page.transport.connected}
+                            ]
+                            onActionRequested: action => page.controllers.queue.addSongs([Number(modelData.song_id)], action === "next")
                             onSelectedRequested: modifiers => page.selectedSongId = Number(modelData.song_id)
                             onActivated: page.playRecent(modelData)
                             onPlayClicked: page.playRecent(modelData, true)
@@ -400,8 +419,8 @@ Item {
                         objectName: "homeLibraryState"
                         Layout.fillWidth: true
                         Layout.topMargin: 16
-                        visible: page.songs.length === 0
-                        text: page.t(!page.transport.connected ? "home_offline" : page.initialLoading ? "home_loading" : page.initialFailed ? "home_load_failed" : "home_empty_library")
+                        visible: page.recentSongs.length === 0
+                        text: page.t(!page.transport.connected ? "home_offline" : page.initialLoading ? "home_loading" : page.initialFailed ? "home_load_failed" : page.songs.length && page.recentView === "played" ? "home_empty_recent_played" : "home_empty_library")
                         color: page.theme.textMuted; font.pixelSize: page.theme.fontBody; wrapMode: Text.WordWrap
                     }
                     TextButton {

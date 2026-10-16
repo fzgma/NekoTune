@@ -15,6 +15,14 @@ PlaybackController::PlaybackController(IpcClient &client) : FeatureController(cl
     });
 }
 void PlaybackController::apply(const QJsonObject &data) {
+    if (data.contains("playback_rate_supported") && m_playbackRateSupported != data.value("playback_rate_supported").toBool()) {
+        m_playbackRateSupported = data.value("playback_rate_supported").toBool();
+        emit playbackRateSupportedChanged();
+    }
+    if (data.contains("playback_rate") && m_playbackRate != data.value("playback_rate").toDouble()) {
+        m_playbackRate = data.value("playback_rate").toDouble();
+        emit playbackRateChanged();
+    }
     if (data.contains("capabilities") && m_capabilities != data.value("capabilities").toObject().toVariantMap()) {
         m_capabilities = data.value("capabilities").toObject().toVariantMap();
         emit capabilitiesChanged();

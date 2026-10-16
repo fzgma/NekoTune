@@ -29,6 +29,7 @@ struct SongMetadata {
     int year = 0;
     int trackNumber = 0;
     int discNumber = 0;
+    QString lastPlayedAt; // UTC ISO 8601 with milliseconds; empty when no playback was recorded.
     bool isRemote() const { return !providerId.isEmpty(); }
     QString resourceKey() const {
         return isRemote() ? QStringLiteral("remote-") +
@@ -82,6 +83,7 @@ struct ImportedFile {
 struct QueueRecord {
     QString path;
     int songId = 0;
+    bool playNext = false; // Queue-only priority; playlist membership ignores this field.
 };
 
 /// Items and currentIndex must be interpreted together.

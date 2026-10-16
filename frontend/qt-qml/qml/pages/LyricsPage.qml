@@ -19,6 +19,7 @@ PlayerPanel {
     queue: shell.queue
     duration: shell.duration
     position: shell.position
+    playbackRate: controllers.playback.playbackRate
     volume: shell.volume
     playbackState: shell.playbackState
     connected: transport.connected

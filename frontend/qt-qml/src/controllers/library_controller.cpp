@@ -5,6 +5,8 @@
 #include <QCollator>
 #include <QJsonDocument>
 #include <QMap>
+#include <QDateTime>
+#include <QTimer>
 #include <algorithm>
 namespace {
 QString albumKey(const QVariantMap &song) {
@@ -23,6 +25,12 @@ QString importSourceFor(const QVariantMap &song) {
 }
 }
 LibraryController::LibraryController(IpcClient &client) : FeatureController(client) {
+    auto *recentFilterTimer = new QTimer(this);
+    recentFilterTimer->setInterval(60000);
+    connect(recentFilterTimer, &QTimer::timeout, this, [this] {
+        if (m_playFilter == "last_7_days" || m_playFilter == "last_30_days") filter();
+    });
+    recentFilterTimer->start();
     connect(&client, &IpcClient::eventReceived, this, [this](const QJsonObject &event) {
         auto name = event.value("event").toString();
         if (name == "server.connected") send("library.scan", {});
@@ -84,11 +92,18 @@ void LibraryController::filter() {
     QVariantList items;
     QSet<QString> sources;
     const auto query = m_searchText.trimmed();
+    const auto now = QDateTime::currentDateTimeUtc();
+    const int recentDays = m_playFilter == "last_7_days" ? 7 : m_playFilter == "last_30_days" ? 30 : 0;
     for (const auto &value : m_songs.items()) {
         auto song = value.toMap();
         const auto source = importSourceFor(song);
         sources.insert(source);
         const auto count = song.value("play_count").toLongLong();
+        if (recentDays) {
+            const auto playedAt = QDateTime::fromString(song.value("last_played_at").toString(), Qt::ISODate);
+            if (!playedAt.isValid() || playedAt < now.addDays(-recentDays) || playedAt > now)
+                continue;
+        }
         if ((!m_importSource.isEmpty() && source != m_importSource)
             || (m_playFilter == "never_played" && count != 0)
             || (m_playFilter == "played" && count == 0))
@@ -123,6 +138,13 @@ void LibraryController::filter() {
         const int aId = a.value("song_id").toInt(), bId = b.value("song_id").toInt();
         if (m_sortOrder == "added_desc") return aId > bId;
         if (m_sortOrder == "added_asc") return aId < bId;
+        if (m_sortOrder == "recently_played") {
+            const auto x = QDateTime::fromString(a.value("last_played_at").toString(), Qt::ISODate);
+            const auto y = QDateTime::fromString(b.value("last_played_at").toString(), Qt::ISODate);
+            if (x.isValid() != y.isValid()) return x.isValid();
+            if (x != y) return x > y;
+            return aId < bId;
+        }
         if (m_sortOrder == "track") {
             for (const auto *field : {"disc_number", "track_number"}) {
                 const auto aNumber = a.value(field).toInt(), bNumber = b.value(field).toInt();
@@ -192,16 +214,36 @@ void LibraryController::filter() {
         emit selectionChanged();
     }
 }
+QVariantList LibraryController::albumSongIds(const QString &id) const {
+    QVariantList tracks;
+    for (const auto &value : m_songs.items()) {
+        const auto song = value.toMap();
+        if (albumKey(song) == id && song.value("available").toBool())
+            tracks.append(value);
+    }
+    std::sort(tracks.begin(), tracks.end(), [](const QVariant &a, const QVariant &b) {
+        const auto left = a.toMap(), right = b.toMap();
+        for (const auto *field : {"disc_number", "track_number"}) {
+            const int x = left.value(field).toInt(), y = right.value(field).toInt();
+            if (x != y) return (x > 0 ? x : 10000) < (y > 0 ? y : 10000);
+        }
+        return left.value("song_id").toInt() < right.value("song_id").toInt();
+    });
+    QVariantList ids;
+    for (const auto &track : tracks) ids.append(track.toMap().value("song_id"));
+    return ids;
+}
 void LibraryController::setSortOrder(const QString &order) {
     static const QStringList allowed{"added_asc", "added_desc", "title", "artist", "album",
-                                     "duration_asc", "duration_desc", "most_played", "least_played", "track"};
+                                     "duration_asc", "duration_desc", "most_played", "least_played", "track", "recently_played"};
     if (order == m_sortOrder || !allowed.contains(order)) return;
     m_sortOrder = order;
     filter();
     emit filterChanged();
 }
 void LibraryController::setPlayFilter(const QString &value) {
-    if (value == m_playFilter || (value != "all" && value != "played" && value != "never_played")) return;
+    if (value == m_playFilter || (value != "all" && value != "played" && value != "never_played" &&
+                                  value != "last_7_days" && value != "last_30_days")) return;
     m_playFilter = value;
     filter();
     emit filterChanged();

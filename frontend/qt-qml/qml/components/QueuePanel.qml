@@ -30,6 +30,10 @@ Item {
     property int selectedId: 0
     property string pendingMethod: ""
     property string operationError: ""
+    property int draggedQueueId: 0
+    property int dropIndex: -1
+    property real dragY: 0
+    readonly property bool canReorder: !currentPlaylist && !searchText.trim() && connected && !pendingMethod
     readonly property bool isPlaying: playbackState === "playing"
     readonly property var selectedPlaylist: playlists.find(list => Number(list.id) === currentPlaylist) || null
     readonly property var sourceItems: selectedPlaylist ? selectedPlaylist.items : queue
@@ -40,6 +44,7 @@ Item {
     signal playRequested(int queueId)
     signal togglePlayPauseRequested()
     signal removeRequested(int queueId)
+    signal moveRequested(int queueId, int position)
     signal editRequested(var songData)
     signal playlistRequested(string action, var params)
     signal queueAddRequested(string path)
@@ -65,6 +70,7 @@ Item {
     }
     function playAll() { playlistRequested("play", {id: currentPlaylist, song_ids: visibleItems.map(item => Number(item.song_id))}) }
     function requestSucceeded(method) {
+        if (method === "queue.add") operationError = ""
         if (method !== pendingMethod) return
         pendingMethod = ""
         operationError = ""
@@ -73,6 +79,7 @@ Item {
         confirmation.completed()
     }
     function requestFailed(method, message) {
+        if (method === "queue.add") operationError = message
         if (method !== pendingMethod) return
         pendingMethod = ""
         operationError = message
@@ -82,22 +89,51 @@ Item {
         const usable = root.connected && (song.available === undefined || Boolean(song.available))
         const result = [
             {key: "play", label: i18n.text("play", i18n.language), enabled: usable},
+            {key: "next", label: i18n.text("play_next", i18n.language), enabled: usable},
+            {key: "queue", label: i18n.text("add_to_queue_end", i18n.language), enabled: usable},
             {key: "playlist", label: i18n.text("add_to_playlist", i18n.language), enabled: usable},
             {key: "edit", label: i18n.text("edit_info", i18n.language), enabled: root.connected},
             {key: "remove", label: i18n.text(root.currentPlaylist ? "remove_from_playlist" : "remove_from_queue", i18n.language), destructive: true, enabled: root.connected}
         ]
-        if (root.currentPlaylist) result.splice(1, 0, {key: "queue", label: i18n.text("add_to_queue", i18n.language), enabled: usable})
         return result
     }
     function songAction(action, song) {
         if (action === "play") playSong(song)
         else if (action === "playlist") addToPlaylist(song)
-        else if (action === "queue") {
-            if (song.source && song.source.kind === "extension" && root.queueController) root.queueController.addSourceSong(song)
-            else queueAddRequested(String(song.path))
+        else if (action === "queue" || action === "next") {
+            if (root.queueController) root.queueController.addSongs([Number(song.song_id)], action === "next")
         }
         else if (action === "edit") editRequested(song)
         else if (action === "remove") removeSong(song)
+    }
+    function cancelDrag() { draggedQueueId = 0; dropIndex = -1 }
+    function updateDrop(sceneY) {
+        if (!draggedQueueId || !canReorder) { cancelDrag(); return }
+        dragY = songList.mapFromItem(null, 0, sceneY).y
+        const y = songList.contentY + Math.max(0, Math.min(songList.height - 1, dragY))
+        let index = songList.indexAt(8, y)
+        if (index < 0) index = songList.indexAt(8, y + songList.spacing)
+        if (index < 0) index = songList.indexAt(8, y - songList.spacing)
+        dropIndex = index >= 0 ? index : dragY < songList.height / 2 ? 0 : sourceItems.length - 1
+    }
+    function finishDrag() {
+        const id = draggedQueueId, position = dropIndex
+        cancelDrag()
+        if (!canReorder || position < 0 || sourceItems.findIndex(song => identity(song) === id) === position) return
+        pendingMethod = "queue.move"
+        operationError = ""
+        moveRequested(id, position)
+    }
+    onCanReorderChanged: if (!canReorder) cancelDrag()
+    onQueueChanged: if (draggedQueueId) cancelDrag()
+    Timer {
+        interval: 30; repeat: true; running: root.draggedQueueId !== 0
+        onTriggered: {
+            const delta = root.dragY < 36 ? -12 : root.dragY > songList.height - 36 ? 12 : 0
+            if (!delta) return
+            songList.contentY = Math.max(songList.originY, Math.min(Math.max(songList.originY, songList.contentHeight - songList.height), songList.contentY + delta))
+            root.updateDrop(songList.mapToItem(null, 0, root.dragY).y)
+        }
     }
     onCurrentPlaylistChanged: { selectedId = 0; searchText = ""; if (songList) songList.positionViewAtBeginning() }
     onSearchTextChanged: selectedId = 0
@@ -154,6 +190,7 @@ Item {
             }
         }
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.borderSubtle }
+        Label { Layout.fillWidth: true; visible: Boolean(root.operationError); text: root.operationError; color: Theme.statusError; wrapMode: Text.WordWrap; textFormat: Text.PlainText }
         ListView {
             id: songList
             objectName: root.currentPlaylist ? "playlistSongList" : "queueSongList"
@@ -178,6 +215,16 @@ Item {
                 playing: root.isPlaying
                 playObjectName: (root.currentPlaylist ? "playPlaylistSong" : "playQueueSong") + root.identity(modelData)
                 menuActions: root.menuActions(modelData)
+                reorderEnabled: root.canReorder
+                onReorderStarted: { root.draggedQueueId = root.identity(modelData); root.dropIndex = index }
+                onReorderMoved: sceneY => root.updateDrop(sceneY)
+                onReorderFinished: root.finishDrag()
+                onReorderCancelled: root.cancelDrag()
+                Rectangle {
+                    width: parent.width; height: 2; color: Theme.accentPrimary
+                    y: root.sourceItems.findIndex(song => root.identity(song) === root.draggedQueueId) < index ? parent.height - height : 0
+                    visible: root.draggedQueueId !== 0 && root.dropIndex === index
+                }
                 onSelectedRequested: root.selectedId = root.identity(modelData)
                 onActivated: root.playSong(modelData)
                 onPlayClicked: current ? root.togglePlayPauseRequested() : root.playSong(modelData)

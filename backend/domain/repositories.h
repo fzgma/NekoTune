@@ -55,6 +55,7 @@ class ISongRepository {
     virtual QVector<QString> pathsForSong(int songId) const = 0;
     virtual QHash<int, QVector<QString>> songPaths() const = 0;
     virtual bool updateDuration(int songId, qint64 durationMs) = 0;
+    /// Atomically increment the count and record the successful start's UTC timestamp.
     virtual bool incrementPlayCount(int songId) = 0;
     virtual bool erase(int songId) = 0;
 };

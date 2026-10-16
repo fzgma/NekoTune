@@ -42,6 +42,8 @@ flowchart TD
 
 事件沿 IPC 返回前端，由订阅该事件的控制器更新属性或模型。业务服务返回类型化数据和 `Result<T>`，JSON 转换集中在 IPC 层。
 
+全局播放速度通过 `IPlaybackBackend::setPlaybackRate` 进入 Qt Multimedia；`PlayerEngine` 校验 0.5–2.0、先保存偏好再应用，不改变歌曲／队列身份或媒体时间戳。Qt 6.10+ 的音高补偿能力决定倍速是否可用。`PlaybackController` 消费确认状态，播放栏、设置、主歌词、迷你播放器和桌面歌词共享速度；逐字视觉插值以每次解码器位置为锚点并限幅，行高亮与进度始终使用媒体位置。MPRIS 只读发布实际 `Rate`。
+
 | 层 | 负责 | 依赖约束 |
 | --- | --- | --- |
 | `domain` | 值类型、队列、歌词解析、播放规则及仓储／后端接口 | 使用 Qt Core 和 Zlib；不依赖 JSON、SQL、网络、Multimedia 或外层代码 |
@@ -123,6 +125,10 @@ Linux 下 `nekotune_frontend` 额外链接 Qt DBus；后端、领域和应用目
 `SystemMediaBridge` 位于桌面前端，消费 `PlaybackController` 的后端确认状态，使用 `IpcClient` 发送命令。Linux 的 `MprisService` 用 `QDBusVirtualObject` 实现 MPRIS 根接口、Player 接口和 Properties；协议编码与平台无关桥接分离。两个桌面入口共用此装配，独立后端不注册媒体会话。
 
 `SystemTrayController` 管理原生托盘菜单、主窗口关闭与恢复。桌面入口使用 `QApplication`，通过 `desktopIntegration` 向 QML 暴露托盘可用性和关闭偏好；`close_to_tray` 通过 `AppPaths` 保存。托盘播放操作复用 `SystemMediaBridge` 的 IPC 请求与后端确认状态。有可用托盘时默认关闭仅隐藏窗口，无托盘时退出；隐藏后托盘消失会恢复窗口。托盘退出和 MPRIS Quit 统一触发应用退出，内嵌后台沿用 `aboutToQuit` 清理，分离运行的外部后台保持运行。
+
+`PlaybackWindowController` 通过 `playbackWindows` 暴露迷你模式、迷你置顶、桌面歌词显示／锁定和平台能力。在主 QML 引擎中按需创建独立顶层窗口，复用同一播放／歌词控制器；不增加后端 IPC。主窗口和迷你窗口互斥显示，桌面歌词独立存在；托盘显示与 MPRIS Raise 恢复完整主界面。窗口几何及置顶偏好以 `playback_windows` 设置保存，启动不恢复开启或锁定状态。原生 Wayland 禁用桌面歌词；X11／Windows 使用 Qt 窗口标志实现透明、置顶及输入穿透，锁定要求托盘可用，托盘消失立即解锁。
+
+`LyricsClock` 和 `LyricTiming.js` 共用时间定位及最多 120ms 的逐字进度插值，`LyricLine` 共用文字底层与裁剪高亮层。原多行歌词保留滚动及点击跳转；`CompactLyrics` 只呈现匹配当前歌曲标识的歌词、下一行预告及状态，占用的动画计时器随辅助窗口隐藏停止。辅助窗口使用独立透明样式，不实例化背景或完整 shell 扩展。
 
 收到首次完整 `server.connected` 快照后才注册会话；断线／退出时撤销，重连后更新 TrackId 的连接代次。命令异步等待 IPC，5 秒超时回复错误，不重放请求。PropertiesChanged 只发布确认后的变化，普通进度更新不发布该信号；明确的确认跳转通过 Seeked 传递。
 

@@ -45,6 +45,7 @@ class LibraryService final : public QObject {
     /// Missing/deleted records are ignored rather than recreated.
     /// This makes delayed scan results safe across intervening edits.
     Result<void> backfillDuration(int id, const QString &hash, qint64 durationMs);
+    /// Persist play count and UTC last-played timestamp together, then publish refreshed metadata.
     Result<void> recordPlayback(int id);
     /// @param id Persistent song to edit; missing songs are rejected before writing.
     /// @param patch Optional field replacements, with present empty values meaning clear.

@@ -16,6 +16,7 @@ class QueueService final : public QObject {
     QueueService(IQueueRepository &repository, ISongRepository &songs, ITransaction &transaction);
     const PlayerQueue &queue() const { return m_queue; }
     Result<void> commit(PlayerQueue next);
+    Result<void> move(int queueId, int position);
     void adoptCommitted(PlayerQueue next);
     void updateMetadata(const SongMetadata &metadata);
     void updateMetadataBatch(const QVector<SongMetadata> &metadata);

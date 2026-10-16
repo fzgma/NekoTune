@@ -14,6 +14,7 @@ struct QueueItem {
     SongMetadata metadata;
     QString path;
     QString state;
+    bool playNext = false;
 };
 
 /// In-memory queue only; currentIndex == -1 means no selection, even for a nonempty queue.
@@ -25,6 +26,7 @@ class PlayerQueue final {
     /// Accept only -1 or an index in the current item vector.
     /// Selection does not start decoding or persist any state.
     /// markCurrent() separately updates the presentation state strings.
+    /// Selecting an occurrence consumes its pending play-next flag in this candidate.
     /// Callers prepare a candidate queue before committing it.
     bool setCurrentIndex(int index);
 
@@ -34,6 +36,12 @@ class PlayerQueue final {
     /// Neither the file nor metadata is revalidated by this value object.
     /// Inspection and persistence remain application responsibilities.
     int add(const QString &path, const SongMetadata &metadata);
+    /// Insert at a zero-based position in [0, size()], retaining the selected occurrence.
+    /// Invalid positions return zero without allocating an identity.
+    int insert(int position, const QString &path, const SongMetadata &metadata);
+    int insertAfterCurrent(const QString &path, const SongMetadata &metadata);
+    /// Move one occurrence to its final zero-based position without changing selection identity.
+    bool move(int queueId, int position);
     /// Remove one occurrence, adjusting selection when earlier positions disappear.
     /// Removing the current occurrence leaves it unselected; the player decides continuation.
     /// Invalid indices fail without changing the candidate value object.

@@ -5,6 +5,11 @@
 // Deterministic device topology shared by decoder fakes; no host audio is touched.
 class TestAudioBackend : public nekotune::IPlaybackBackend {
   public:
+    double rate = 1.0;
+    bool rateSupported = true;
+    void setPlaybackRate(double value) override { rate = value; }
+    double playbackRate() const override { return rate; }
+    bool supportsPlaybackRate() const override { return rateSupported; }
     QList<nekotune::AudioOutputDevice> devices{{"c3BlYWtlcg==", "Speaker", true}};
     QString outputId = "c3BlYWtlcg==";
     QList<nekotune::AudioOutputDevice> audioOutputs() const override { return devices; }

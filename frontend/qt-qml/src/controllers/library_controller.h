@@ -51,6 +51,7 @@ class LibraryController final : public FeatureController {
     void setAlbumView(bool enabled);
     Q_INVOKABLE void openAlbum(const QString &id);
     Q_INVOKABLE void closeAlbum();
+    Q_INVOKABLE QVariantList albumSongIds(const QString &id) const;
     Q_INVOKABLE void saveBatchMetadata(const QVariantList &ids, const QVariantMap &patch, const QString &tagMode);
     QVariantMap editing() const { return m_editing; }
     bool metadataReady() const { return m_metadataReady; }

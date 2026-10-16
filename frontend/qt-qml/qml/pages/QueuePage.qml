@@ -41,6 +41,7 @@ Item {
         onPlayRequested: id => page.controllers.queue.playQueueItem(id)
         onTogglePlayPauseRequested: page.controllers.playback.togglePlayPause()
         onRemoveRequested: id => page.controllers.queue.removeQueueItem(id)
+        onMoveRequested: (id, position) => page.controllers.queue.moveQueueItem(id, position)
         onEditRequested: song => page.editRequested(song)
         onPlaylistRequested: (action, params) => page.controllers.playlists.managePlaylist(action, params)
     }

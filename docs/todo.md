@@ -19,9 +19,9 @@
 
 | 优先级 | 项目 | 分类 | 工作量 |
 | --- | --- | --- | --- |
-| P0 | 最近播放时间（`last_played_at`） | 曲库 | S |
+| 已完成 | 最近播放时间（`last_played_at`） | 曲库 | S |
 | P0 | 收藏（喜欢的歌曲） | 曲库 | S–M |
-| P0 | 队列「下一首播放」与拖拽重排 | 播放 | M |
+| 已完成 | 队列「下一首播放」与拖拽重排 | 播放 | M |
 | P0 | 睡眠定时器 | 播放 | S |
 | P1 | 目录监听自动入库 | 曲库 | M |
 | P1 | 歌单拖拽排序与 M3U 导入导出 | 歌单 | M |
@@ -36,7 +36,7 @@
 | P2 | 智能歌单 | 歌单 | M–L |
 | P2 | CUE + 整轨文件 | 曲库 | L |
 | P2 | 淡入淡出（crossfade） | 播放 | M（依赖 gapless） |
-| P2 | 迷你模式 / 桌面歌词 | 界面 | M–L |
+| 待平台验收 | 迷你模式 / 桌面歌词 | 界面 | M–L |
 | P2 | 全局快捷键 | 系统集成 | M |
 | P2 | 内嵌标签写回（可选） | 曲库 | M |
 | P2 | 扩展 SDK：播放事件订阅 | 扩展 | M |
@@ -51,20 +51,14 @@
 
 相关代码：`backend/application/playback/player_engine.*`、`backend/domain/playback/playback_backend.h`（`IPlaybackBackend`）、`backend/infrastructure/playback/qt_playback_backend.*`、`backend/application/playback/queue_service.*`、`backend/domain/playback/player_queue.*`。
 
-### 1.1 队列「下一首播放」与拖拽重排 — P0 · M
+### 1.1 队列「下一首播放」与拖拽重排 — 已完成
 
-- 现状：队列 API 只有 `queue.add`、`queue.play`、`queue.remove`、`queue.clear`、`queue.status`，没有移动与插入位置。
-- 目标：
-  - 歌曲行与专辑行的更多菜单增加「下一首播放」和「加入队列末尾」。
-  - 队列抽屉支持拖拽重排。
-- 方案：
-  - 新增 IPC `queue.move`（参数：`queue_id`、目标位置）和 `queue.add` 的 `position`/`next` 选项。
-  - `PlayerQueue` 增加 `move` 与 `insertAfterCurrent`，保持「歌曲 ID 与队列项 ID 分开」的既有约定。
-  - `QueueService` 先写库、后更新内存；`queue_items.position` 是主键，重排需在事务内整体重写位置。
-  - 当前项被移动时，`current_index` 必须跟随，不能触发重新加载；这与 `PlayerEngine` 中「队列通知不得被解释为外部选择」的既有处理相关，需沿用。
-- 验收：移动当前项、移动到当前项前后、重复歌曲项各有一个用例；重启后顺序保持；随机模式下「下一首播放」优先于随机序列。
-- 测试：扩展 `tests/player_queue_test.cpp`、`tests/playback_order_test.cpp`，QML 侧加拖拽用例。
-- 文档：更新 `docs/API.md` 队列章节。
+- 已实现 `queue.move(queue_id, position)` 与 `queue.add` 的 `position` / `next` 选项，支持已有歌曲和专辑整批入队。
+- 首页、曲库、队列和歌单歌曲菜单支持「下一首播放」「加入队列末尾」；专辑菜单按碟号／音轨号整批插入可用歌曲。
+- 队列抽屉和队列页面支持拖拽重排及边缘滚动；搜索结果和歌单视图禁用重排。
+- 先提交数据库事务，再发布内存快照；移动当前项只更新位置，保留音频源、播放状态和进度。
+- 待播优先标记持久化，随机模式优先播放；成功切换才消耗标记，重启后顺序与待播意图恢复。
+- 测试覆盖：队列身份与重复项、前后跨越当前项、失败回滚、不重新加载、重启恢复、随机优先、IPC 校验及 QML 菜单／拖拽。API 与 README 已同步。
 
 ### 1.2 睡眠定时器 — P0 · S
 
@@ -100,6 +94,7 @@
 
 ### 1.5 倍速播放 — P1 · S–M
 
+- 实现状态：已接入全局速度设置、播放栏入口、设置页恢复、MPRIS 只读同步及主／迷你／桌面歌词的速度校准。Qt 6.10+ 且支持音高补偿时可用；旧版保持 1.0×。自动化覆盖七档速度、媒体时间轴、全局持久化、保存失败和多客户端同步；真实音频设备上的音高听感仍需人工验收。
 - 目标：0.5×–2.0×，保持音高；播放栏放一个小入口，设置里可恢复 1.0×。
 - 方案：`IPlaybackBackend` 增加 `setPlaybackRate`；`QMediaPlayer` 原生支持。MPRIS 的 `Rate` 属性需同步（当前文档写明系统端不处理循环/随机，Rate 可只读展示）。
 - 边界：歌词时间轴与进度条要按实际位置而非墙钟计算；倍速不持久化到单曲，只作为全局设置。
@@ -123,17 +118,13 @@
 
 相关代码：`backend/storage/song_repository.*`、`backend/application/library/library_service.*`、`backend/runtime/library_scanner.*`、`backend/infrastructure/library/music_directory.*`、`frontend/qt-qml/src/controllers/library_controller.*`、`frontend/qt-qml/qml/components/LibraryPanel.qml`。
 
-### 2.1 最近播放时间 — P0 · S
+### 2.1 最近播放时间 — 已完成
 
-- 现状：`songs` 表有播放次数（`incrementPlayCount`），没有最后播放时间。
-- 目标：新增 `last_played_at`，曲库排序与首页「最近播放」使用。
-- 方案：
-  - 数据库迁移（参照 `database_session.cpp` 现有 `PRAGMA table_info` 式的补列逻辑）：`ALTER TABLE songs ADD COLUMN last_played_at TEXT NOT NULL DEFAULT ''`。
-  - 在 `player_engine.cpp` 计入播放次数的同一时刻（`m_playCounted`）写入，保证两者一致。
-  - 曲库排序增加「最近播放」；筛选增加「近 7 天 / 30 天播放过」。
-  - 首页新增「最近播放」区块，或把现有「最近加入」做成可切换。
-- 验收：播放满足计数条件后时间更新；仅切换页面、搜索、预览不更新；旧库迁移后默认值为空且排在最后。
-- 文档：README 功能表、`docs/API.md` 歌曲字段。
+- 旧库按列检查新增 `last_played_at TEXT NOT NULL DEFAULT ''`，空时间表示没有可追溯的播放记录。
+- 沿用 `PlayerEngine::songStarted` 与 `m_playCounted` 的计数时机，在同一条 SQL 和事务中更新次数及 UTC ISO 8601 毫秒时间。
+- 曲库支持「最近播放」倒序排序，未知时间排最后；支持近 7／30 天连续时间窗口筛选，与标签、搜索及来源组合生效，每分钟刷新过期记录。
+- 首页最近歌曲区可切换「最近入库／最近播放」，最近播放最多五首，按当前显示顺序发起播放。
+- 测试覆盖旧库迁移、重启持久化、统计原子回滚、暂停续播不重复更新、只读预览不更新、IPC 同步与 QML 排序／筛选／首页切换；README 和 API 已同步。
 
 ### 2.2 收藏 — P0 · S–M
 
@@ -241,11 +232,12 @@
 
 ## 五、界面
 
-### 5.1 迷你模式 / 桌面歌词 — P2 · M–L
+### 5.1 迷你模式 / 桌面歌词 — 已实现，待平台实机验收
 
-- 迷你模式：小窗口，封面 + 播放控制 + 当前歌词一行，置顶可选。复用 `LrcLyrics.qml` 的逐字高亮。
-- 桌面歌词：无边框透明置顶窗口；Wayland 下置顶/点击穿透受合成器限制（需要 layer-shell 或放弃），先实现 X11/Windows，Wayland 给出说明。
-- 前置：现有 `ThemeBackground`、`Theme` 已有深浅配色，需要做独立的透明窗口样式。
+- 迷你模式替代主窗口显示，提供封面、播放控制、单行逐字歌词和可选置顶；关闭时恢复主界面。
+- X11／Windows 桌面歌词显示当前行与下一行，支持透明置顶、拖动缩放和锁定穿透；依赖可用托盘提供解锁入口。Wayland 显示不支持说明，仍可使用迷你模式。
+- 共享歌词时钟和行渲染，独立透明外观；保存几何及置顶偏好，重启手动开启且默认解锁。
+- 待验收：X11／Windows 原生置顶、透明、点击穿透与混合 DPI；自动化离屏测试不替代平台验收。
 
 ---
 

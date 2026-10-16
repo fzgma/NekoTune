@@ -1,4 +1,5 @@
 #include "storage/song_repository.h"
+#include <QDateTime>
 #include <QSet>
 #include <QSqlError>
 namespace nekotune {
@@ -116,7 +117,7 @@ QVector<SongMetadata> SongRepository::songs() const {
     QSqlQuery query(m_db);
     if (!query.exec(
             QStringLiteral("SELECT id, hash, first_path, custom_title, artist, lyrics, "
-                           "source_name, duration_ms, source_provider, source_track_id, album, cover_url, import_source, play_count, album_artist, genre, year, track_number, disc_number "
+                           "source_name, duration_ms, source_provider, source_track_id, album, cover_url, import_source, play_count, album_artist, genre, year, track_number, disc_number, last_played_at "
                            "FROM songs ORDER BY id ASC"))) {
         return items;
     }
@@ -139,6 +140,7 @@ QVector<SongMetadata> SongRepository::songs() const {
             query.value(13).toLongLong(),
             query.value(14).toString(), query.value(15).toString(), query.value(16).toInt(),
             query.value(17).toInt(), query.value(18).toInt(),
+            query.value(19).toString(),
         });
     }
 
@@ -153,7 +155,7 @@ std::optional<SongMetadata> SongRepository::songById(int songId) const {
     QSqlQuery query(m_db);
     query.prepare(
         QStringLiteral("SELECT id, hash, first_path, custom_title, artist, lyrics, "
-                       "source_name, duration_ms, source_provider, source_track_id, album, cover_url, import_source, play_count, album_artist, genre, year, track_number, disc_number "
+                       "source_name, duration_ms, source_provider, source_track_id, album, cover_url, import_source, play_count, album_artist, genre, year, track_number, disc_number, last_played_at "
                        "FROM songs WHERE id = :id"));
     query.bindValue(QStringLiteral(":id"), songId);
 
@@ -251,7 +253,7 @@ std::optional<SongMetadata> SongRepository::songByHash(const QString &hash) cons
     QSqlQuery query(m_db);
     query.prepare(
         QStringLiteral("SELECT id, hash, first_path, custom_title, artist, lyrics, "
-                       "source_name, duration_ms, source_provider, source_track_id, album, cover_url, import_source, play_count, album_artist, genre, year, track_number, disc_number "
+                       "source_name, duration_ms, source_provider, source_track_id, album, cover_url, import_source, play_count, album_artist, genre, year, track_number, disc_number, last_played_at "
                        "FROM songs WHERE hash = :hash"));
     query.bindValue(QStringLiteral(":hash"), hash);
 
@@ -286,8 +288,8 @@ std::optional<SongMetadata> SongRepository::readSongFromQuery(QSqlQuery &query) 
         query.value(6).toString(), query.value(7).toLongLong(), query.value(8).toString(),
         query.value(9).toString(), query.value(10).toString(),  query.value(11).toString(),
         query.value(12).toString(), query.value(13).toLongLong(),
-            query.value(14).toString(), query.value(15).toString(), query.value(16).toInt(),
-            query.value(17).toInt(), query.value(18).toInt(),
+        query.value(14).toString(), query.value(15).toString(), query.value(16).toInt(),
+        query.value(17).toInt(), query.value(18).toInt(), query.value(19).toString(),
     };
 }
 // Only positive probe results can replace a stored duration.
@@ -313,7 +315,9 @@ bool SongRepository::incrementPlayCount(int songId) {
         return false;
     }
     QSqlQuery query(m_db);
-    query.prepare("UPDATE songs SET play_count=play_count+1 WHERE id=:id");
+    // Count and timestamp describe the same successful playback start and must commit together.
+    query.prepare("UPDATE songs SET play_count=play_count+1, last_played_at=:played_at WHERE id=:id");
+    query.bindValue(":played_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     query.bindValue(":id", songId);
     if (!query.exec()) {
         setError(query.lastError().text());

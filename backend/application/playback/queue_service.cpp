@@ -18,9 +18,16 @@ QueueService::QueueService(IQueueRepository &repository, ISongRepository &songs,
         if (i == snapshot.currentIndex)
             current = m_queue.size();
         m_queue.add(record.path, *song);
+        m_queue[m_queue.size() - 1].playNext = record.playNext;
     }
     m_queue.setCurrentIndex(current);
     m_queue.markCurrent();
+}
+Result<void> QueueService::move(int queueId, int position) {
+    auto next = m_queue;
+    if (!next.move(queueId, position))
+        return failure(QStringLiteral("Invalid queue item or target position"));
+    return commit(std::move(next));
 }
 Result<void> QueueService::commit(PlayerQueue next) {
     next.markCurrent();

@@ -15,7 +15,9 @@ Item {
     required property var translator
     property var ai: null
     property var audioOutput: null
+    property var playback: null
     property var desktop: null
+    property var windowModes: null
     property bool saving: false
     property string message: ""
     property bool failed: false
@@ -78,6 +80,46 @@ Item {
                     text: root.t("tray_unavailable")
                     color: Theme.textMuted; font.pixelSize: Theme.fontCaption
                     wrapMode: Text.WordWrap
+                }
+            }
+        }
+
+        PlaybackWindowSettings {
+            Layout.fillWidth: true
+            visible: root.windowModes !== null
+            manager: root.windowModes
+            translator: root.translator
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            visible: root.playback !== null
+            implicitHeight: rateSettings.implicitHeight + 36
+            radius: Theme.radiusMd; color: Theme.bgSurface; border.color: Theme.borderSubtle
+            ColumnLayout {
+                id: rateSettings
+                anchors.fill: parent; anchors.margins: 18; spacing: Theme.spaceMd
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { Layout.fillWidth: true; text: root.t("playback_rate"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
+                    PlaybackRateButton {
+                        translator: root.translator
+                        playbackRate: root.playback ? root.playback.playbackRate : 1.0
+                        enabled: root.connected && root.playback !== null && root.playback.playbackRateSupported
+                        onRateRequested: rate => root.playback.setPlaybackRate(rate)
+                    }
+                    TextButton {
+                        objectName: "resetPlaybackRateButton"
+                        text: root.t("playback_rate_reset")
+                        subtle: true
+                        enabled: root.connected && root.playback !== null
+                        onClicked: root.playback.setPlaybackRate(1.0)
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: root.t(root.playback && root.playback.playbackRateSupported ? "playback_rate_hint" : "playback_rate_unavailable")
+                    color: Theme.textMuted; font.pixelSize: Theme.fontCaption; wrapMode: Text.WordWrap
                 }
             }
         }

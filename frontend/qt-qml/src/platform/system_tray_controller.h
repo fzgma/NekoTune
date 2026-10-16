@@ -11,6 +11,7 @@ class QMenu;
 class QSystemTrayIcon;
 class I18n;
 class SystemMediaBridge;
+class PlaybackWindowController;
 
 // Owns desktop window lifetime; playback remains behind the shared IPC bridge.
 class SystemTrayController final : public QObject {
@@ -26,6 +27,7 @@ class SystemTrayController final : public QObject {
     bool closeToTray() const { return m_closeToTray; }
     void setCloseToTray(bool value);
     void attachWindow(QWindow *window);
+    void setPlaybackWindows(PlaybackWindowController *windows);
     void showWindow();
     void toggleWindow();
     void quit();
@@ -43,11 +45,13 @@ class SystemTrayController final : public QObject {
     I18n &m_translator;
     AvailabilityProbe m_availability;
     QPointer<QWindow> m_window;
+    QPointer<PlaybackWindowController> m_playbackWindows;
     QTimer m_poll;
     std::unique_ptr<QMenu> m_menu;
     QSystemTrayIcon *m_icon = nullptr;
     QAction *m_track = nullptr, *m_toggle = nullptr, *m_playPause = nullptr;
     QAction *m_previous = nullptr, *m_next = nullptr, *m_quit = nullptr;
+    QAction *m_mini = nullptr, *m_lyrics = nullptr, *m_lockLyrics = nullptr;
     Qt::WindowState m_restoreState = Qt::WindowNoState;
     bool m_available = false, m_closeToTray = true, m_stopping = false;
     void hideWindow();

@@ -59,7 +59,8 @@ jobs:
         if: runner.os == 'Linux'
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
-          version: '6.8.3'
+          # Pitch-preserving playback speed requires Qt Multimedia 6.10+.
+          version: '6.11.2'
           modules: 'qtmultimedia qtshadertools'
           cache: true
       - name: Build Linux Fcitx5-Qt 5.1.9 with the release Qt

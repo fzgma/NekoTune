@@ -26,6 +26,10 @@ class QueueController final : public FeatureController {
                                     {"duration_ms", song.value("duration_ms").toLongLong()}}}});
     }
     Q_INVOKABLE void playQueueItem(int id) { send("queue.play", {{"id", id}}); }
+    Q_INVOKABLE void moveQueueItem(int id, int position) {
+        send("queue.move", {{"queue_id", id}, {"position", position}});
+    }
+    Q_INVOKABLE void addSongs(const QVariantList &ids, bool next = false);
     Q_INVOKABLE void removeQueueItem(int id) { send("queue.remove", {{"id", id}}); }
     Q_INVOKABLE void clearQueue() { send("queue.clear"); }
 

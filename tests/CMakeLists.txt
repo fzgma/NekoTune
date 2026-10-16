@@ -7,6 +7,11 @@ endfunction()
 
 set(CMAKE_WIN32_EXECUTABLE OFF)
 set(NEKOTUNE_TEST_QPA offscreen)
+add_executable(nekotune_playback_window_test playback_window_test.cpp ../frontend/qt-qml/resources.qrc)
+target_link_libraries(nekotune_playback_window_test PRIVATE nekotune_frontend Qt6::Test Qt6::QuickControls2)
+nekotune_add_qt_test(NAME nekotune_playback_window_test COMMAND nekotune_playback_window_test)
+set_tests_properties(nekotune_playback_window_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Fusion")
 add_executable(nekotune_system_tray_test system_tray_test.cpp ../frontend/qt-qml/resources.qrc)
 target_link_libraries(nekotune_system_tray_test PRIVATE nekotune_core nekotune_frontend Qt6::Test)
 nekotune_add_qt_test(NAME nekotune_system_tray_test COMMAND nekotune_system_tray_test)
@@ -20,7 +25,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(nekotune_mpris_test PRIVATE nekotune_core nekotune_frontend Qt6::DBus Qt6::Test)
     find_program(NEKOTUNE_DBUS_RUN_SESSION dbus-run-session REQUIRED)
     nekotune_add_qt_test(NAME nekotune_mpris_test COMMAND ${NEKOTUNE_DBUS_RUN_SESSION} -- $<TARGET_FILE:nekotune_mpris_test>
-        metadataAndWireTypes playbackNavigationSeekAndVolume stalePositionsAndErrors
+        metadataAndWireTypes playbackRateIsReadOnlyAndFollowsBackend playbackNavigationSeekAndVolume stalePositionsAndErrors
         progressSignalsAndDeferredSeekConfirmation unavailableOutputAndMetadataClear collisionAndCleanup
         disconnectReconnectChangesTrackIdentity raiseAndQuitRequests commandTimeoutAndLateReply
         ipcValidationAndLegacyNavigation playerctlInteroperability backendFailureRetainsSelection
@@ -31,6 +36,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 if(WIN32)
     set(NEKOTUNE_TEST_QPA windows)
+    set_tests_properties(nekotune_playback_window_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Fusion")
     set_tests_properties(nekotune_system_tray_test PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software")
 endif()

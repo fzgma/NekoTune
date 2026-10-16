@@ -26,5 +26,7 @@ struct PlaybackSnapshot {
     AudioMetadata metadata;
     PlaybackMode playbackMode = PlaybackMode::Sequential;
     PlaybackCapabilities capabilities;
+    double playbackRate = 1.0;
+    bool playbackRateSupported = false;
 };
 } // namespace nekotune

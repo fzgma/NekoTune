@@ -32,6 +32,60 @@ Item {
 
         function cleanup() { lyrics = null }
 
+        function verifyActiveLineCentered() {
+            const list = findChild(lyrics, "lyricsList")
+            wait(40)
+            tryVerify(() => {
+                const row = list.itemAtIndex(lyrics.activeIndex)
+                return row !== null
+                    && Math.abs(row.mapToItem(lyrics, 0, row.height / 2).y - lyrics.height / 2) < 1
+            })
+        }
+
+        function test_activeLineStaysCentered_data() {
+            return [
+                {tag: "animated", reducedMotion: false},
+                {tag: "reduced-motion", reducedMotion: true}
+            ]
+        }
+
+        function test_activeLineStaysCentered(data) {
+            lyrics.reducedMotion = data.reducedMotion
+            const rows = []
+            for (let index = 0; index < 30; ++index)
+                rows.push({time_ms: index * 1000, text: "Line " + index})
+            lyrics.lines = rows
+            for (const index of [0, 1, 15, 16, 29, 28, 0]) {
+                lyrics.position = index * 1000
+                compare(lyrics.activeIndex, index)
+                verifyActiveLineCentered()
+            }
+        }
+
+        function test_activeLineRecentersAfterResizeAndReplacement() {
+            lyrics.position = 560
+            verifyActiveLineCentered()
+            lyrics.height = 300
+            verifyActiveLineCentered()
+            lyrics.lines = [{time_ms: 560, text: "A long lyric line that wraps when the lyrics panel becomes narrow"}]
+            lyrics.width = 160
+            verifyActiveLineCentered()
+            verify(findChild(lyrics, "lyricLine0").height > 40)
+            lyrics.width = 460
+            lyrics.height = 440
+            verifyActiveLineCentered()
+            lyrics.lines = [{time_ms: 560, words: [
+                {text: "A long ", time_ms: 560, duration_ms: 100},
+                {text: "word-timed ", time_ms: 660, duration_ms: 100},
+                {text: "lyric ", time_ms: 760, duration_ms: 100},
+                {text: "that wraps", time_ms: 860, duration_ms: 100}
+            ]}]
+            lyrics.width = 160
+            verifyActiveLineCentered()
+            lyrics.width = 460
+            verifyActiveLineCentered()
+        }
+
         // No lyric line is active before the first timestamp or after seeking back before it.
         // Markup-like text must be displayed literally rather than interpreted as rich text.
         // Exact timestamp boundaries choose the newly active line.
@@ -62,6 +116,7 @@ Item {
             mouseClick(row, row.width / 2, row.height / 2)
             compare(seekSpy.count, 1)
             compare(seekSpy.signalArguments[0][0], 560)
+            verifyActiveLineCentered()
         }
 
         // Word progress uses each word's interval, including gaps between intervals.
@@ -241,8 +296,7 @@ Item {
             const before = list.contentY
             const next = list.itemAtIndex(6)
             verify(next !== null)
-            const target = Math.max(0, Math.min(next.y + next.height / 2 - list.height * 0.42,
-                                                 Math.max(0, list.contentHeight - list.height)))
+            const target = next.y + next.height / 2 - list.height / 2
             verify(target > before + 10)
             lyrics.position = 6000
             compare(lyrics.activeIndex, 6)
