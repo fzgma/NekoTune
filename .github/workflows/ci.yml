@@ -68,6 +68,9 @@ jobs:
         run: |
           git clone https://github.com/fcitx/fcitx5-qt.git .ci-fcitx5-qt
           git -C .ci-fcitx5-qt checkout 3ade1a680221f3e211adcfb50c323285c4bded77
+          # Backport upstream's explicit private-module lookup for Qt 6.10+.
+          # https://github.com/fcitx/fcitx5-qt/commit/6ac4fdd8e90ff9c25a5219e15e83740fa38c9c71
+          git -C .ci-fcitx5-qt apply "$PWD/scripts/ci/fcitx5-qt6-private-modules.patch"
           # The distribution uses xcb; no Qt Wayland private API is needed.
           cmake -S .ci-fcitx5-qt -B .ci-fcitx5-qt/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \

@@ -4,8 +4,9 @@ import "../../frontend/qt-qml/qml/components" as PlayerComponents
 
 Item {
     id: scene
-    width: 640
-    height: 160
+    // Leave enough capture area when Qt's software grab reports a unit DPR.
+    width: 640 * Math.max(1, Screen.devicePixelRatio)
+    height: 160 * Math.max(1, Screen.devicePixelRatio)
 
     Component {
         id: sliderComponent
@@ -76,12 +77,19 @@ Item {
             const centerX = slider.handle.x + slider.handle.width / 2
             const centerY = Math.floor(slider.height / 2)
             const direction = data.mirrored ? -1 : 1
-            const snapshot = grabImage(slider)
+            // Grab the origin-aligned scene: Qt's software renderer can crop
+            // child snapshots incorrectly at the 0.5 scale used by Windows CI.
+            const snapshot = grabImage(scene)
+            const pixelScale = scene.Screen.devicePixelRatio
+            function pixelAt(x, y) {
+                const point = slider.mapToItem(scene, x, y)
+                return snapshot.pixel(Math.floor(point.x * pixelScale), Math.floor(point.y * pixelScale))
+            }
             // Sample just outside the resting dot: no gap before it or fill after it.
             if (data.fraction > 0)
-                compare(snapshot.pixel(Math.round(centerX - direction * 7), centerY), slider.activeColor)
+                compare(pixelAt(centerX - direction * 7, centerY), slider.activeColor)
             if (data.fraction < 1)
-                compare(snapshot.pixel(Math.round(centerX + direction * 7), centerY), slider.baseColor)
+                compare(pixelAt(centerX + direction * 7, centerY), slider.baseColor)
         }
 
         // Volume uses the base slider's live updates rather than the seek control's release-only behavior.
