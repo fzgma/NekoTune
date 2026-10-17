@@ -41,10 +41,16 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/lyrics/lyrics_cache.cpp
     infrastructure/lyrics/lyrics_storage.cpp
     infrastructure/lyrics/sidecar_store.cpp
+    infrastructure/playback/audio_output_devices.cpp
+    infrastructure/playback/pcm_decoder.cpp
+    infrastructure/playback/pcm_renderer.cpp
+    infrastructure/playback/pcm_dsp.cpp
+    infrastructure/playback/ffmpeg_playback_backend.cpp
+    infrastructure/playback/playback_backend_supervisor.cpp
     infrastructure/playback/qt_playback_backend.cpp
 )
 target_link_libraries(nekotune_infrastructure PUBLIC nekotune_domain nekotune_storage nekotune_paths Qt6::Network Qt6::Gui Qt6::Multimedia)
-target_link_libraries(nekotune_infrastructure PRIVATE qt6keychain PkgConfig::FFMPEG)
+target_link_libraries(nekotune_infrastructure PRIVATE qt6keychain PkgConfig::FFMPEG Threads::Threads)
 target_compile_definitions(nekotune_infrastructure PRIVATE NEKOTUNE_NODE_BINARY="${NEKOTUNE_NODE_BINARY}" NEKOTUNE_EXTENSION_SUPERVISOR="${CMAKE_SOURCE_DIR}/extensions/dist/supervisor.cjs")
 add_dependencies(nekotune_infrastructure nekotune_extension_runtime)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -73,6 +79,7 @@ add_library(nekotune_application STATIC
     application/lyrics/lyrics_service.cpp
     application/playback/playback_order_service.cpp
     application/playback/audio_output_service.cpp
+    application/playback/audio_settings_service.cpp
     application/playback/player_engine.cpp
     application/playback/queue_service.cpp
 )
@@ -90,6 +97,7 @@ add_library(nekotune_ipc STATIC
     ipc/api/player_api.cpp
     ipc/serialization/lyrics_serialization.cpp
     ipc/serialization/serialization.cpp
+    ipc/serialization/audio_serialization.cpp
 )
 target_link_libraries(nekotune_ipc PUBLIC nekotune_application nekotune_paths Qt6::Network)
 

@@ -1,6 +1,25 @@
 #include "ipc/api/api_context.h"
 #include <QFileInfo>
+#include "ipc/serialization/audio_serialization.h"
 namespace nekotune {
+QJsonObject ApiContext::audioSettingsStatus() const {
+    if (!audioSettings) return {};
+    auto settings = audioSettingsJson(audioSettings->settings());
+    const auto capabilities = audioSettings->capabilities();
+    settings.insert("active_backend", audioSettings->activeBackend());
+    settings.insert("restart_required", audioSettings->restartRequired());
+    settings.insert("gapless_supported", capabilities.gapless);
+    settings.insert("crossfade_supported", capabilities.crossfade);
+    settings.insert("equalizer_supported", capabilities.equalizer);
+    settings.insert("sample_rate", audioSettings->sampleRate());
+    QJsonArray frequencies, available;
+    for (int frequency : EqualizerFrequencies) {
+        frequencies.append(frequency);
+        available.append(audioSettings->sampleRate() > frequency * 2);
+    }
+    settings.insert("frequencies", frequencies); settings.insert("available_bands", available);
+    return {{"audio_settings", settings}};
+}
 QJsonObject ApiContext::audioOutputStatus() const {
     if (!audioOutputs)
         return {};
@@ -39,6 +58,8 @@ QJsonObject ApiContext::withCover(QJsonObject song) const {
 QJsonObject ApiContext::playbackStatus() const {
     auto state = toJson(player.snapshot());
     state.insert("song", withCover(state.value("song").toObject()));
+    const auto audio = audioSettingsStatus();
+    if (!audio.isEmpty()) state.insert("audio_settings", audio.value("audio_settings"));
     return state;
 }
 QJsonObject ApiContext::libraryStatus() const {

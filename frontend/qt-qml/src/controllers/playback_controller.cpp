@@ -10,11 +10,15 @@ PlaybackController::PlaybackController(IpcClient &client) : FeatureController(cl
             emit seeked(event.value("position").toInteger(), event.value("queue_id").toInt());
     });
     connect(&client, &IpcClient::responseReceived, this, [this](const QString &, const QJsonObject &data) {
-        if (data.contains("state") && data.contains("volume"))
+        if ((data.contains("state") && data.contains("volume")) || data.contains("audio_settings"))
             apply(data);
     });
 }
 void PlaybackController::apply(const QJsonObject &data) {
+    if (data.contains("audio_settings") && m_audioSettings != data.value("audio_settings").toObject().toVariantMap()) {
+        m_audioSettings = data.value("audio_settings").toObject().toVariantMap();
+        emit audioSettingsChanged();
+    }
     if (data.contains("playback_rate_supported") && m_playbackRateSupported != data.value("playback_rate_supported").toBool()) {
         m_playbackRateSupported = data.value("playback_rate_supported").toBool();
         emit playbackRateSupportedChanged();

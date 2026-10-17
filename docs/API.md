@@ -167,6 +167,21 @@ Linux MPRIS 的 `Rate` 为只读实际速度，变化发送 `PropertiesChanged`�
 
 随机模式默认使用 `shuffle_bag`：每轮每个队列项播放一次，轮次结束后重新洗牌，至少两项时避免跨轮连续重复同一项。队列显示顺序保持不变，相同歌曲的不同 `queue_id` 分别参与。上一首回到播放历史，下一首先沿历史前进，无历史时上一首重播当前项。直接点播、替换队列或切换模式重建随机轮次；追加项加入本轮待播序列，删除项从待播序列和历史移除。随机历史不跨重启保存。
 
+### 音频引擎设置
+
+- `player.audio_settings`：读取配置、实际后端和能力。
+- `player.set_audio_backend`：`{"backend":"ffmpeg"}` 或 `{"backend":"qt"}`，重启生效。
+- `player.set_transition`：`{"crossfade_seconds":3.5}`，范围 0–12，0 关闭淡入淡出但保留 Gapless。
+- `player.set_equalizer`：部分更新 `enabled`、`auto_headroom`、`preamp_db`、`gains`（恰好 10 个数）或 `preset`（`flat` / `bass` / `vocal` / `bright`）。`gains` 与 `preset` 互斥，所有增益范围 −12～+12 dB。
+
+以上方法返回 `data.audio_settings`；完整播放状态和 `server.connected` 也包含同一字段。保存成功后发布 `player.audio_settings_changed`，多客户端按确认值同步。配置示例：
+
+```json
+{"audio_settings":{"backend":"ffmpeg","active_backend":"ffmpeg","restart_required":false,"crossfade_seconds":0,"gapless_supported":true,"crossfade_supported":true,"equalizer_supported":true,"sample_rate":48000,"frequencies":[31,62,125,250,500,1000,2000,4000,8000,16000],"available_bands":[true,true,true,true,true,true,true,true,true,true],"equalizer":{"enabled":false,"auto_headroom":true,"preamp_db":0,"gains":[0,0,0,0,0,0,0,0,0,0]}}}
+```
+
+实际能力来自运行中的后端，可能因受控回退而不同于保存的偏好；输出采样率为 0 时各频段暂不可用。FFmpeg 当前仅支持原速，`playback_rate_supported` 为 false，不改写已存储的倍速值。手动切歌不使用 Crossfade；预加载不发布 `player.track_changed`，边界到达才提交选择、更新播放次数和歌词。
+
 ### `player.audio_outputs` / `player.set_audio_output`
 
 查询、设置响应和 `player.audio_outputs_changed` 事件共享设备快照：

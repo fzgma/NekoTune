@@ -72,6 +72,7 @@ class PlayerEngine final : public QObject {
     void setSourceResolver(ISourceResolver *resolver) { m_sourceResolver = resolver; }
     void sourceUnavailable(const QString &provider);
     void sourcesReloading(const QStringList &extensionIds, bool active);
+    void setCrossfadeSeconds(double seconds);
     void cancelPendingMetadataRefresh() { m_metadataTimer.stop(); }
   signals:
     void stateChanged(nekotune::PlayerState state);
@@ -90,6 +91,10 @@ class PlayerEngine final : public QObject {
   private:
     Result<void> advance(PlaybackAdvance reason, bool preserveState = false);
     void refreshCapabilities();
+    void refreshPreload();
+    void invalidatePreload();
+    void startPreloaded(quint64 token);
+    void releaseResolved(const QUrl &source);
     void loadCurrent(bool play, bool resetPlayCount = true, PlayerState idleState = PlayerState::Paused);
     void clearSource();
     void setState(PlayerState state);
@@ -97,6 +102,15 @@ class PlayerEngine final : public QObject {
     QueueService &m_queue;
     PlaybackOrderService m_order;
     bool m_navigating = false;
+    bool m_decoderReady = false;
+    bool m_shuttingDown = false;
+    double m_crossfadeSeconds = 0;
+    quint64 m_preloadToken = 0;
+    QString m_preloadKey;
+    QString m_failedPreloadKey;
+    QUrl m_preloadSource;
+    std::optional<PlaybackOrderService::Selection> m_preloadSelection;
+    QSet<QUrl> m_leasedSources;
     QTimer m_metadataTimer;
     AudioMetadata m_metadata;
     PlayerState m_state = PlayerState::Stopped;

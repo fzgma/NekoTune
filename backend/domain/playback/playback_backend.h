@@ -1,6 +1,7 @@
 #pragma once
 #include "domain/playback/player_state.h"
 #include "domain/result.h"
+#include "domain/playback/audio_settings.h"
 #include <functional>
 #include <QObject>
 #include <QList>
@@ -30,6 +31,12 @@ struct AudioMetadata {
     QString artist;
     QString album;
 };
+struct PreloadRequest {
+    QUrl source;
+    quint64 token = 0;
+    TransitionStrategy strategy = TransitionStrategy::Gapless;
+    double crossfadeSeconds = 0;
+};
 /// Decoder-facing operations use milliseconds and normalized volume.
 /// Signals report asynchronous state changes of the current source.
 /// The backend owns decoding, not queue identity or navigation rules.
@@ -42,6 +49,14 @@ class IPlaybackBackend : public QObject {
     Q_OBJECT
   public:
     using QObject::QObject;
+    virtual QString backendName() const { return QStringLiteral("qt"); }
+    virtual BackendCapabilities backendCapabilities() const { return {}; }
+    virtual void preloadNext(const PreloadRequest &) {}
+    virtual void cancelPreload() {}
+    virtual void authorizeTransition(quint64) {}
+    virtual void finishAfterCurrent() {}
+    virtual void setEqualizer(const EqualizerSettings &) {}
+    virtual int outputSampleRate() const { return 0; }
     virtual void setSource(const QUrl &url) = 0;
     virtual QUrl source() const = 0;
     virtual void play() = 0;
@@ -67,7 +82,14 @@ class IPlaybackBackend : public QObject {
         done(failure("audio_output_port_unavailable", ErrorCode::Unavailable));
     }
     virtual void suspendAudioOutput() = 0;
+    virtual void shutdown() { stop(); setSource({}); }
   signals:
+    void backendChanged();
+    void decoderFailure(const QString &message, bool fallbackEligible);
+    void nextReady(quint64 token);
+    void nextFailed(quint64 token, const QString &message);
+    void nextTrackStarted(quint64 token);
+    void sourceReleased(const QUrl &source);
     void stateChanged(nekotune::PlayerState state);
     void positionChanged(qint64 position);
     void seeked(qint64 position);

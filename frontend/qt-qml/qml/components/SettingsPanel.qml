@@ -84,6 +84,14 @@ Item {
             }
         }
 
+        AudioEngineSettings {
+            Layout.fillWidth: true
+            visible: root.playback !== null && Boolean(root.playback.audioSettings) && Object.keys(root.playback.audioSettings).length > 0
+            controller: root.playback
+            translator: root.translator
+            enabled: root.connected
+        }
+
         PlaybackWindowSettings {
             Layout.fillWidth: true
             visible: root.windowModes !== null

@@ -48,6 +48,42 @@ Item {
             movedSpy.clear()
         }
 
+        function test_trackMeetsHandle_data() {
+            return [
+                {tag: "start", fraction: 0, width: 400, mirrored: false},
+                {tag: "early", fraction: 0.03, width: 400, mirrored: false},
+                {tag: "middle", fraction: 0.5, width: 400, mirrored: false},
+                {tag: "late", fraction: 0.97, width: 400, mirrored: false},
+                {tag: "end", fraction: 1, width: 400, mirrored: false},
+                {tag: "compact-volume", fraction: 0.25, width: 72, mirrored: false},
+                {tag: "rtl-start", fraction: 0, width: 400, mirrored: true},
+                {tag: "rtl-early", fraction: 0.03, width: 400, mirrored: true},
+                {tag: "rtl-middle", fraction: 0.5, width: 400, mirrored: true},
+                {tag: "rtl-late", fraction: 0.97, width: 400, mirrored: true},
+                {tag: "rtl-end", fraction: 1, width: 400, mirrored: true},
+                {tag: "rtl-compact-volume", fraction: 0.25, width: 72, mirrored: true}
+            ]
+        }
+
+        function test_trackMeetsHandle(data) {
+            slider.width = data.width
+            slider.value = data.fraction
+            slider.LayoutMirroring.enabled = data.mirrored
+            slider.activeColor = "#cc99ff"
+            slider.baseColor = "#333333"
+            verify(waitForRendering(slider))
+
+            const centerX = slider.handle.x + slider.handle.width / 2
+            const centerY = Math.floor(slider.height / 2)
+            const direction = data.mirrored ? -1 : 1
+            const snapshot = grabImage(slider)
+            // Sample just outside the resting dot: no gap before it or fill after it.
+            if (data.fraction > 0)
+                compare(snapshot.pixel(Math.round(centerX - direction * 7), centerY), slider.activeColor)
+            if (data.fraction < 1)
+                compare(snapshot.pixel(Math.round(centerX + direction * 7), centerY), slider.baseColor)
+        }
+
         // Volume uses the base slider's live updates rather than the seek control's release-only behavior.
         // At least one moved signal must occur while the pointer is still pressed.
         // Release retains the last visible volume instead of restoring the pre-drag value.

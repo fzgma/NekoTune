@@ -177,6 +177,36 @@ class PlaybackOrderTest final : public QObject {
         QVERIFY(player.setPlaybackRate(1.0));
         QCOMPARE(saved, 1.0);
     }
+    void audioSettingsIpcPersistenceAndClientSync() {
+        BackendRuntime runtime([] { return std::make_unique<OrderAudio>(); });
+        QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+        OrderPeer peer; QVERIFY(peer.connect(runtime.serverName()));
+        peer.event("server.connected");
+        IpcClient client; PlaybackController controller(client); client.connectBackend();
+        QTRY_VERIFY(!controller.audioSettings().isEmpty());
+        const auto original = peer.call("player.audio_settings").value("data").toObject().value("audio_settings").toObject();
+        QCOMPARE(original.value("backend").toString(), QString("ffmpeg"));
+        QCOMPARE(peer.call("player.set_audio_backend", {{"backend", "qt"}}).value("status").toString(), QString("ok"));
+        QTRY_COMPARE(controller.audioSettings().value("backend").toString(), QString("qt"));
+        QVERIFY(controller.audioSettings().value("restart_required").toBool());
+        QCOMPARE(peer.call("player.set_transition", {{"crossfade_seconds", 3.5}}).value("status").toString(), QString("ok"));
+        QCOMPARE(peer.call("player.set_equalizer", {{"preset", "bass"}, {"enabled", true}}).value("status").toString(), QString("ok"));
+        QTRY_VERIFY(controller.audioSettings().value("equalizer").toMap().value("enabled").toBool());
+        for (const auto &bad : {QJsonValue(), QJsonValue(true), QJsonValue("3"), QJsonValue(-1), QJsonValue(13)})
+            QCOMPARE(peer.call("player.set_transition", {{"crossfade_seconds", bad}}).value("status").toString(), QString("error"));
+        QCOMPARE(peer.call("player.set_equalizer", {{"gains", QJsonArray{1, 2}}}).value("status").toString(), QString("error"));
+        QCOMPARE(peer.call("player.set_equalizer", {{"enabled", "true"}}).value("status").toString(), QString("error"));
+        runtime.stop(); QVERIFY(runtime.start());
+        OrderPeer restored; QVERIFY(restored.connect(runtime.serverName()));
+        const auto saved = restored.event("server.connected").value("data").toObject().value("audio_settings").toObject();
+        QCOMPARE(saved.value("backend").toString(), QString("qt"));
+        QCOMPARE(saved.value("crossfade_seconds").toDouble(), 3.5);
+        QVERIFY(!saved.value("restart_required").toBool());
+        QVERIFY(saved.value("equalizer").toObject().value("enabled").toBool());
+        runtime.stop();
+        // Subsequent tests start with their own baseline preferences.
+        QVERIFY(AppPaths::saveSetting("audio_engine", QJsonObject{}));
+    }
     void playbackRateIpcPersistenceAndClientSync() {
         QVERIFY(AppPaths::saveSetting("playback_rate", 9.0));
         BackendRuntime runtime([] { return std::make_unique<OrderAudio>(); });

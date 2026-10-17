@@ -1,5 +1,6 @@
 #include "ipc/api/api_context.h"
 #include <QJsonArray>
+#include "ipc/serialization/audio_serialization.h"
 #include <cmath>
 #include <limits>
 namespace nekotune {
@@ -10,6 +11,26 @@ namespace nekotune {
 // Responses include authoritative state after the accepted operation.
 // The client should reconcile that state instead of predicting selection.
 void registerPlayerApi(IpcRouter &router, ApiContext &api) {
+    router.registerMethod("player.audio_settings", [&api](const auto &, auto done) {
+        done(api.audioSettings ? success(api.audioSettingsStatus()) : error(failure("Audio settings unavailable", ErrorCode::Unavailable)));
+    });
+    for (const auto &method : {QString("player.set_audio_backend"), QString("player.set_transition"), QString("player.set_equalizer")}) {
+        router.registerMethod(method, [&api, method](const QJsonObject &params, auto done) {
+            if (!api.audioSettings) { done(error(failure("Audio settings unavailable", ErrorCode::Unavailable))); return; }
+            QJsonObject patch;
+            if (method == "player.set_audio_backend") {
+                if (!params.contains("backend")) { done(error(failure("backend is required"))); return; }
+                patch.insert("backend", params.value("backend"));
+            } else if (method == "player.set_transition") {
+                if (!params.contains("crossfade_seconds")) { done(error(failure("crossfade_seconds is required"))); return; }
+                patch.insert("crossfade_seconds", params.value("crossfade_seconds"));
+            } else patch.insert("equalizer", params);
+            const auto candidate = parseAudioSettings(patch, api.audioSettings->settings());
+            if (!candidate) { done(error(candidate.error())); return; }
+            const auto result = api.audioSettings->update(candidate.value());
+            done(response(result, api.audioSettingsStatus()));
+        }, true);
+    }
     router.registerMethod("player.audio_outputs", [&api](const auto &, auto done) {
         done(api.audioOutputs ? success(api.audioOutputStatus())
                               : error(failure("Audio outputs unavailable", ErrorCode::Unavailable)));

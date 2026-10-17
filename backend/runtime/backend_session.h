@@ -49,6 +49,7 @@ class BackendSession final : public QObject {
     std::unique_ptr<IPlaybackBackend> m_audio;
     PlayerEngine m_player;
     AudioOutputService m_audioOutputs;
+    AudioSettingsService m_audioSettings;
     LyricsController m_lyrics;
     CoverService m_covers;
     SidecarStore m_sidecars;

@@ -136,17 +136,29 @@ Linux 下 `nekotune_frontend` 额外链接 Qt DBus；后端、领域和应用目
 
 ### 播放与顺序
 
-`PlayerEngine` 通过 `IPlaybackBackend` 操作媒体源、播放状态、位置、音量和音频元数据，具体实现为 `QtPlaybackBackend`。播放实现不负责曲库、下载或数据库访问。
+`PlayerEngine` 通过 `IPlaybackBackend` 操作媒体源、播放状态、位置、音量和音频元数据，具体实现由稳定的 `PlaybackBackendSupervisor` 代理选择，默认 `FFmpegPlaybackBackend`，保留 `QtPlaybackBackend`。播放实现不负责曲库、下载或数据库访问。
 
 播放快照及进度／时长事件统一使用队列歌曲从数据库读取的 `duration_ms`，解码器只提供实时位置与补充标签。时长补齐通过 `LibraryService::durationUpdated` 更新队列、当前播放快照和歌单；已有歌名、歌手和正数时长时，歌词匹配无需等待解码器加载。
 
-`BackendRuntime` 可接收播放后端工厂，每次启动均在后端线程创建适配器，再由 `BackendSession` 持有。正式程序默认使用 `QtPlaybackBackend`；IPC／QML 播放业务测试注入模拟后端，不依赖运行机器是否有音频设备。无设备时保持暂停的行为另外通过模拟设备和实际 Qt 适配器验证。
+`BackendRuntime` 可接收播放后端工厂，每次启动均在后端线程创建适配器，再由 `BackendSession` 持有。正式程序默认使用 FFmpeg；后端偏好重启生效，尚未输出音频的格式／解码初始化失败最多回退 Qt 一次，网络与设备故障不触发回退。FFmpeg 当前仅支持原速，不覆写 Qt 倍速偏好；IPC／QML 播放业务测试注入模拟后端，不依赖运行机器是否有音频设备。无设备时保持暂停的行为另外通过模拟设备和实际 Qt 适配器验证。
 
-音频设备由同一接口暴露普通设备／端口数据和输出可用性信号，Qt 类型保留在基础设施层。`AudioOutputService` 负责持久选择与默认设备／断开策略，保存回调在 `BackendSession` 注入。Linux 可选的 `PulseAudioPorts` 使用原生 libpulse 异步订阅和切换同声卡端口，通过非阻塞主循环迭代接入后端线程，并在切换后回读确认。`QtPlaybackBackend` 在设备或耳机端口丢失时停用输出，`PlayerEngine` 清除待播放意图并检查所有起播路径；前端的共享 `AudioOutputController` 通过 IPC 同步设置页和播放栏，不直接枚举本机音频设备。
+音频设备由同一接口暴露普通设备／端口数据和输出可用性信号，Qt 类型保留在基础设施层。`AudioOutputService` 负责持久选择与默认设备／断开策略，保存回调在 `BackendSession` 注入。Linux 可选的 `PulseAudioPorts` 使用原生 libpulse 异步订阅和切换同声卡端口，通过非阻塞主循环迭代接入后端线程，并在切换后回读确认。两种后端共用 `AudioOutputDevices` 的设备／端口实现，在设备或耳机端口丢失时停用输出，`PlayerEngine` 清除待播放意图并检查所有起播路径；前端的共享 `AudioOutputController` 通过 IPC 同步设置页和播放栏，不直接枚举本机音频设备。
 
 `PlayerQueue` 是领域队列，歌曲 ID 与队列项 ID 分开：同一歌曲可以在队列中出现多次，每个队列项仍有独立身份。`QueueService` 恢复持久队列，并提供先写库、后更新内存的提交入口。
 
 `PlaybackOrderService` 管理顺序、单曲循环、随机和列表循环；自动播完、手动下一首与上一首由 `PlaybackAdvance` 区分。随机策略通过 `IShuffleStrategy` 注入，默认使用 `ShuffleBagStrategy`。服务先提出选择，队列提交成功后才确认随机状态和历史，避免失败切歌推进内部顺序。播放模式通过装配处注入的保存函数写入配置。
+
+### 连续 PCM 与音效
+
+FFmpeg 解码器分别在工作线程读取当前与预加载源，输出经一次延迟／填充裁剪的原生采样率立体声浮点 PCM。缓冲有界且可取消，输出线程只进行非阻塞取样、重采样、混音、DSP 和 `QAudioSink` 写入。每路解码缓冲为 15 MiB、规范化缓冲为 12 MiB，余量用于转换块和输出，PCM 总预算为 64 MiB；高采样率时可缩短渐变窗口。相同采样率的 Gapless 源复用重采样滤波历史和分数相位，异采样率源分别排空后衔接。
+
+`PlayerEngine` 保存 `propose(Ended)` 的候选及唯一播放令牌，准备下一首不改变选择或随机历史。队列拓扑、模式、seek、停止和扩展重载使旧候选失效；元数据／播放次数更新不会反复重建相同候选。`nextReady` 只授权渲染；`PcmOutputClock` 随设备已处理帧数推进，到达 `nextTrackStarted` 才写库、确认顺序并发布歌词、MPRIS 与播放次数。保存失败立即停播且不确认候选。输出时钟不等于物理扬声器精确出声时刻，硬件延迟另行实机测量。
+
+下一首 URL 的异步解析与当前源独立。扩展 URL 分别持有，晚到结果直接释放，混音尾音退出并不再需要源时才释放旧 URL；关闭时先中断并回收解码工作线程，再关闭扩展代理。`finishAfterCurrent` 与短暂的下一首决策窗口防止短曲连续播放过早排空重采样器；未及时就绪的源回退普通切歌。
+
+Crossfade 只在自然结束时使用等功率曲线，时长 0–12 秒、默认关闭，并限制为两首各自时长的一半。同专辑与艺人、同碟连续曲号且非随机／插播时优先 Gapless，单曲循环也使用 Gapless。首次非零下一首权重对应的输出帧切换曲目身份；暂停冻结过渡，seek 与手动导航取消尾音。
+
+DSP 为持久的前级、10 个 `equalizer`、`alimiter` 和浮点输出格式滤镜。运行时命令以约 20 ms 小步更新参数，关闭 EQ 平滑回到单位增益而保留滤镜状态。频段为 31 Hz–16 kHz，增益与前级均为 ±12 dB；自动余量按最大正增益降低前级，限幅关闭自动补偿增益，延迟补偿保证输出帧序号与边界一致。`AudioSettingsService` 先保存再应用配置，Qt 回退期间保留但停用 DSP 设置。
 
 ### 曲库、歌单与标签
 
@@ -284,7 +296,7 @@ API 默认不清理文件，界面删除确认框默认勾选清理；前端必�
 
 页面在 `qml/pages` 中声明 `shell`、`controllers`、`transport`、`translator` 属性，按需提供导入和编辑信号。将描述加入 `PageRegistry.js`，文件加入 `resources.qrc`；页面选择和请求回调保留在功能控制器或页面中。
 
-替换播放器时实现 `IPlaybackBackend`，在装配处替换 `QtPlaybackBackend`。扩展随机算法实现 `IShuffleStrategy` 并注入 `PlayerEngine`；新增播放模式还需同步领域枚举、顺序规则、IPC 校验、前端选项、翻译和协议文档。
+替换播放器时实现 `IPlaybackBackend`，在装配处通过后端代理工厂选择实现。扩展随机算法实现 `IShuffleStrategy` 并注入 `PlayerEngine`；新增播放模式还需同步领域枚举、顺序规则、IPC 校验、前端选项、翻译和协议文档。
 
 ## 9. 验证与当前约束
 

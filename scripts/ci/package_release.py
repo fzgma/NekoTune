@@ -163,6 +163,19 @@ def bundle_windows(stage: Path, qt: Path) -> None:
                 raise RuntimeError(f"Unresolved dependency {name} in {binary}")
 
 
+def validate_audio_runtime(stage: Path, platform: str) -> None:
+    """Reject archives missing a playback/DSP library or the Qt fallback plugin."""
+    library_dir = stage / ("lib" if platform == "linux" else "bin")
+    for component in ("avformat", "avcodec", "avutil", "swresample", "avfilter"):
+        pattern = f"lib{component}.so*" if platform == "linux" else f"{component}-*.dll"
+        if not any(path.is_file() for path in library_dir.glob(pattern)):
+            raise RuntimeError(f"Incomplete audio runtime: {component} missing from {library_dir}")
+    plugins = stage / "plugins/multimedia" if platform == "linux" else stage / "bin/multimedia"
+    pattern = "*.so" if platform == "linux" else "*.dll"
+    if not any(path.is_file() for path in plugins.glob(pattern)):
+        raise RuntimeError(f"Qt Multimedia fallback plugin missing from {plugins}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", type=Path, required=True)
@@ -186,6 +199,7 @@ def main() -> None:
                      [directory.resolve() for directory in args.plugin_dir])
     else:
         bundle_windows(stage, qt)
+    validate_audio_runtime(stage, args.platform)
     licenses = stage / "licenses"
     licenses.mkdir(exist_ok=True)
     for filename in ("LICENSE", "README.md"):
@@ -204,7 +218,7 @@ def main() -> None:
     )
     (licenses / "THIRD-PARTY.md").write_text(
         "This distribution includes Qt (LGPL/GPL), QtKeychain (BSD), "
-        "FFmpeg and its codec libraries, Node.js and their dependencies.\n"
+        "FFmpeg (avformat, avcodec, avutil, swresample, avfilter), Node.js and their dependencies.\n"
         "Node.js notices are in libexec/nekotune/NODE-LICENSE.\n"
         "Qt source and licenses: https://code.qt.io/ and https://www.qt.io/licensing/\n"
         "QtKeychain source: https://github.com/frankosterfeld/qtkeychain/tree/0.17.0\n"

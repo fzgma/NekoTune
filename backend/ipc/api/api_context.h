@@ -1,6 +1,7 @@
 #pragma once
 #include "application/ai_service.h"
 #include "application/playback/audio_output_service.h"
+#include "application/playback/audio_settings_service.h"
 #include "application/library/collection_service.h"
 #include "application/lyrics/cover_service.h"
 #include "application/lyrics/lyrics_controller.h"
@@ -37,6 +38,8 @@ struct ApiContext {
     ExtensionService *extensions = nullptr;
     MusicService *music = nullptr;
     AudioOutputService *audioOutputs = nullptr;
+    AudioSettingsService *audioSettings = nullptr;
+    QJsonObject audioSettingsStatus() const;
     QJsonObject audioOutputStatus() const;
     QJsonObject playbackStatus() const;
     QJsonObject libraryStatus() const;

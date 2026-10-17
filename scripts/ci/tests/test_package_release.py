@@ -92,5 +92,33 @@ class LinuxInputMethodPackagingTest(unittest.TestCase):
         )
 
 
+class AudioRuntimePackagingTest(unittest.TestCase):
+    def test_audio_libraries_and_qt_fallback_are_required(self) -> None:
+        for platform in ("linux", "windows"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                stage = Path(directory)
+                library_dir = stage / ("lib" if platform == "linux" else "bin")
+                library_dir.mkdir()
+                libraries = []
+                for component in ("avformat", "avcodec", "avutil", "swresample", "avfilter"):
+                    name = f"lib{component}.so.1" if platform == "linux" else f"{component}-1.dll"
+                    library = library_dir / name
+                    library.write_bytes(b"library")
+                    libraries.append(library)
+                plugin = stage / ("plugins/multimedia/libffmpegmediaplugin.so" if platform == "linux"
+                                  else "bin/multimedia/ffmpegmediaplugin.dll")
+                plugin.parent.mkdir(parents=True)
+                plugin.write_bytes(b"plugin")
+                package_release.validate_audio_runtime(stage, platform)
+                for library in libraries:
+                    library.unlink()
+                    with self.assertRaisesRegex(RuntimeError, "Incomplete audio runtime"):
+                        package_release.validate_audio_runtime(stage, platform)
+                    library.write_bytes(b"library")
+                plugin.unlink()
+                with self.assertRaisesRegex(RuntimeError, "fallback plugin missing"):
+                    package_release.validate_audio_runtime(stage, platform)
+
+
 if __name__ == "__main__":
     unittest.main()

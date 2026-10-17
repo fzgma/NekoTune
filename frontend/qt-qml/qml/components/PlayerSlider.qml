@@ -25,14 +25,16 @@ Slider {
         // Visual track: 4px fixed height
         Rectangle {
             anchors.centerIn: parent
-            width: parent.width
+            // Match the track endpoints to the handle's center at each limit.
+            width: Math.max(0, parent.width - slider.handle.width)
             height: 4
             radius: 2
             color: slider.baseColor
 
             // Active track
             Rectangle {
-                width: Math.max(0, slider.visualPosition * parent.width)
+                x: slider.mirrored ? parent.width - width : 0
+                width: slider.position * parent.width
                 height: parent.height
                 radius: 2
                 color: slider.activeColor

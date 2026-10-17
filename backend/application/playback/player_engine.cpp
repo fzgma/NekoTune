@@ -1,5 +1,6 @@
 #include "application/playback/player_engine.h"
 #include <QFileInfo>
+#include "domain/playback/transition_policy.h"
 #include <QPointer>
 #include <algorithm>
 #include <cmath>
@@ -15,8 +16,10 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
                                  && m_backend.supportsPlaybackRate() ? playbackRate : 1.0);
     m_order.reset(queue.queue());
     connect(&queue, &QueueService::changed, this, [this] {
-        if (!m_navigating)
+        if (!m_navigating) {
             m_order.syncQueue(m_queue.queue());
+            refreshPreload();
+        }
         refreshCapabilities();
     });
     connect(this, &PlayerEngine::trackChanged, this, &PlayerEngine::refreshCapabilities);
@@ -25,10 +28,13 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
         const auto &queue = m_queue.queue();
         if (queue.currentIndex() >= 0)
             emit seeked(position, queue.at(queue.currentIndex()).id);
+        refreshPreload();
     });
     connect(&backend, &IPlaybackBackend::stateChanged, this, &PlayerEngine::setState);
     connect(&backend, &IPlaybackBackend::audioOutputAvailabilityChanged, this, [this](bool available) {
         if (!available) {
+            invalidatePreload();
+            m_failedPreloadKey.clear();
             const bool intended = playing() || m_playIntent;
             m_playIntent = false;
             if (intended)
@@ -43,21 +49,40 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
         refreshCapabilities();
         m_metadataTimer.start();
     });
-    connect(&backend, &IPlaybackBackend::metadataChanged, &m_metadataTimer, qOverload<>(&QTimer::start));
+    connect(&backend, &IPlaybackBackend::metadataChanged, this, [this] {
+        m_decoderReady = true;
+        m_metadataTimer.start();
+        refreshPreload();
+    });
+    connect(&backend, &IPlaybackBackend::nextReady, this, [this](quint64 token) {
+        if (m_preloadSelection && token == m_preloadToken) m_backend.authorizeTransition(token);
+    });
+    connect(&backend, &IPlaybackBackend::nextFailed, this, [this](quint64 token, const QString &) {
+        if (!m_preloadSelection || token != m_preloadToken) return;
+        m_failedPreloadKey = m_preloadKey;
+        invalidatePreload();
+    });
+    connect(&backend, &IPlaybackBackend::nextTrackStarted, this, &PlayerEngine::startPreloaded);
+    connect(&backend, &IPlaybackBackend::sourceReleased, this, &PlayerEngine::releaseResolved);
+    connect(&backend, &IPlaybackBackend::backendChanged, this, [this] {
+        if (!m_backend.backendCapabilities().gapless) invalidatePreload();
+        emit playbackRateChanged(m_backend.playbackRate());
+        refreshCapabilities();
+    });
     connect(&backend, &IPlaybackBackend::ended, this, [this] {
         auto result = advance(PlaybackAdvance::Ended);
         if (!result)
             emit errorOccurred(result.error().message);
     });
     connect(&backend, &IPlaybackBackend::failed, this, [this](const QString &message) {
+        invalidatePreload(); m_decoderReady = false; m_metadataTimer.stop();
         const auto &current = m_queue.queue();
         if (current.currentIndex() >= 0 && current.at(current.currentIndex()).metadata.isRemote()) {
             ++m_sourceGeneration;
             m_resolving = false;
             m_playIntent = false;
             m_backend.setSource({});
-            if (m_sourceResolver)
-                m_sourceResolver->release(m_resolvedSource);
+            releaseResolved(m_resolvedSource);
             m_resolvedSource = QUrl{};
             setState(PlayerState::Error);
             emit errorOccurred(message);
@@ -85,6 +110,95 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
         emit lyricsNeeded(true);
     });
     refreshCapabilities();
+}
+void PlayerEngine::releaseResolved(const QUrl &source) {
+    if (m_leasedSources.remove(source) && m_sourceResolver) m_sourceResolver->release(source);
+}
+void PlayerEngine::invalidatePreload() {
+    ++m_preloadToken;
+    const bool pending = m_preloadSelection.has_value();
+    m_preloadSelection.reset();
+    m_preloadKey.clear(); m_preloadSource = QUrl{};
+    if (pending) m_backend.cancelPreload();
+}
+void PlayerEngine::setCrossfadeSeconds(double seconds) {
+    if (m_crossfadeSeconds == seconds) return;
+    m_crossfadeSeconds = seconds;
+    m_failedPreloadKey.clear();
+    refreshPreload();
+}
+void PlayerEngine::refreshPreload() {
+    if (m_navigating || m_shuttingDown) return;
+    const auto &queue = m_queue.queue();
+    if (!m_backend.backendCapabilities().gapless || !m_decoderReady ||
+        m_resolving || queue.currentIndex() < 0 || m_backend.source().isEmpty()) return;
+    auto selection = m_order.propose(queue, PlaybackAdvance::Ended);
+    const int index = queue.indexById(selection.queueId);
+    if (index < 0) { invalidatePreload(); m_backend.finishAfterCurrent(); return; }
+    const auto item = queue.at(index);
+    const auto &current = queue.at(queue.currentIndex());
+    auto strategy = transitionStrategyFor(current.metadata, item.metadata, m_order.mode(), item.playNext, m_crossfadeSeconds);
+    if (!m_backend.backendCapabilities().crossfade) strategy = TransitionStrategy::Gapless;
+    QString topology;
+    for (int i = 0; i < queue.size(); ++i) topology += QString::number(queue.at(i).id) + ':' + QString::number(queue.at(i).playNext) + ';';
+    const QString key = topology + '/' + QString::number(current.id) + '/' + QString::number(item.id) + '/' + item.path + '/' +
+        item.metadata.providerId + '/' + item.metadata.providerTrackId + '/' + QString::number(int(m_order.mode())) +
+        '/' + QString::number(int(strategy)) + '/' + QString::number(m_crossfadeSeconds);
+    if (key == m_preloadKey || key == m_failedPreloadKey) return;
+    invalidatePreload();
+    if (!m_playIntent) return;
+    const auto token = m_preloadToken;
+    m_preloadKey = key; m_preloadSelection = std::move(selection);
+    auto prepared = [this, token, strategy](const QUrl &url) {
+        m_preloadSource = url;
+        m_backend.preloadNext({url, token, strategy, m_crossfadeSeconds});
+    };
+    if (!item.metadata.isRemote()) { prepared(QUrl::fromLocalFile(item.path)); return; }
+    if (!m_sourceResolver || m_reloadingExtensions.contains(item.metadata.providerId.section('/', 0, 0))) {
+        m_failedPreloadKey = key; invalidatePreload(); return;
+    }
+    QPointer<PlayerEngine> guard(this);
+    auto *resolver = m_sourceResolver;
+    resolver->resolve(item.metadata, [guard, resolver, token, strategy](Result<QUrl> result) {
+        if (!guard || guard->m_shuttingDown || token != guard->m_preloadToken || !guard->m_preloadSelection) {
+            if (result) resolver->release(result.value());
+            return;
+        }
+        if (!result) {
+            guard->m_failedPreloadKey = guard->m_preloadKey; guard->invalidatePreload(); return;
+        }
+        guard->m_preloadSource = result.value(); guard->m_leasedSources.insert(result.value());
+        guard->m_backend.preloadNext({result.value(), token, strategy, guard->m_crossfadeSeconds});
+    });
+}
+void PlayerEngine::startPreloaded(quint64 token) {
+    if (m_shuttingDown) return;
+    if (!m_preloadSelection || token != m_preloadToken) {
+        m_backend.stop();
+        loadCurrent(m_playIntent, false);
+        return;
+    }
+    auto candidate = m_queue.queue();
+    const int index = candidate.indexById(m_preloadSelection->queueId);
+    if (index < 0) { invalidatePreload(); m_backend.stop(); return; }
+    candidate.setCurrentIndex(index);
+    m_navigating = true;
+    auto saved = m_queue.commit(std::move(candidate));
+    m_navigating = false;
+    if (!saved) {
+        invalidatePreload(); m_backend.stop(); m_backend.setSource({});
+        m_playIntent = false; setState(PlayerState::Error);
+        emit errorOccurred(saved.error().message); return;
+    }
+    m_order.confirm(std::move(*m_preloadSelection));
+    m_resolvedSource = m_preloadSource;
+    m_preloadSelection.reset(); m_preloadSource = QUrl{}; m_preloadKey.clear(); m_failedPreloadKey.clear();
+    ++m_sourceGeneration;
+    m_metadataTimer.stop(); m_metadata = m_backend.metadata(); m_metadataReady = true;
+    m_playCounted = false; m_decoderReady = true;
+    emit trackChanged(); emit lyricsNeeded(true);
+    setState(PlayerState::Playing);
+    refreshCapabilities(); refreshPreload();
 }
 void PlayerEngine::refreshCapabilities() {
     const auto &queue = m_queue.queue();
@@ -156,12 +270,15 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount, PlayerState idleS
     if (resetPlayCount)
         m_playCounted = false;
     play = play && m_backend.audioOutputAvailable();
+    invalidatePreload();
+    m_failedPreloadKey.clear();
+    m_decoderReady = false;
     const auto generation = ++m_sourceGeneration;
     m_resolving = false;
     m_waitingForReload = false;
     m_playIntent = play;
-    if (m_sourceResolver)
-        m_sourceResolver->release(m_resolvedSource);
+    if (!m_backend.backendCapabilities().gapless)
+        releaseResolved(m_resolvedSource);
     m_resolvedSource = QUrl{};
     const auto &queue = m_queue.queue();
     if (queue.currentIndex() < 0) {
@@ -206,6 +323,7 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount, PlayerState idleS
                 return;
             }
             guard->m_resolvedSource = result.value();
+            guard->m_leasedSources.insert(result.value());
             guard->m_backend.setSource(result.value());
             if (guard->m_playIntent && guard->m_backend.audioOutputAvailable())
                 guard->m_backend.play();
@@ -222,13 +340,15 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount, PlayerState idleS
         setState(m_idleState);
 }
 void PlayerEngine::clearSource() {
+    invalidatePreload();
+    m_decoderReady = false;
     m_playCounted = false;
     ++m_sourceGeneration;
     m_resolving = false;
     m_waitingForReload = false;
     m_playIntent = false;
-    if (m_sourceResolver)
-        m_sourceResolver->release(m_resolvedSource);
+    if (!m_backend.backendCapabilities().gapless)
+        releaseResolved(m_resolvedSource);
     m_resolvedSource = QUrl{};
     m_metadataTimer.stop();
     m_backend.stop();
@@ -265,6 +385,7 @@ Result<void> PlayerEngine::play() {
         loadCurrent(true);
     else
         m_backend.play();
+    refreshPreload();
     return {};
 }
 Result<void> PlayerEngine::toggle() { return playing() ? pause() : play(); }
@@ -279,6 +400,7 @@ Result<void> PlayerEngine::pause() {
     return {};
 }
 Result<void> PlayerEngine::stop() {
+    invalidatePreload();
     m_playIntent = false;
     m_idleState = PlayerState::Stopped;
     m_playCounted = false;
@@ -297,10 +419,15 @@ Result<void> PlayerEngine::setPlaybackMode(PlaybackMode mode) {
     if (result && previous != mode) {
         refreshCapabilities();
         emit playbackModeChanged(mode);
+        refreshPreload();
     }
     return result;
 }
 void PlayerEngine::sourceUnavailable(const QString &provider) {
+    if (m_preloadSelection) {
+        const int index = m_queue.queue().indexById(m_preloadSelection->queueId);
+        if (index >= 0 && m_queue.queue().at(index).metadata.providerId == provider) invalidatePreload();
+    }
     const auto &current = m_queue.queue();
     if (current.currentIndex() < 0 || current.at(current.currentIndex()).metadata.providerId != provider)
         return;
@@ -311,6 +438,7 @@ void PlayerEngine::sourceUnavailable(const QString &provider) {
     emit errorOccurred("Music source unavailable: " + provider);
 }
 void PlayerEngine::sourcesReloading(const QStringList &extensionIds, bool active) {
+    if (active) invalidatePreload();
     for (const auto &id : extensionIds) {
         if (active)
             m_reloadingExtensions.insert(id);
@@ -353,6 +481,7 @@ Result<void> PlayerEngine::advance(PlaybackAdvance reason, bool preserveState) {
         return saved;
     // Only a durable selection may consume the shuffle proposal and its playback history.
     m_order.confirm(std::move(selection));
+    invalidatePreload();
     m_backend.stop();
     loadCurrent(resume, true, preserveState && previousState == PlayerState::Stopped
                                   ? PlayerState::Stopped : PlayerState::Paused);
@@ -366,6 +495,8 @@ Result<void> PlayerEngine::advance(PlaybackAdvance reason, bool preserveState) {
 Result<void> PlayerEngine::seek(qint64 position) {
     if (position < 0)
         return failure(QStringLiteral("Position must be greater than or equal to 0"));
+    invalidatePreload();
+    m_failedPreloadKey.clear();
     m_backend.seek(position);
     return {};
 }
@@ -490,16 +621,21 @@ void PlayerEngine::metadataBatchUpdated(const QVector<SongMetadata> &metadata) {
     }
 }
 void PlayerEngine::shutdown() {
+    m_shuttingDown = true;
+    invalidatePreload();
     ++m_sourceGeneration;
     m_resolving = false;
     m_waitingForReload = false;
     m_reloadingExtensions.clear();
     m_playIntent = false;
-    if (m_sourceResolver)
-        m_sourceResolver->release(m_resolvedSource);
+    if (!m_backend.backendCapabilities().gapless)
+        releaseResolved(m_resolvedSource);
     m_resolvedSource = QUrl{};
     m_metadataTimer.stop();
-    m_backend.stop();
-    m_backend.setSource({});
+    m_backend.shutdown();
+    // Shutdown owns the remaining leases; stale resolver callbacks release their
+    // own URL without entering the playback state machine.
+    const auto leases = m_leasedSources;
+    for (const auto &url : leases) releaseResolved(url);
 }
 } // namespace nekotune

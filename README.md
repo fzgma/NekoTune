@@ -32,7 +32,7 @@ NekoTune 是一款本地优先的 Linux 音乐播放器，使用 C++20、Qt6 和
 - CMake 3.28+、支持 C++20 的编译器和 `pkg-config`。
 - Qt 6.6+：Core、Gui、Widgets、Network、Sql、Multimedia、Quick、Qml、QuickControls2、Test、QuickTest；保持音高的倍速功能需要 Qt 6.10+，Linux 发布工作流使用 6.11.2。
 - Linux 桌面集成另需 Qt DBus 开发包；自动化总线测试需要 `dbus-run-session`，可选安装 `playerctl` 验证客户端互操作。
-- Zlib 和 FFmpeg 开发库：`libavformat`、`libavutil`。
+- Zlib 和 FFmpeg 开发库：`libavformat`、`libavutil`、`libavcodec`、`libswresample`、`libavfilter`。
 - QtKeychain 0.17+ 的 Qt6 开发包，CMake 包名为 `Qt6Keychain`。
 - Linux 还需 `libsecret-1` 开发库，用于读取并迁移旧版系统密钥库条目。建议安装 `libpulse` 14+ 开发库（Debian/Ubuntu：`libpulse-dev`），以便直接选择同一声卡下的耳机／扬声器端口；兼容 PulseAudio 和 PipeWire 的 Pulse 服务，未编入此支持时仍可选择 Qt 音频设备。
 - JS 构建工具需要 pnpm；CMake 下载并校验固定的 Node.js 24.21.0，发行运行不依赖系统 Node.js。扩展运行时支持 Linux 和 Windows x86_64。
@@ -94,7 +94,9 @@ NEKOTUNE_SOCKET="$nekotune_profile/nekotune.sock" \
 
 底部播放栏的 `1.0×` 入口可选择 0.5×–2.0×（每档 0.25×），保持音高；设置页可选择速度或恢复 1.0×。速度全局保存，切歌和重启后沿用，不写入单曲。歌词与进度跟随媒体实际位置，MPRIS 只读展示当前速度。
 
-保持音高的倍速需要 Qt 6.10+ 及支持音高补偿的 Qt Multimedia 后端（如 FFmpeg）。其他环境保持 1.0×，设置页显示原因。
+默认播放引擎使用 FFmpeg 解码、连续 PCM 管线与 `QAudioSink` 输出，支持无缝播放、自然换曲淡入淡出和应用内 10 段 EQ。设置中的后端偏好在重启后生效；当前源尚未输出音频时，特定格式／解码初始化错误可回退 Qt 一次。
+
+FFmpeg 引擎当前仅支持原速，不覆盖已有倍速偏好。需要保留音高的倍速时可选择 Qt 后端并重启；该能力需要 Qt 6.10+ 和支持音高补偿的 Qt Multimedia 后端。
 
 ### 系统托盘
 

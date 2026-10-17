@@ -14,6 +14,7 @@ class PlaybackController final : public FeatureController {
     Q_PROPERTY(double volume READ volume NOTIFY volumeChanged)
     Q_PROPERTY(double playbackRate READ playbackRate NOTIFY playbackRateChanged)
     Q_PROPERTY(bool playbackRateSupported READ playbackRateSupported NOTIFY playbackRateSupportedChanged)
+    Q_PROPERTY(QVariantMap audioSettings READ audioSettings NOTIFY audioSettingsChanged)
     Q_PROPERTY(QVariantMap song READ song NOTIFY songChanged)
     Q_PROPERTY(QVariantMap capabilities READ capabilities NOTIFY capabilitiesChanged)
   public:
@@ -25,6 +26,7 @@ class PlaybackController final : public FeatureController {
     double volume() const { return m_volume; }
     double playbackRate() const { return m_playbackRate; }
     bool playbackRateSupported() const { return m_playbackRateSupported; }
+    QVariantMap audioSettings() const { return m_audioSettings; }
     QVariantMap song() const { return m_song; }
     QVariantMap capabilities() const { return m_capabilities; }
     /// Merge a partial event or complete status reply on the frontend thread.
@@ -44,6 +46,9 @@ class PlaybackController final : public FeatureController {
     Q_INVOKABLE void seek(double value) { send("player.seek", {{"position", value}}); }
     Q_INVOKABLE void setVolume(double value) { send("player.set_volume", {{"volume", value}}); }
     Q_INVOKABLE void setPlaybackRate(double value) { send("player.set_playback_rate", {{"rate", value}}); }
+    Q_INVOKABLE void setAudioBackend(const QString &backend) { send("player.set_audio_backend", {{"backend", backend}}); }
+    Q_INVOKABLE void setCrossfade(double seconds) { send("player.set_transition", {{"crossfade_seconds", seconds}}); }
+    Q_INVOKABLE void setEqualizer(const QVariantMap &settings) { send("player.set_equalizer", QJsonObject::fromVariantMap(settings)); }
     /// Mute is a normal zero-volume request, not a separate backend playback state.
     /// Unmuting restores the last observed positive value, with the default as a fallback.
     /// Confirmation still arrives through the ordinary volume event path.
@@ -57,6 +62,7 @@ class PlaybackController final : public FeatureController {
     void playbackRateChanged();
     void playbackRateSupportedChanged();
     void songChanged();
+    void audioSettingsChanged();
     void capabilitiesChanged();
     void seeked(qint64 position, int queueId);
 
@@ -65,6 +71,7 @@ class PlaybackController final : public FeatureController {
     QString m_state = "stopped";
     double m_position = 0, m_duration = 0, m_volume = .8, m_lastVolume = .8;
     QVariantMap m_song;
+    QVariantMap m_audioSettings;
     QVariantMap m_capabilities;
     double m_playbackRate = 1.0;
     bool m_playbackRateSupported = false;

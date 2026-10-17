@@ -3,9 +3,14 @@
 #include "infrastructure/extensions/extension_lyrics_provider.h"
 #include "infrastructure/lyrics/lrclib_provider.h"
 #include "infrastructure/lyrics/lyrics_storage.h"
-#include "infrastructure/playback/qt_playback_backend.h"
+#include "infrastructure/playback/playback_backend_supervisor.h"
+#include "ipc/serialization/audio_serialization.h"
 namespace nekotune {
 namespace {
+AudioSettings savedAudioSettings() {
+    const auto parsed = parseAudioSettings(AppPaths::setting("audio_engine").toObject());
+    return parsed ? parsed.value() : AudioSettings{};
+}
 AudioOutputSelection savedAudioOutput() {
     const auto saved = AppPaths::setting("audio_output").toObject();
     return {saved.value("device_id").toString(), saved.value("device_name").toString(),
@@ -34,7 +39,7 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
       m_playlistRepository(m_database), m_tagRepository(m_database),
       m_library(m_songs, m_tagRepository, m_database), m_playlists(m_playlistRepository),
       m_tags(m_tagRepository), m_queue(m_queueRepository, m_songs, m_database),
-      m_audio(audio ? std::move(audio) : std::make_unique<QtPlaybackBackend>()),
+      m_audio(audio ? std::move(audio) : std::make_unique<PlaybackBackendSupervisor>(savedAudioSettings().backend)),
       m_player(*m_audio, m_queue, std::make_unique<ShuffleBagStrategy>(),
                playbackModeFromString(AppPaths::setting("playback_mode").toString())
                    .value_or(PlaybackMode::Sequential),
@@ -46,6 +51,9 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
                                                                  {"device_name", selected.name},
                                                                  {"port_id", selected.portId},
                                                                  {"port_name", selected.portName}});
+      }),
+      m_audioSettings(*m_audio, m_player, savedAudioSettings(), [](const AudioSettings &settings) {
+          return AppPaths::saveSetting("audio_engine", audioSettingsJson(settings));
       }),
       m_lyrics(m_player, createLyrics()), m_covers(std::make_unique<LyricsStorage>()),
       m_collections(m_songs, m_queueRepository, m_playlistRepository, m_database, m_library, m_queue,
@@ -68,6 +76,13 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     m_api.configDirectory = AppPaths::configDirectory();
     m_api.ai = &m_ai;
     m_api.audioOutputs = &m_audioOutputs;
+    m_api.audioSettings = &m_audioSettings;
+    connect(&m_audioSettings, &AudioSettingsService::changed, this, [this] {
+        auto event = m_api.audioSettingsStatus(); event.insert("event", "player.audio_settings_changed");
+        event.insert("playback_rate_supported", m_audio->supportsPlaybackRate());
+        event.insert("playback_rate", m_audio->playbackRate());
+        m_server.broadcastEvent(event);
+    });
     connect(&m_audioOutputs, &AudioOutputService::changed, this, [this] {
         auto event = m_api.audioOutputStatus();
         event.insert("event", "player.audio_outputs_changed");
@@ -191,7 +206,7 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
         const auto state = m_api.playbackStatus();
         m_server.broadcastEvent(
             {{"event", "player.track_changed"}, {"song", state.value("song")},
-             {"duration", state.value("duration")}});
+             {"position", state.value("position")}, {"duration", state.value("duration")}});
     };
     connect(&m_player, &PlayerEngine::trackChanged, this, trackChanged);
     connect(&m_player, &PlayerEngine::errorOccurred, this, [this](const QString &message) {
@@ -256,6 +271,8 @@ void BackendSession::shutdown() {
     if (m_stopped)
         return;
     m_stopped = true;
+    // Finish decoder I/O before revoking the extension proxy's leased URLs.
+    m_player.shutdown();
     m_extensionBackend.shutdown();
     m_scanner.shutdown();
     m_sidecars.shutdown();
@@ -266,6 +283,5 @@ void BackendSession::shutdown() {
     m_imports.shutdown();
     m_server.shutdown();
     m_lyrics.shutdown();
-    m_player.shutdown();
 }
 } // namespace nekotune

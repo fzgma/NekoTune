@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(NekoTune
-    VERSION 1.1.0
+    VERSION 1.2.0
     DESCRIPTION "Local-first Linux music player with a decoupled C++ backend"
     LANGUAGES CXX
 )
@@ -23,10 +23,11 @@ find_package(Qt6 6.6 REQUIRED COMPONENTS
     Test
 )
 find_package(ZLIB REQUIRED)
+find_package(Threads REQUIRED)
 find_package(Qt6Keychain 0.17 CONFIG REQUIRED)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavutil)
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavutil libavcodec libswresample libavfilter)
 
 # Linux-only reader for credentials saved by the previous libsecret backend.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
