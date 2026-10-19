@@ -22,10 +22,13 @@ extern "C" {
 namespace nekotune {
 namespace {
 QString fingerprint(const QString &path) {
-    const QFileInfo file(path);
-    if (!file.isFile())
+    const auto canonical = QFileInfo(path).canonicalFilePath();
+    const QFileInfo file(canonical);
+    if (canonical.isEmpty() || !file.isFile())
         return {};
-    const auto identity = file.canonicalFilePath().toUtf8() + '\0' + QByteArray::number(file.size()) + '\0' +
+    // Windows can report a symlink's own size/timestamps. Fingerprint the same
+    // target for both its managed audio link and its original playback path.
+    const auto identity = canonical.toUtf8() + '\0' + QByteArray::number(file.size()) + '\0' +
                           QByteArray::number(file.lastModified().toMSecsSinceEpoch()) + '\0' +
                           QByteArray::number(file.metadataChangeTime().toMSecsSinceEpoch());
     return QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());

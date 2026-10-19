@@ -1,5 +1,6 @@
 #include "application/playback/audio_settings_service.h"
 #include "infrastructure/library/audio_duration.h"
+#include "infrastructure/library/audio_reference.h"
 #include "infrastructure/library/loudness_analysis.h"
 #include "infrastructure/playback/pcm_decoder.h"
 #include "infrastructure/playback/pcm_dsp.h"
@@ -11,6 +12,7 @@
 #include "support/store_fixture.h"
 #include <QCryptographicHash>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocalSocket>
@@ -254,6 +256,31 @@ class ReplayGainTest : public QObject {
         QVERIFY(!readLoudnessCache(b).trackGainDb);
         QVERIFY(!readLoudnessCache(a).albumGainDb);
         QVERIFY(readLoudnessCache(a).trackGainDb);
+    }
+    void analysisCacheFollowsAudioSymlinks() {
+        QTemporaryDir dir;
+        const auto a = dir.filePath("a.wav"), b = dir.filePath("b.wav");
+        const auto linkA = dir.filePath("managed-a.wav"), linkB = dir.filePath("managed-b.wav");
+        QVERIFY(wav(a, .04));
+        QVERIFY(wav(b, .08));
+        if (!createAudioSymlink(a, linkA) || !createAudioSymlink(b, linkB))
+            QSKIP("Native audio symlinks are unavailable");
+        QVERIFY(QFileInfo(linkA).isSymLink());
+        QVERIFY(QFileInfo(linkB).isSymLink());
+        LoudnessAnalysis analysis;
+        QVERIFY(analysis.start({{{linkA, linkB}, true}}));
+        QTRY_VERIFY_WITH_TIMEOUT(!analysis.status().running, 10000);
+        QVERIFY2(analysis.status().error.isEmpty(), qPrintable(analysis.status().error));
+        const auto original = readLoudnessCache(a);
+        QVERIFY(original.trackGainDb);
+        QVERIFY(original.albumGainDb);
+        QCOMPARE(readLoudnessCache(linkA), original);
+        QCOMPARE(readLoudnessCache(linkB), readLoudnessCache(b));
+        QCOMPARE(readLoudnessCache(b).albumGainDb, original.albumGainDb);
+        QVERIFY(wav(b, .12, 48000));
+        QVERIFY(!readLoudnessCache(linkB).trackGainDb);
+        QVERIFY(!readLoudnessCache(linkA).albumGainDb);
+        QVERIFY(readLoudnessCache(linkA).trackGainDb);
     }
     void cancellationAndPlaybackThrottle() {
         QTemporaryDir dir;
