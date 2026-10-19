@@ -120,6 +120,8 @@ WorkerW 是 Explorer 的内部机制，不是稳定公开 API。当前没有 Win
 
 CI 从固定的 LayerShellQt 6.7.4 源码（`1613a5f61150192d8187989466d4ff961f4ce2c4`）及 ECM 6.26.0 构建，使用与 NekoTune 相同的 Qt SDK。Qt 6.11 的 Wayland 来自 Qt base；构建必须能找到 `Qt6::WaylandClientPrivate`，且 CI 断言生成的 `wallpaper-runtime.json` 中 backend 为 `wayland`。不得复制针对更新系统 Qt 构建的库到较旧 SDK 包中。
 
+Qt 6.11 的私有头文件使用 Wayland 1.24 新增的 `wl_fixes`，Ubuntu 24.04 自带的 Wayland 1.22 无法满足。CI 从校验 SHA-256 的官方 Wayland 1.24.0 发行包构建到临时前缀，统一设置 scanner、pkg-config、CMake 和动态库查找路径；该版本的运行库通过 ELF 依赖收集进入发布包，`COPYING` 保存到 `licenses/Wayland/`。
+
 打包新增 Wayland QPA、xdg-shell、Wayland 图形／装饰／输入设备插件目录，以及 LayerShellQt／QtWayland 的 ELF 依赖闭包；QtQuick.Effects 已随 QtQuick 目录收集。按窗口调用 API 时不需要设置全局 shell 插件环境变量，也不导入 LayerShellQt 的 QML 模块。后端不链接这些 GUI 依赖。
 
 脚本要求构建 manifest 的 Qt 版本匹配 qmake，复制每个 Qt 库时校验与所选 SDK 文件一致，并执行 `ldd -r` 检查缺失依赖／符号。仍要求构建来源一致，不能仅凭相同版本号保证私有 ABI 兼容。IBus 和 Fcitx 插件保持必需且继续做加载冒烟；Fcitx 和 LayerShellQt 许可证随包复制。
