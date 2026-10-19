@@ -60,6 +60,16 @@ def copy_fcitx_licenses(stage: Path, source: Path) -> None:
     shutil.copytree(licenses, stage / "licenses/Fcitx5-Qt", dirs_exist_ok=True)
 
 
+def linux_dependencies(binary: Path, environment: dict[str, str], *,
+                       relocations: bool = False) -> str:
+    command = ["ldd", "-r"] if relocations else ["ldd"]
+    output = run(*command, str(binary), env=environment)
+    if ("=> not found" in output or "undefined symbol:" in output
+            or "version `" in output and "not found" in output):
+        raise RuntimeError(f"Unresolved dependency in {binary}:\n{output}")
+    return output
+
+
 def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
                  extra_plugin_dirs: list[Path]) -> None:
     validate_build_qt(stage, qt)
@@ -86,6 +96,7 @@ def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
     )
     pending = [file for file in stage.rglob("*") if file.is_file()
                and (".so" in file.name or file.parent.name == "bin")]
+    entry_points = [binary for binary in pending if not binary.is_relative_to(library_dir)]
     seen: set[Path] = set()
     while pending:
         binary = pending.pop()
@@ -95,9 +106,7 @@ def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
             if stream.read(4) != b"\x7fELF":
                 continue
         seen.add(binary)
-        output = run("ldd", "-r", str(binary), env=environment)
-        if "=> not found" in output or "undefined symbol:" in output or "version `" in output and "not found" in output:
-            raise RuntimeError(f"Unresolved dependency in {binary}:\n{output}")
+        output = linux_dependencies(binary, environment)
         for name, filename in re.findall(r"^\s*(\S+) => (/\S+)", output, re.MULTILINE):
             if system_library.match(name):
                 continue
@@ -107,6 +116,12 @@ def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
             if not destination.exists():
                 copy_file(Path(filename), destination)
                 pending.append(destination)
+    # Qt's FFmpeg libavutil references RAND_bytes from the sibling SSL stub.
+    # Validate symbols in the executable/plugin's complete load scope; isolated
+    # leaf libraries need not provide every symbol through their own DT_NEEDED.
+    for binary in entry_points:
+        if binary in seen:
+            linux_dependencies(binary, environment, relocations=True)
     launcher = stage / "NekoTune"
     launcher.write_text(
         '#!/bin/sh\nset -eu\n'

@@ -124,7 +124,7 @@ Qt 6.11 的私有头文件使用 Wayland 1.24 新增的 `wl_fixes`，Ubuntu 24.0
 
 打包新增 Wayland QPA、xdg-shell、Wayland 图形／装饰／输入设备插件目录，以及 LayerShellQt／QtWayland 的 ELF 依赖闭包；QtQuick.Effects 已随 QtQuick 目录收集。按窗口调用 API 时不需要设置全局 shell 插件环境变量，也不导入 LayerShellQt 的 QML 模块。后端不链接这些 GUI 依赖。
 
-脚本要求构建 manifest 的 Qt 版本匹配 qmake，复制每个 Qt 库时校验与所选 SDK 文件一致，并执行 `ldd -r` 检查缺失依赖／符号。仍要求构建来源一致，不能仅凭相同版本号保证私有 ABI 兼容。IBus 和 Fcitx 插件保持必需且继续做加载冒烟；Fcitx 和 LayerShellQt 许可证随包复制。
+脚本要求构建 manifest 的 Qt 版本匹配 qmake，复制每个 Qt 库时校验与所选 SDK 文件一致。先用 `ldd` 收集依赖闭包，再对程序及插件入口执行 `ldd -r` 检查缺失符号；Qt FFmpeg 的叶子库可能依赖同一插件加载的 SSL stub，不能单独做符号检查。仍要求构建来源一致，不能仅凭相同版本号保证私有 ABI 兼容。IBus 和 Fcitx 插件保持必需且继续做加载冒烟；Fcitx 和 LayerShellQt 许可证随包复制。
 
 ```sh
 cmake --install build --prefix "$PWD/stage"

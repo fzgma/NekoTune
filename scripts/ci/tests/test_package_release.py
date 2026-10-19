@@ -2,7 +2,11 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -158,6 +162,62 @@ class WallpaperRuntimePackagingTest(unittest.TestCase):
             with patch.object(package_release, "run", return_value="6.10.0"):
                 with self.assertRaisesRegex(RuntimeError, "differs from package Qt"):
                     package_release.validate_build_qt(root, root)
+
+
+@unittest.skipUnless(sys.platform == "linux" and shutil.which("cc") and shutil.which("ldd"),
+                     "Requires a Linux C compiler and ldd")
+class LinuxSymbolScopeTest(unittest.TestCase):
+    def check_bundle(self, *, include_provider: bool) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            native, qt, stage = root / "native", root / "qt", root / "stage"
+            native.mkdir()
+            (stage / "bin").mkdir(parents=True)
+            plugins = qt / "plugins/platforminputcontexts"
+            plugins.mkdir(parents=True)
+            for name in ("fcitx5", "ibus"):
+                (plugins / f"lib{name}platforminputcontextplugin.so").write_bytes(b"plugin")
+
+            def compile_library(name: str, source: str, destination: Path,
+                                libraries: tuple[str, ...] = ()) -> None:
+                source_file = root / f"{name}.c"
+                source_file.write_text(source, encoding="utf-8")
+                subprocess.run(["cc", "-shared", "-fPIC", str(source_file),
+                                f"-L{native}", "-Wl,--no-as-needed", *libraries,
+                                "-o", str(destination)], check=True, capture_output=True)
+
+            compile_library("leaf", "extern int provided(void); int leaf(void) { return provided(); }",
+                            native / "libleaf.so")
+            compile_library("provider", "int provided(void) { return 42; }", native / "libprovider.so")
+            plugin = stage / "plugins/libconsumer.so"
+            plugin.parent.mkdir(parents=True)
+            libraries = ("-lleaf", "-lprovider") if include_provider else ("-lleaf",)
+            compile_library("consumer", "extern int leaf(void); int consumer(void) { return leaf(); }",
+                            plugin, libraries)
+            # Like Qt's libavutil/SSL stub pair, the leaf alone lacks the provider.
+            isolated = subprocess.check_output(["ldd", "-r", str(native / "libleaf.so")],
+                                               text=True, stderr=subprocess.STDOUT)
+            self.assertIn("undefined symbol: provided", isolated)
+            with patch.object(package_release, "validate_build_qt"):
+                if not include_provider:
+                    with self.assertRaisesRegex(RuntimeError, "undefined symbol: provided"):
+                        package_release.bundle_linux(stage, qt, [native], [])
+                    return
+                package_release.bundle_linux(stage, qt, [native], [])
+                # Repackaging a populated stage must keep leaf libraries out of the load scope checks.
+                package_release.bundle_linux(stage, qt, [native], [])
+            self.assertTrue((stage / "lib/libleaf.so").is_file())
+            self.assertTrue((stage / "lib/libprovider.so").is_file())
+            environment = dict(os.environ, LD_LIBRARY_PATH=str(stage / "lib"))
+            subprocess.run([sys.executable, "-c",
+                            "import ctypes, sys; assert ctypes.CDLL(sys.argv[1]).consumer() == 42",
+                            str(plugin)], env=environment, check=True, capture_output=True)
+
+    def test_sibling_provider_resolves_symbols_for_the_plugin(self) -> None:
+        self.check_bundle(include_provider=True)
+
+    def test_missing_provider_still_fails_packaging(self) -> None:
+        self.check_bundle(include_provider=False)
 
 
 if __name__ == "__main__":
