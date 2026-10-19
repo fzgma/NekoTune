@@ -47,6 +47,14 @@ target_link_libraries(nekotune_paths PUBLIC Qt6::Core)
 add_subdirectory(backend)
 add_subdirectory(frontend/qt-qml)
 
+# The Windows development tree keeps Qt's QML imports beside the executable.
+# Without a local qt.conf, Qt resolves its MSYS2 compiled-in prefix to
+# <build>/share/qt6/qml, where the Controls plugin is absent.
+if(WIN32)
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/qt.conf"
+         CONTENT "[Paths]\nQmlImports=qml\n")
+endif()
+
 enable_testing()
 add_subdirectory(tests)
 
