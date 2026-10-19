@@ -37,6 +37,8 @@ NekoTune 使用基于换行分隔的 JSON 协议，通过 Unix domain socket 进
 
 ## 事件
 
+音乐壁纸复用现有 `server.connected` 快照与 `player.* / lyrics.changed` 补丁，不新增 IPC 方法、事件或订阅，也不轮询播放状态。前端本地 `WallpaperManager.audioAnalysis` 返回 `spectrumAvailable: false`、`source: "none"`、空 `bands` 及不可用原因；这不是后端频谱 API。当前两个音频后端均未提供分析数据，见[壁纸说明](wallpaper.md)。
+
 后端会向所有已连接客户端广播事件：
 
 ```json
@@ -173,6 +175,9 @@ Linux MPRIS 的 `Rate` 为只读实际速度，变化发送 `PropertiesChanged`�
 - `player.set_audio_backend`：`{"backend":"ffmpeg"}` 或 `{"backend":"qt"}`，重启生效。
 - `player.set_transition`：`{"crossfade_seconds":3.5}`，范围 0–12，0 关闭淡入淡出但保留 Gapless。
 - `player.set_equalizer`：部分更新 `enabled`、`auto_headroom`、`preamp_db`、`gains`（恰好 10 个数）或 `preset`（`flat` / `bass` / `vocal` / `bright`）。`gains` 与 `preset` 互斥，所有增益范围 −12～+12 dB。
+- `player.set_replay_gain`：部分更新 `mode`（`off` / `track` / `album`）和 `preamp_db`（−12～+12 dB），默认 `off` / `0`。配置持久化，Qt 不支持时仍保留设置。
+- `player.analyze_loudness`：可选 `ids`（1～10000 个正整数歌曲 ID，去重）；省略时分析可用本地曲库，传入空数组或不存在 ID 返回错误。选中的专辑会扩展至全部已入库成员，跳过已具备数据的组。仅允许一个后台任务，响应立即返回进度；不修改原音频，不自动重新启动。
+- `player.cancel_loudness_analysis`：请求取消当前分析；重复取消安全，停止后 `running` 为 false。已经完成的缓存保留。
 
 以上方法返回 `data.audio_settings`；完整播放状态和 `server.connected` 也包含同一字段。保存成功后发布 `player.audio_settings_changed`，多客户端按确认值同步。配置示例：
 
@@ -181,6 +186,14 @@ Linux MPRIS 的 `Rate` 为只读实际速度，变化发送 `PropertiesChanged`�
 ```
 
 实际能力来自运行中的后端，可能因受控回退而不同于保存的偏好；输出采样率为 0 时各频段暂不可用。FFmpeg 当前仅支持原速，`playback_rate_supported` 为 false，不改写已存储的倍速值。手动切歌不使用 Crossfade；预加载不发布 `player.track_changed`，边界到达才提交选择、更新播放次数和歌词。
+
+`audio_settings` 还包含以下响度字段，设置、歌曲切换、后端回退和分析进度均通过 `player.audio_settings_changed` 同步：
+
+```json
+{"replay_gain":{"mode":"track","preamp_db":0},"replay_gain_supported":true,"replay_gain_status":{"gain_db":-4.5,"source":"tag","peak_limited":false},"loudness_analysis":{"running":false,"cancelling":false,"cancelled":false,"completed":0,"total":0,"error":""}}
+```
+
+`source` 为 `off`、`tag`、`analysis`、`missing` 或 `unavailable`。`gain_db` 为选定模式、预增益及峰值余量合成后的 ReplayGain 目标增益，不含 EQ／动态限幅。缺少对应数据时不套用预增益、不回退另一模式，返回 `missing` / `0`；Qt 返回 `unavailable` / `0`。分析 `completed` 为完成或已有数据跳过的文件数，`error` 为最近错误，取消及部分失败时可能小于 `total`。分析分组、−18 LUFS 目标、静音与缓存失效规则见 [音频引擎](audio-engine.md)。
 
 ### `player.audio_outputs` / `player.set_audio_output`
 
@@ -534,3 +547,36 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 - 主题包沿用 `extensions.enable/disable/reload/uninstall`。无 Worker 的主题仍以 `running` 表示已启用，含代码时需要 `trusted: true` 完成首次授权。删除当前主题包先保存默认主题选择；禁用保留选择以便恢复。
 
 前端 `controllers.theme` 暴露 `items`、`selectedId`、`activeId`、`mode`、`isDark`、`tokens`、`background`、`uiSlots`、`busy/error/notice` 等状态。`setMode` 保存本地 `theme_mode`，`selectTheme/importTheme/exportTheme/removeTheme/reset` 走既有扩展管理接口。QML 的 `Theme` 兼容原变量名并新增 `isDark`。格式与示例见 [主题制作](themes.md)。
+
+
+## 听歌历史与统计
+
+记账只由后端确认的播放状态与实际媒体位置驱动，没有客户端上报时长的接口。暂停续播不会创建第二条会话，重复队列项、循环重播和重新点播会创建新的 UUID。播放速度影响媒体位置增长率，`listened_ms` 始终为实际收听毫秒。完整播放要求自然结束且不重复计算的媒体覆盖达到曲目时长的 95%；seek 跳过的进度不计入时长与覆盖。
+
+### `history.list`
+
+参数：`days` 为 `1`、`7` 或 `30`（默认 30，含今天的本地日历日）；`timezone` 为 IANA 时区名（默认后端系统时区，桌面端明确传入自身系统时区）；`search` 为歌名／歌手的字面子串，最多 500 字符；`completed_only` 为布尔值（默认 false）；`limit` 为 1–100（默认 50）；`offset` 为非负整数（默认 0，上限 100000000）。非法类型、范围或时区返回错误。
+
+返回 `items`、`total`、`limit`、`offset`。按 `started_at DESC, id DESC` 排序，各记录包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `id` | 会话 UUID，跨重启稳定 |
+| `song_id`, `song_key`, `queue_id` | 曲库 ID、稳定歌曲资源身份、当时的队列项 ID；队列项 ID 仅在该后端运行期有意义 |
+| `title`, `artist` | 起播时的资料快照，曲库删除后仍保留 |
+| `started_at`, `updated_at` | UTC ISO 8601 毫秒时间；进行中为最近确认时间，结束后为结束时间 |
+| `listened_ms`, `duration_ms` | 实际收听时长与曲目时长 |
+| `completed` | 自然结束且覆盖至少 95% |
+| `end_reason` | 空字符串代表进行中；其他为 `ended`、`skipped`、`replaced`、`removed`、`stopped`、`error`、`shutdown`、`interrupted` |
+
+历史按会话开始日期筛选；跨午夜的会话仍是一条，首页每日统计则分配到实际收听日期。数据库使用 UTC epoch 毫秒。查询不会创建会话或重复增加时长。
+
+### `history.stats`
+
+参数仅需可选 `timezone`。返回 `days`（含今天的近 30 天，每项为 `date: YYYY-MM-DD`、`listened_ms`，没有收听的日期补零）、`week_ms`（当地本周一零时至今）、`top_songs`（近 30 天按实际收听时长降序前五首，含 `song_key`、`song_id`、`title`、`artist`、`plays`、`listened_ms`）、`total_sessions`（全部历史会话数）、`timezone`。`plays` 只计入窗口内有实际收听片段的独立会话。统计在数据库聚合，跨日和夏令时按请求时区的实际边界计算。
+
+### `history.clear`
+
+必须传入 `confirm: true`。删除全部会话及收听片段，成功返回空 `data` 并广播 `history.changed`。保留曲库、歌单、`play_count` 与 `last_played_at`；当前轮次也停止写入历史，直到下一次重新起播，避免清空数据被暂停续播重新生成。界面使用确认弹窗，失败保留重试入口。
+
+`history.changed` 表示历史检查点、会话结束或清空已提交，客户端应合并刷新。每 5 秒和播放边界保存实际收听片段；异常退出仅保留最后成功检查点，重启标记为 `interrupted`，从不补算离线时间。首次启用返回空历史，不将旧播放次数折算为历史时长。

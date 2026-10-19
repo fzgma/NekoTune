@@ -13,8 +13,11 @@ Item {
     property bool connected: true
     property bool running: visible
     property bool showNext: false
+    property bool wrap: false
     property bool outlined: false
     property bool reducedMotion: Theme.reducedMotion
+    property bool animateLineChanges: true
+    property int updateInterval: 16
     property int pixelSize: 18
     property int previewPixelSize: 24
     readonly property string songIdentity: String(song.resource_key || song.song_hash || "")
@@ -34,7 +37,42 @@ Item {
     readonly property var nextLine: lines[activeIndex + 1] || null
     readonly property string nextText: nextLine ? String(nextLine.text || (nextLine.words || []).map(word => word.text).join("")) : ""
     readonly property real shownPosition: clock.shownPosition
+    readonly property bool motionAllowed: animateLineChanges && running && visible && connected && !reducedMotion
+    property var displayedFrame: null
+    property var outgoingFrame: null
+    property real transitionProgress: 1
+    property int transitionDirection: 1
+    implicitHeight: wrap ? currentFrame.implicitHeight : 0
     function t(key) { return translator ? translator.text(key, translator.language) : key }
+
+    function finishTransition() {
+        lineTransition.stop()
+        transitionProgress = 1
+        outgoingFrame = null
+    }
+    function synchronizeLine() {
+        const previous = displayedFrame
+        displayedFrame = {song: songIdentity, document: document, index: activeIndex,
+                          lyric: currentLine, nextText: nextText}
+        if (previous && previous.song === songIdentity && previous.document === document
+                && previous.index === activeIndex) return
+        finishTransition()
+        if (!motionAllowed || !previous || previous.song !== songIdentity
+                || previous.document !== document || activeIndex < 0) return
+        outgoingFrame = {lyric: previous.lyric, nextText: previous.nextText,
+                         index: previous.index, position: shownPosition}
+        transitionDirection = activeIndex > previous.index ? 1 : -1
+        lineTransition.restart()
+    }
+    // Coalesce dependent bindings so a frame always contains a matching lyric and preview.
+    onActiveIndexChanged: Qt.callLater(synchronizeLine)
+    onCurrentLineChanged: Qt.callLater(synchronizeLine)
+    onNextTextChanged: Qt.callLater(synchronizeLine)
+    onSongIdentityChanged: finishTransition()
+    onDocumentChanged: finishTransition()
+    onConnectedChanged: if (!connected) finishTransition()
+    onMotionAllowedChanged: if (!motionAllowed) finishTransition()
+    Component.onCompleted: synchronizeLine()
 
     LyricsClock {
         id: clock
@@ -44,41 +82,90 @@ Item {
         playing: root.playing && root.connected
         running: root.running
         reducedMotion: root.reducedMotion
+        updateInterval: root.updateInterval
     }
-    LyricLine {
-        id: currentLine
-        objectName: "compactCurrentLine"
-        width: parent.width
-        height: root.showNext ? parent.height * 0.57 : parent.height
+    component LyricFrame: Item {
+        id: frame
+        required property var lyric
+        required property string nextText
+        required property int activeIndex
+        required property real position
+        property bool outgoing: false
+        readonly property string fullText: line.fullText
+        implicitHeight: line.implicitHeight + (nextLabel.visible ? nextLabel.implicitHeight + 12 : 0)
+        LyricLine {
+            id: line
+            objectName: frame.outgoing ? "compactOutgoingLine" : "compactCurrentLine"
+            lineIndex: frame.outgoing ? -1 : 0
+            width: parent.width
+            height: root.wrap ? implicitHeight : root.showNext ? parent.height * 0.57 : parent.height
+            lyric: frame.lyric
+            position: frame.position
+            wrap: root.wrap
+            horizontalPadding: 2
+            pixelSize: root.pixelSize
+            outlined: root.outlined
+            reducedMotion: root.reducedMotion || frame.outgoing
+            activeColor: frame.activeIndex >= 0 ? Theme.accentPrimary : root.outlined ? "#f5f1fa" : Theme.textSecondary
+            inactiveColor: root.outlined ? "#f5f1fa" : Theme.textSecondary
+        }
+        Text {
+            id: nextLabel
+            objectName: frame.outgoing ? "compactOutgoingNextLine" : "compactNextLine"
+            anchors.top: line.bottom
+            anchors.topMargin: root.wrap ? 12 : 0
+            width: parent.width
+            height: root.wrap ? implicitHeight : root.showNext ? parent.height * 0.43 : 0
+            visible: root.showNext && frame.nextText.length > 0
+            text: frame.nextText
+            textFormat: Text.PlainText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.previewPixelSize
+            wrapMode: root.wrap ? Text.Wrap : Text.NoWrap
+            elide: root.wrap ? Text.ElideNone : Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            color: root.outlined ? "#f5f1fa" : Theme.textSecondary
+            style: root.outlined ? Text.Outline : Text.Normal
+            styleColor: "#18121f"
+        }
+    }
+    LyricFrame {
+        id: currentFrame
+        objectName: "compactCurrentFrame"
+        width: root.width; height: root.height
         lyric: root.currentLine
+        nextText: root.nextText
+        activeIndex: root.activeIndex
         position: clock.shownPosition
-        wrap: false
-        horizontalPadding: 2
-        pixelSize: root.pixelSize
-        outlined: root.outlined
-        reducedMotion: root.reducedMotion
-        activeColor: root.activeIndex >= 0 ? Theme.accentPrimary : root.outlined ? "#f5f1fa" : Theme.textSecondary
-        inactiveColor: root.outlined ? "#f5f1fa" : Theme.textSecondary
+        opacity: root.transitionProgress
+        transform: Translate { y: root.transitionDirection * 14 * (1 - root.transitionProgress) }
     }
-    Text {
-        objectName: "compactNextLine"
-        anchors.top: currentLine.bottom
-        width: parent.width
-        height: root.showNext ? parent.height * 0.43 : 0
-        visible: root.showNext && root.nextText.length > 0
-        text: root.nextText
-        textFormat: Text.PlainText
-        font.family: Theme.fontFamily
-        font.pixelSize: root.previewPixelSize
-        elide: Text.ElideRight
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        color: root.outlined ? "#f5f1fa" : Theme.textSecondary
-        style: root.outlined ? Text.Outline : Text.Normal
-        styleColor: "#18121f"
+    Loader {
+        objectName: "compactOutgoingFrame"
+        width: root.width; height: root.height
+        active: root.outgoingFrame !== null
+        opacity: 1 - root.transitionProgress
+        transform: Translate { y: -root.transitionDirection * 14 * root.transitionProgress }
+        sourceComponent: LyricFrame {
+            outgoing: true
+            lyric: root.outgoingFrame ? root.outgoingFrame.lyric : ({})
+            nextText: root.outgoingFrame ? root.outgoingFrame.nextText : ""
+            activeIndex: root.outgoingFrame ? root.outgoingFrame.index : -1
+            position: root.outgoingFrame ? root.outgoingFrame.position : 0
+        }
+    }
+    NumberAnimation {
+        id: lineTransition
+        objectName: "compactLineTransition"
+        target: root; property: "transitionProgress"
+        from: 0; to: 1
+        duration: Theme.durationSmooth
+        easing.type: Easing.OutCubic
+        onFinished: root.outgoingFrame = null
     }
     HoverHandler { id: hover }
     ToolTip.visible: hover.hovered
     ToolTip.delay: 600
-    ToolTip.text: currentLine.fullText + (root.showNext && root.nextText ? "\n" + root.nextText : "")
+    ToolTip.text: currentFrame.fullText + (root.showNext && root.nextText ? "\n" + root.nextText : "")
 }

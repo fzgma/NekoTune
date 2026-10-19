@@ -11,7 +11,7 @@ class FFmpegPlaybackBackend final : public IPlaybackBackend {
     FFmpegPlaybackBackend();
     ~FFmpegPlaybackBackend() override;
     QString backendName() const override { return QStringLiteral("ffmpeg"); }
-    BackendCapabilities backendCapabilities() const override { return {true, true, true}; }
+    BackendCapabilities backendCapabilities() const override { return {true, true, true, true}; }
     void setSource(const QUrl &url) override;
     QUrl source() const override { return m_source; }
     void play() override;
@@ -41,6 +41,9 @@ class FFmpegPlaybackBackend final : public IPlaybackBackend {
     void authorizeTransition(quint64 token) override;
     void finishAfterCurrent() override;
     void setEqualizer(const EqualizerSettings &settings) override;
+    void setReplayGain(const ReplayGainSettings &settings) override;
+    ReplayGainData replayGainData() const override { return m_replayGainData; }
+    void updateReplayGainData(const QUrl &source, const ReplayGainData &data) override;
     int outputSampleRate() const override { return m_sampleRate; }
 
   private:
@@ -51,6 +54,7 @@ class FFmpegPlaybackBackend final : public IPlaybackBackend {
     PcmOutputWorker *m_worker = nullptr;
     QUrl m_source;
     AudioMetadata m_metadata;
+    ReplayGainData m_replayGainData;
     qint64 m_position = 0, m_duration = 0;
     quint64 m_generation = 0;
     double m_volume = .8;

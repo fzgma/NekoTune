@@ -82,6 +82,13 @@ class PlaybackBackendSupervisor final : public IPlaybackBackend {
         m_active->setEqualizer(settings);
     }
     int outputSampleRate() const override { return m_active->outputSampleRate(); }
+    void setReplayGain(const ReplayGainSettings &settings) override {
+        m_replayGain = settings; m_active->setReplayGain(settings);
+    }
+    ReplayGainData replayGainData() const override { return m_active->replayGainData(); }
+    void updateReplayGainData(const QUrl &source, const ReplayGainData &data) override {
+        m_active->updateReplayGainData(source, data);
+    }
 
   private:
     void install(std::unique_ptr<IPlaybackBackend> backend, const QUrl &keep = {});
@@ -92,6 +99,7 @@ class PlaybackBackendSupervisor final : public IPlaybackBackend {
     std::unique_ptr<IPlaybackBackend> m_active;
     QSet<QUrl> m_sources;
     EqualizerSettings m_equalizer;
+    ReplayGainSettings m_replayGain;
     double m_volume = .8, m_rate = 1;
     bool m_playIntent = false, m_triedFallback = false;
     quint64 m_generation = 0;

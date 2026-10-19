@@ -8,8 +8,16 @@ import os from 'node:os';
 import path from 'node:path';
 
 const stage = path.resolve(process.argv[2]);
-async function checkDistribution(backendOnly, inputMethod = '') {
-  const label = backendOnly ? 'Backend' : `Desktop${inputMethod ? ' (' + inputMethod + ')' : ''}`;
+const nativeWayland = process.argv.includes('--wayland');
+const wallpaperRuntime = JSON.parse(await fs.readFile(path.join(stage, 'wallpaper-runtime.json'), 'utf8'));
+if (wallpaperRuntime.backend === 'wayland') {
+  for (const file of ['plugins/wayland-shell-integration/libxdg-shell.so', 'qml/QtQuick/Effects/qmldir'])
+    await fs.access(path.join(stage, file));
+}
+if (nativeWayland) assert.equal(wallpaperRuntime.backend, 'wayland');
+async function checkDistribution(backendOnly, inputMethod = '', standalone = false) {
+  const label = standalone ? 'Standalone frontend + external backend'
+    : backendOnly ? 'Backend' : `Desktop${inputMethod ? ' (' + inputMethod + ')' : ''}`;
   const inputPlugin = inputMethod ? await fs.realpath(path.join(stage, 'plugins/platforminputcontexts',
     `lib${inputMethod === 'fcitx' ? 'fcitx5' : 'ibus'}platforminputcontextplugin.so`)) : '';
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nekotune-release-'));
@@ -27,7 +35,7 @@ async function checkDistribution(backendOnly, inputMethod = '') {
     NEKOTUNE_DB_PATH: path.join(root, 'player.sqlite3'),
     XDG_CONFIG_HOME: path.join(root, 'config'), XDG_DATA_HOME: path.join(root, 'data'),
     XDG_CACHE_HOME: path.join(root, 'cache'),
-    QT_QPA_PLATFORM: process.platform === 'win32' ? 'windows' : 'offscreen',
+    QT_QPA_PLATFORM: process.platform === 'win32' ? 'windows' : nativeWayland && (!backendOnly || standalone) ? 'wayland' : 'offscreen',
     QT_QUICK_BACKEND: 'software',
     QT_FORCE_STDERR_LOGGING: '1',
     PATH: process.platform === 'win32'
@@ -44,7 +52,16 @@ async function checkDistribution(backendOnly, inputMethod = '') {
     ? path.join(stage, 'bin', process.platform === 'win32' ? 'nekotune-backend.exe' : 'nekotune-backend')
     : process.platform === 'win32' ? path.join(stage, 'bin', 'nekotune.exe') : path.join(stage, 'NekoTune');
   environment.NEKOTUNE_SAFE_MODE = '1';
-  const child = spawn(executable, backendOnly ? [] : ['--safe-mode'], { env: environment, windowsHide: true });
+  const testWallpaper = nativeWayland && (!backendOnly || standalone);
+  if (testWallpaper) {
+    await fs.mkdir(path.join(root, 'config'), { recursive: true });
+    await fs.writeFile(path.join(root, 'config/settings.json'), JSON.stringify({
+      wallpaper: { enabled: true, autoRestore: true },
+    }));
+    environment.NEKOTUNE_SAFE_MODE = '0';
+    delete environment.QT_QUICK_BACKEND;
+  }
+  const child = spawn(executable, backendOnly || testWallpaper ? [] : ['--safe-mode'], { env: environment, windowsHide: true });
   let output = '', exited = false, exitStatus = 'running';
   const trace = [];
   const diagnostics = () => `${label}: ${exitStatus}\nIPC: ${trace.join('\n')}\n${output}`;
@@ -52,6 +69,15 @@ async function checkDistribution(backendOnly, inputMethod = '') {
   child.stderr.on('data', bytes => { output += bytes; });
   child.on('exit', (code, signal) => { exited = true; exitStatus = `exit=${code}, signal=${signal}`; });
   child.on('error', error => { output += error.stack; exited = true; exitStatus = 'spawn failed'; });
+  let frontend, frontendExited = false;
+  if (standalone) {
+    frontend = spawn(path.join(stage, 'bin', process.platform === 'win32' ? 'nekotune-qt-qml.exe' : 'nekotune-qt-qml'),
+      testWallpaper ? [] : ['--safe-mode'], { env: environment, windowsHide: true });
+    frontend.stdout.on('data', bytes => { output += bytes; });
+    frontend.stderr.on('data', bytes => { output += bytes; });
+    frontend.on('exit', () => { frontendExited = true; });
+    frontend.on('error', error => { output += error.stack; frontendExited = true; });
+  }
   let socket;
   try {
     const deadline = Date.now() + 45_000;
@@ -130,8 +156,20 @@ async function checkDistribution(backendOnly, inputMethod = '') {
       assert.ok(output.includes(`"${inputPlugin}" loaded library`),
         `Packaged ${inputMethod} input context was not loaded:\n${diagnostics()}`);
     }
+    if (testWallpaper) assert.match(output, /NekoTune wallpaper mapped on/, diagnostics());
+    if (standalone) {
+      assert.ok(!frontendExited, `Standalone frontend exited early:\n${diagnostics()}`);
+      frontend.kill();
+      await Promise.race([
+        new Promise(resolve => frontend.once('exit', resolve)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Standalone frontend did not exit')), 5000)),
+      ]);
+      // The external backend and its IPC remain alive after frontend removal.
+      assert.ok(await call('player.status'));
+    }
     console.log(`Installed ${label}, SQLite, IPC, bundled Node and theme import/export passed.`);
   } finally {
+    if (frontend && !frontendExited) frontend.kill('SIGKILL');
     socket?.destroy();
     child.kill();
     if (!exited) await Promise.race([
@@ -144,10 +182,10 @@ async function checkDistribution(backendOnly, inputMethod = '') {
 }
 
 const failures = [];
-const checks = process.platform === 'linux' ? [[true, ''], [false, 'fcitx'], [false, 'ibus']]
-  : [[true, ''], [false, '']];
-for (const [backendOnly, inputMethod] of checks) {
-  try { await checkDistribution(backendOnly, inputMethod); }
+const checks = process.platform === 'linux' ? [[true, ''], [false, 'fcitx'], [false, 'ibus'], [true, '', true]]
+  : [[true, ''], [false, ''], [true, '', true]];
+for (const [backendOnly, inputMethod, standalone] of checks) {
+  try { await checkDistribution(backendOnly, inputMethod, standalone); }
   catch (error) { console.error(error); failures.push(error); }
 }
 if (failures.length) throw new AggregateError(failures, 'Installed distribution validation failed');

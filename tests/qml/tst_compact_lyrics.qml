@@ -124,5 +124,114 @@ Item {
             lyrics.visible = false
             verify(!findChild(lyrics, "lyricsFrameTimer").running)
         }
+        function test_wrappingIsOptInAndReflowsBothLines() {
+            lyrics.width = 320
+            lyrics.pixelSize = 36
+            lyrics.previewPixelSize = 22
+            lyrics.lyrics = {track_id: "track-a", state: "ready", document: {lines: [
+                {time_ms: 1000, text: "A long lyric line to read across several lines on a portrait screen"},
+                {time_ms: 3000, text: "Another long preview line that should wrap rather than disappear"}
+            ]}}
+            lyrics.position = 1000
+            const current = findChild(lyrics, "lyricText0")
+            const next = findChild(lyrics, "compactNextLine")
+            compare(current.wrapMode, Text.NoWrap)
+            compare(next.wrapMode, Text.NoWrap)
+            lyrics.wrap = true
+            waitForRendering(lyrics)
+            verify(current.lineCount > 1)
+            verify(next.lineCount > 1)
+            const narrowHeight = lyrics.implicitHeight
+            lyrics.width = 900
+            waitForRendering(lyrics)
+            verify(lyrics.implicitHeight < narrowHeight)
+            const words = []
+            for (let i = 0; i < 12; ++i) words.push({time_ms: 1000 + i * 200, duration_ms: 200, text: "歌词 "})
+            lyrics.width = 320
+            lyrics.lyrics = {track_id: "track-a", document: {lines: [{time_ms: 1000, words: words}]}}
+            const first = findChild(lyrics, "krcWord0_0")
+            const last = findChild(lyrics, "krcWord0_11")
+            tryVerify(() => last.y > first.y)
+            compare(lyrics.activeIndex, 0)
+        }
+        function settleFirstLine() {
+            lyrics.position = 1500
+            wait(0)
+            tryCompare(findChild(lyrics, "compactLineTransition"), "running", false)
+        }
+        function test_lineChangeCrossfadesBothRows() {
+            settleFirstLine()
+            const animation = findChild(lyrics, "compactLineTransition")
+            const current = findChild(lyrics, "compactCurrentFrame")
+            const outgoing = findChild(lyrics, "compactOutgoingFrame")
+            lyrics.position = 3000
+            tryCompare(animation, "running", true)
+            verify(current.opacity < 1)
+            verify(outgoing.opacity > 0)
+            compare(findChild(lyrics, "compactCurrentLine").fullText, lines[1].text)
+            compare(findChild(lyrics, "compactOutgoingLine").fullText, lines[0].text)
+            compare(findChild(lyrics, "compactOutgoingNextLine").text, lines[1].text)
+            compare(findChild(lyrics, "compactNextLine").text, lines[2].text)
+            compare(lyrics.transitionDirection, 1)
+            tryCompare(animation, "running", false)
+            compare(current.opacity, 1)
+            compare(outgoing.active, false)
+            lyrics.position = 3200
+            wait(0)
+            compare(animation.running, false)
+        }
+        function test_rapidSeekUsesLatestLineAndReversesDirection() {
+            settleFirstLine()
+            const animation = findChild(lyrics, "compactLineTransition")
+            lyrics.position = 3000
+            tryCompare(animation, "running", true)
+            lyrics.position = 5000
+            tryVerify(() => lyrics.displayedFrame.index === 2)
+            compare(findChild(lyrics, "compactOutgoingLine").fullText, lines[1].text)
+            lyrics.position = 1500
+            tryVerify(() => lyrics.displayedFrame.index === 0)
+            compare(lyrics.transitionDirection, -1)
+            compare(findChild(lyrics, "compactCurrentLine").fullText, lines[0].text)
+            tryCompare(animation, "running", false)
+            compare(findChild(lyrics, "compactOutgoingFrame").active, false)
+            compare(findChild(lyrics, "krcWord0_0").progress, 0.5)
+        }
+        function test_disablingMotionFinishesTransition_data() {
+            return [{tag: "reduced-motion", property: "reducedMotion", value: true},
+                    {tag: "disabled", property: "animateLineChanges", value: false},
+                    {tag: "suspended", property: "running", value: false},
+                    {tag: "hidden", property: "visible", value: false}]
+        }
+        function test_disablingMotionFinishesTransition(data) {
+            settleFirstLine()
+            const animation = findChild(lyrics, "compactLineTransition")
+            lyrics.position = 3000
+            tryCompare(animation, "running", true)
+            lyrics[data.property] = data.value
+            compare(animation.running, false)
+            compare(findChild(lyrics, "compactCurrentFrame").opacity, 1)
+            compare(findChild(lyrics, "compactOutgoingFrame").active, false)
+            lyrics.position = 5000
+            wait(0)
+            compare(animation.running, false)
+            compare(findChild(lyrics, "compactCurrentLine").fullText, lines[2].text)
+        }
+        function test_trackAndDocumentChangesClearOutgoingLyrics_data() {
+            return [{tag: "track"}, {tag: "disconnect"}, {tag: "document"}]
+        }
+        function test_trackAndDocumentChangesClearOutgoingLyrics(data) {
+            settleFirstLine()
+            const animation = findChild(lyrics, "compactLineTransition")
+            lyrics.position = 3000
+            tryCompare(animation, "running", true)
+            if (data.tag === "track") lyrics.song = {resource_key: "track-b"}
+            else if (data.tag === "disconnect") lyrics.connected = false
+            else lyrics.lyrics = {track_id: "track-a", document: {lines: [{time_ms: 0, text: "replacement"}]}}
+            compare(animation.running, false)
+            compare(findChild(lyrics, "compactOutgoingFrame").active, false)
+            wait(0)
+            compare(animation.running, false)
+            verify(findChild(lyrics, "compactCurrentLine").fullText !== lines[1].text)
+        }
     }
 }

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 
 // The backend supplies one canonical artwork URL for this song.
 // Render the local placeholder underneath the asynchronous image.
@@ -13,6 +14,7 @@ Item {
     property string coverUrl: ""
     property string playbackState: "stopped"
     property real maxDimension: 280
+    property real decodeScale: Screen.devicePixelRatio
     property color lavenderColor: Theme.accentPrimary
     property color roseColor: Theme.accentSecondary
 
@@ -51,6 +53,7 @@ Item {
         Image {
             anchors.fill: parent
             source: "qrc:/artwork/default-cover.png"
+            sourceSize: Qt.size(Math.ceil(coverCard.width * root.decodeScale), Math.ceil(coverCard.height * root.decodeScale))
             fillMode: Image.PreserveAspectCrop
             smooth: true
             mipmap: true
@@ -60,6 +63,7 @@ Item {
         Image {
             anchors.fill: parent
             source: root.hasSong ? root.coverUrl : ""
+            sourceSize: Qt.size(Math.ceil(coverCard.width * root.decodeScale), Math.ceil(coverCard.height * root.decodeScale))
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             smooth: true

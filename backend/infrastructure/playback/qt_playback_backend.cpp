@@ -37,10 +37,13 @@ QtPlaybackBackend::QtPlaybackBackend() {
     connect(&m_player, &QMediaPlayer::mediaStatusChanged, this, [this](auto status) {
         if (status == QMediaPlayer::EndOfMedia)
             emit ended();
-        else if (status == QMediaPlayer::LoadingMedia)
+        else if (status == QMediaPlayer::LoadingMedia || status == QMediaPlayer::StalledMedia)
             emit stateChanged(PlayerState::Loading);
-        else if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia)
+        else if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia) {
             emit metadataChanged();
+            if (m_player.playbackState() == QMediaPlayer::PlayingState)
+                emit stateChanged(PlayerState::Playing);
+        }
     });
     connect(&m_player, &QMediaPlayer::positionChanged, this, &IPlaybackBackend::positionChanged);
     connect(&m_player, &QMediaPlayer::positionChanged, this, &QtPlaybackBackend::confirmSeek);

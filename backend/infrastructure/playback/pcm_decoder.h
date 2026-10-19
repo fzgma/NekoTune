@@ -17,6 +17,7 @@ struct DecodedAudioInfo {
     bool fallbackEligible = false;
     QString error;
     AudioMetadata metadata;
+    ReplayGainData replayGain;
 };
 // One decoder owns all FFmpeg input state. Native-rate stereo float samples are
 // buffered so the render side can preserve one resampler across gapless sources.
@@ -30,6 +31,7 @@ class PcmDecoder final {
     size_t available() const; // stereo frames
     size_t read(float *destination, size_t frames);
     void cancel();
+    void updateReplayGainData(const ReplayGainData &analysis);
     const QUrl source;
 
   private:
@@ -41,6 +43,7 @@ class PcmDecoder final {
     mutable std::mutex m_mutex;
     std::condition_variable m_space;
     DecodedAudioInfo m_info;
+    std::optional<ReplayGainData> m_analysis;
     std::deque<std::vector<float>> m_blocks;
     size_t m_offset = 0, m_samples = 0;
     const size_t m_capacity;

@@ -8,6 +8,9 @@ Rectangle {
     required property var translator
     readonly property var settings: controller ? (controller.audioSettings || {}) : ({})
     readonly property var eq: settings.equalizer || ({})
+    readonly property var replayGain: settings.replay_gain || ({})
+    readonly property var replayStatus: settings.replay_gain_status || ({})
+    readonly property var analysis: settings.loudness_analysis || ({})
     readonly property var gains: eq.gains || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     property var pendingGains: null
     readonly property var shownGains: pendingGains || gains
@@ -91,6 +94,71 @@ Rectangle {
         Label {
             Layout.fillWidth: true; visible: !root.settings.equalizer_supported
             text: root.t("audio_eq_unavailable"); color: Theme.textMuted; wrapMode: Text.WordWrap
+        }
+        Label { text: root.t("audio_replay_gain"); color: Theme.textPrimary; font.pixelSize: Theme.fontDialogTitle }
+        RowLayout {
+            Layout.fillWidth: true
+            Label { Layout.fillWidth: true; text: root.t("audio_replay_mode"); color: Theme.textSecondary }
+            ComboBox {
+                objectName: "audioReplayGainMode"
+                enabled: Boolean(root.settings.replay_gain_supported)
+                model: [root.t("audio_replay_off"), root.t("audio_replay_track"), root.t("audio_replay_album")]
+                currentIndex: root.replayGain.mode === "track" ? 1 : root.replayGain.mode === "album" ? 2 : 0
+                onActivated: if (root.controller) root.controller.setReplayGain({mode: ["off", "track", "album"][currentIndex]})
+                Accessible.name: root.t("audio_replay_mode")
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            enabled: Boolean(root.settings.replay_gain_supported) && root.replayGain.mode !== "off"
+            Label { text: root.t("audio_eq_preamp"); color: Theme.textSecondary }
+            Slider {
+                id: replayPreamp
+                objectName: "audioReplayGainPreamp"
+                Layout.fillWidth: true; from: -12; to: 12; stepSize: 0.5
+                value: root.replayGain.preamp_db || 0
+                onMoved: replayTimer.restart()
+                Accessible.name: root.t("audio_replay_gain") + " " + root.t("audio_eq_preamp")
+            }
+            Label { text: replayPreamp.value.toFixed(1) + " dB"; color: Theme.textSecondary }
+            Timer { id: replayTimer; interval: 50; onTriggered: if (root.controller) root.controller.setReplayGain({preamp_db: replayPreamp.value}) }
+        }
+        Label {
+            objectName: "audioReplayGainStatus"
+            Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.textMuted
+            text: root.t("audio_replay_source_" + (root.settings.replay_gain_supported ? (root.replayStatus.source || "off") : "unavailable"))
+                  + " · " + Number(root.replayStatus.gain_db || 0).toFixed(1) + " dB"
+                  + (root.replayStatus.peak_limited ? " · " + root.t("audio_replay_protected") : "")
+        }
+        Label {
+            Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.textMuted
+            text: root.t("audio_replay_hint")
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            Button {
+                objectName: "audioAnalyzeLoudness"
+                text: root.t("audio_replay_analyze"); enabled: !root.analysis.running
+                onClicked: if (root.controller) root.controller.analyzeLoudness()
+                Accessible.name: text
+            }
+            Button {
+                objectName: "audioCancelLoudness"
+                visible: Boolean(root.analysis.running); enabled: !root.analysis.cancelling
+                text: root.t("audio_replay_cancel")
+                onClicked: if (root.controller) root.controller.cancelLoudnessAnalysis()
+                Accessible.name: text
+            }
+            Label {
+                Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.textSecondary
+                visible: Number(root.analysis.total || 0) > 0
+                text: (root.analysis.cancelling ? root.t("audio_replay_cancelling") : root.analysis.running ? root.t("audio_replay_running") : root.analysis.cancelled ? root.t("audio_replay_cancelled") : root.t("audio_replay_finished"))
+                      + " " + (root.analysis.completed || 0) + "/" + (root.analysis.total || 0)
+            }
+        }
+        Label {
+            Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.textSecondary
+            visible: Boolean(root.analysis.error); text: root.analysis.error || ""
         }
         CheckBox {
             objectName: "audioEqualizerEnabled"

@@ -1,9 +1,11 @@
 """Regression coverage for Linux input method deployment."""
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 spec = importlib.util.spec_from_file_location(
@@ -59,7 +61,7 @@ class LinuxInputMethodPackagingTest(unittest.TestCase):
             ).exists()
         )
         self.assertTrue((deployed / "platforms/libqxcb.so").exists())
-        self.assertFalse((deployed / "platforms/libqwayland.so").exists())
+        self.assertTrue((deployed / "platforms/libqwayland.so").exists())
         self.assertTrue((deployed / "sqldrivers/libqsqlite.so").exists())
         self.assertFalse((deployed / "sqldrivers/libqsqlmysql.so").exists())
 
@@ -118,6 +120,44 @@ class AudioRuntimePackagingTest(unittest.TestCase):
                 plugin.unlink()
                 with self.assertRaisesRegex(RuntimeError, "fallback plugin missing"):
                     package_release.validate_audio_runtime(stage, platform)
+
+
+class WallpaperRuntimePackagingTest(unittest.TestCase):
+    def test_wayland_dependencies_are_required_only_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            manifest = stage / "wallpaper-runtime.json"
+            manifest.write_text(json.dumps({"backend": "disabled", "qt": "6.11.2"}))
+            package_release.validate_wallpaper_runtime(stage)
+            manifest.write_text(json.dumps({"backend": "wayland", "qt": "6.11.2"}))
+            files = ["lib/libLayerShellQtInterface.so.6", "lib/libQt6WaylandClient.so.6",
+                     "plugins/platforms/libqwayland.so", "plugins/wayland-shell-integration/libxdg-shell.so",
+                     "plugins/wayland-graphics-integration-client/libqt-plugin-wayland-egl.so",
+                     "qml/QtQuick/Effects/qmldir"]
+            for filename in files:
+                with self.assertRaisesRegex(RuntimeError, "Incomplete Wayland"):
+                    package_release.validate_wallpaper_runtime(stage)
+                path = stage / filename
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"runtime")
+            package_release.validate_wallpaper_runtime(stage)
+
+    def test_mixed_qt_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            expected, actual = root / "qt.so", root / "system.so"
+            expected.write_bytes(b"release Qt")
+            actual.write_bytes(b"system Qt")
+            with self.assertRaisesRegex(RuntimeError, "Mixed Qt ABI"):
+                package_release.validate_qt_library(actual, expected)
+            actual.write_bytes(expected.read_bytes())
+            package_release.validate_qt_library(actual, expected)
+            (root / "wallpaper-runtime.json").write_text(json.dumps({"backend": "wayland", "qt": "6.11.2"}))
+            (root / "bin").mkdir()
+            (root / "bin/qmake").touch()
+            with patch.object(package_release, "run", return_value="6.10.0"):
+                with self.assertRaisesRegex(RuntimeError, "differs from package Qt"):
+                    package_release.validate_build_qt(root, root)
 
 
 if __name__ == "__main__":

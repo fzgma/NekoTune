@@ -13,6 +13,7 @@ target_include_directories(nekotune_domain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nekotune_domain PUBLIC Qt6::Core ZLIB::ZLIB)
 
 add_library(nekotune_storage STATIC
+    storage/listening_history_repository.cpp
     storage/database_session.cpp
     storage/playlist_repository.cpp
     storage/queue_repository.cpp
@@ -35,6 +36,7 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/credentials/credential_store.cpp
     infrastructure/kugou/kugou_account_session.cpp
     infrastructure/library/audio_duration.cpp
+    infrastructure/library/loudness_analysis.cpp
     infrastructure/library/audio_reference.cpp
     infrastructure/library/import_executor.cpp
     infrastructure/library/music_directory.cpp
@@ -65,6 +67,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 add_library(nekotune_application STATIC
+    application/playback/listening_history_service.cpp
     application/extensions/extension_service.h
     application/extensions/music_service.cpp
     application/ai_service.cpp
@@ -86,6 +89,7 @@ add_library(nekotune_application STATIC
 target_link_libraries(nekotune_application PUBLIC nekotune_domain)
 
 add_library(nekotune_ipc STATIC
+    ipc/api/history_api.cpp
     ipc/api/extensions_api.cpp
     ipc/api/music_api.cpp
     ipc/ipc_router.cpp

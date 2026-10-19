@@ -10,6 +10,19 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 namespace nekotune {
+void PcmGainEnvelope::setGain(double db, int sampleRate, bool immediate) {
+    const double value = std::pow(10.0, std::clamp(db, -120.0, 60.0) / 20);
+    if (immediate) { current = target = value; remaining = 0; return; }
+    if (target == value) return;
+    target = value;
+    remaining = std::max(1, sampleRate / 50);
+    step = (target - current) / remaining;
+}
+float PcmGainEnvelope::next() {
+    if (remaining && --remaining == 0) current = target;
+    else if (remaining) current += step;
+    return float(current);
+}
 struct PcmDsp::Impl {
     AVFilterGraph *graph = avfilter_graph_alloc();
     AVFilterContext *source = nullptr, *sink = nullptr, *volume = nullptr;
@@ -135,6 +148,7 @@ void PcmDsp::setSettings(const EqualizerSettings &settings) {
 QString PcmDsp::error() const { return d->problem; }
 std::vector<float> PcmDsp::process(std::span<const float> samples) {
     std::vector<float> output;
+    if (samples.size() % 2) { d->problem = "Incomplete stereo DSP frame"; return output; }
     if (!d->problem.isEmpty())
         return output;
     size_t offset = 0;

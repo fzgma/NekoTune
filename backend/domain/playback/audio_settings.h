@@ -1,5 +1,6 @@
 #pragma once
 #include "domain/result.h"
+#include "domain/playback/replay_gain.h"
 #include <QString>
 #include <array>
 #include <cmath>
@@ -11,6 +12,7 @@ struct BackendCapabilities {
     bool gapless = false;
     bool crossfade = false;
     bool equalizer = false;
+    bool replayGain = false;
     bool operator==(const BackendCapabilities &) const = default;
 };
 struct EqualizerSettings {
@@ -24,9 +26,14 @@ struct AudioSettings {
     QString backend = QStringLiteral("ffmpeg");
     double crossfadeSeconds = 0;
     EqualizerSettings equalizer;
+    ReplayGainSettings replayGain;
     bool operator==(const AudioSettings &) const = default;
 };
 inline Result<void> validateAudioSettings(const AudioSettings &settings) {
+    if (settings.replayGain.mode != "off" && settings.replayGain.mode != "track" && settings.replayGain.mode != "album")
+        return failure("ReplayGain mode must be off, track or album");
+    if (!std::isfinite(settings.replayGain.preampDb) || std::abs(settings.replayGain.preampDb) > 12)
+        return failure("ReplayGain preamp_db must be between -12 and 12");
     if (settings.backend != "ffmpeg" && settings.backend != "qt")
         return failure("backend must be ffmpeg or qt");
     if (!std::isfinite(settings.crossfadeSeconds) || settings.crossfadeSeconds < 0 || settings.crossfadeSeconds > 12)

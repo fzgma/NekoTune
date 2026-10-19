@@ -49,6 +49,9 @@ class PlaybackController final : public FeatureController {
     Q_INVOKABLE void setAudioBackend(const QString &backend) { send("player.set_audio_backend", {{"backend", backend}}); }
     Q_INVOKABLE void setCrossfade(double seconds) { send("player.set_transition", {{"crossfade_seconds", seconds}}); }
     Q_INVOKABLE void setEqualizer(const QVariantMap &settings) { send("player.set_equalizer", QJsonObject::fromVariantMap(settings)); }
+    Q_INVOKABLE void setReplayGain(const QVariantMap &settings) { send("player.set_replay_gain", QJsonObject::fromVariantMap(settings)); }
+    Q_INVOKABLE void analyzeLoudness() { send("player.analyze_loudness"); }
+    Q_INVOKABLE void cancelLoudnessAnalysis() { send("player.cancel_loudness_analysis"); }
     /// Mute is a normal zero-volume request, not a separate backend playback state.
     /// Unmuting restores the last observed positive value, with the default as a fallback.
     /// Confirmation still arrives through the ordinary volume event path.

@@ -6,7 +6,19 @@ function(nekotune_add_qt_test)
 endfunction()
 
 set(CMAKE_WIN32_EXECUTABLE OFF)
+add_executable(nekotune_replay_gain_test replay_gain_test.cpp)
+target_link_libraries(nekotune_replay_gain_test PRIVATE nekotune_core Qt6::Test PkgConfig::FFMPEG)
+target_compile_definitions(nekotune_replay_gain_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+nekotune_add_qt_test(NAME nekotune_replay_gain_test COMMAND nekotune_replay_gain_test)
+add_executable(nekotune_listening_history_test listening_history_test.cpp)
+target_link_libraries(nekotune_listening_history_test PRIVATE nekotune_core nekotune_frontend Qt6::Test)
+nekotune_add_qt_test(NAME nekotune_listening_history_test COMMAND nekotune_listening_history_test)
 set(NEKOTUNE_TEST_QPA offscreen)
+add_executable(nekotune_wallpaper_test wallpaper_test.cpp ../frontend/qt-qml/resources.qrc)
+target_link_libraries(nekotune_wallpaper_test PRIVATE nekotune_frontend Qt6::Test Qt6::QuickControls2)
+nekotune_add_qt_test(NAME nekotune_wallpaper_test COMMAND nekotune_wallpaper_test)
+set_tests_properties(nekotune_wallpaper_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Fusion")
 add_executable(nekotune_playback_window_test playback_window_test.cpp ../frontend/qt-qml/resources.qrc)
 target_link_libraries(nekotune_playback_window_test PRIVATE nekotune_frontend Qt6::Test Qt6::QuickControls2)
 nekotune_add_qt_test(NAME nekotune_playback_window_test COMMAND nekotune_playback_window_test)
@@ -36,6 +48,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 if(WIN32)
     set(NEKOTUNE_TEST_QPA windows)
+    set_tests_properties(nekotune_wallpaper_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Fusion")
     set_tests_properties(nekotune_playback_window_test PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Fusion")
     set_tests_properties(nekotune_system_tray_test PROPERTIES

@@ -52,6 +52,7 @@ void PlaybackBackendSupervisor::install(std::unique_ptr<IPlaybackBackend> backen
     FORWARD(nextReady, (quint64 token), (token))
     FORWARD(nextFailed, (quint64 token, const QString &message), (token, message))
     FORWARD(backendChanged, (), ())
+    FORWARD(replayGainChanged, (), ())
 #undef FORWARD
     connect(active, &IPlaybackBackend::nextTrackStarted, this, [this, active](quint64 token) {
         if (m_active.get() != active)
@@ -67,6 +68,7 @@ void PlaybackBackendSupervisor::install(std::unique_ptr<IPlaybackBackend> backen
     active->setVolume(m_volume);
     active->setPlaybackRate(m_rate);
     active->setEqualizer(m_equalizer);
+    active->setReplayGain(m_replayGain);
     active->setAudioOutput(m_device, m_port);
 }
 void PlaybackBackendSupervisor::setSource(const QUrl &url) {

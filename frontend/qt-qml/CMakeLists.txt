@@ -4,6 +4,38 @@ add_library(nekotune_frontend STATIC src/ipc_client.cpp src/ipc_client.h src/i18
 target_sources(nekotune_frontend PRIVATE src/platform/system_media_bridge.cpp src/platform/system_media_bridge.h
     src/platform/system_tray_controller.cpp src/platform/system_tray_controller.h
     src/platform/playback_window_controller.cpp src/platform/playback_window_controller.h)
+target_sources(nekotune_frontend PRIVATE
+    src/wallpaper/wallpaper_manager.cpp src/wallpaper/wallpaper_manager.h
+    src/wallpaper/wallpaper_platform.h)
+set(NEKOTUNE_WALLPAPER_BACKEND "disabled")
+if(NEKOTUNE_ENABLE_WALLPAPER AND WIN32)
+    target_sources(nekotune_frontend PRIVATE src/wallpaper/wallpaper_windows.cpp)
+    target_link_libraries(nekotune_frontend PRIVATE user32 comctl32)
+    set(NEKOTUNE_WALLPAPER_BACKEND "windows")
+elseif(NEKOTUNE_ENABLE_WALLPAPER AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # LayerShellQt uses QtWayland private ABI. Keep all three from one Qt build.
+    # 6.6 provides explicit output binding and per-window shell integration.
+    if(Qt6_VERSION VERSION_GREATER_EQUAL "6.10")
+        find_package(Qt6WaylandClient QUIET)
+        find_package(Qt6WaylandClientPrivate QUIET)
+        find_package(LayerShellQt 6.6 QUIET CONFIG)
+        if(TARGET LayerShellQt::Interface AND TARGET Qt6::WaylandClientPrivate)
+            target_sources(nekotune_frontend PRIVATE src/wallpaper/wallpaper_wayland.cpp)
+            target_link_libraries(nekotune_frontend PRIVATE LayerShellQt::Interface Qt6::WaylandClientPrivate)
+            set(NEKOTUNE_WALLPAPER_BACKEND "wayland")
+        endif()
+    endif()
+    if(NEKOTUNE_WALLPAPER_BACKEND STREQUAL "disabled")
+        message(STATUS "Music wallpaper unavailable: needs Qt >= 6.10 with matching WaylandClient private development files and LayerShellQt >= 6.6. Player remains enabled.")
+    endif()
+endif()
+if(NEKOTUNE_WALLPAPER_BACKEND STREQUAL "disabled")
+    target_sources(nekotune_frontend PRIVATE src/wallpaper/wallpaper_unavailable.cpp)
+endif()
+message(STATUS "NekoTune wallpaper backend: ${NEKOTUNE_WALLPAPER_BACKEND}")
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/wallpaper-runtime.json"
+    CONTENT "{\"backend\":\"${NEKOTUNE_WALLPAPER_BACKEND}\",\"qt\":\"${Qt6_VERSION}\"}\n")
+install(FILES "${CMAKE_BINARY_DIR}/wallpaper-runtime.json" DESTINATION .)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Qt6 6.6 REQUIRED COMPONENTS DBus)
     target_sources(nekotune_frontend PRIVATE src/platform/linux/mpris_service.cpp src/platform/linux/mpris_service.h)

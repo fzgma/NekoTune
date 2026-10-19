@@ -7,12 +7,25 @@ QJsonObject audioSettingsJson(const AudioSettings &settings) {
         gains.append(gain);
     return {{"backend", settings.backend},
             {"crossfade_seconds", settings.crossfadeSeconds},
+            {"replay_gain", QJsonObject{{"mode", settings.replayGain.mode}, {"preamp_db", settings.replayGain.preampDb}}},
             {"equalizer", QJsonObject{{"enabled", settings.equalizer.enabled},
                                       {"auto_headroom", settings.equalizer.autoHeadroom},
                                       {"preamp_db", settings.equalizer.preampDb},
                                       {"gains", gains}}}};
 }
 Result<AudioSettings> parseAudioSettings(const QJsonObject &patch, AudioSettings settings) {
+    if (patch.contains("replay_gain")) {
+        if (!patch.value("replay_gain").isObject()) return failure("replay_gain must be an object");
+        const auto gain = patch.value("replay_gain").toObject();
+        if (gain.contains("mode")) {
+            if (!gain.value("mode").isString()) return failure("ReplayGain mode must be a string");
+            settings.replayGain.mode = gain.value("mode").toString();
+        }
+        if (gain.contains("preamp_db")) {
+            if (!gain.value("preamp_db").isDouble()) return failure("ReplayGain preamp_db must be a number");
+            settings.replayGain.preampDb = gain.value("preamp_db").toDouble();
+        }
+    }
     if (patch.contains("backend")) {
         if (!patch.value("backend").isString())
             return failure("backend must be a string");

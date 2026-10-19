@@ -11,6 +11,14 @@ QJsonObject ApiContext::audioSettingsStatus() const {
     settings.insert("gapless_supported", capabilities.gapless);
     settings.insert("crossfade_supported", capabilities.crossfade);
     settings.insert("equalizer_supported", capabilities.equalizer);
+    settings.insert("replay_gain_supported", capabilities.replayGain);
+    const auto gain = audioSettings->replayGainStatus();
+    settings.insert("replay_gain_status", QJsonObject{{"gain_db", gain.gainDb}, {"source", gain.source},
+                                                     {"peak_limited", gain.peakLimited}});
+    const auto analysis = audioSettings->analysisStatus();
+    settings.insert("loudness_analysis", QJsonObject{{"running", analysis.running}, {"cancelling", analysis.cancelling},
+        {"cancelled", analysis.cancelled},
+        {"completed", analysis.completed}, {"total", analysis.total}, {"error", analysis.error}});
     settings.insert("sample_rate", audioSettings->sampleRate());
     QJsonArray frequencies, available;
     for (int frequency : EqualizerFrequencies) {

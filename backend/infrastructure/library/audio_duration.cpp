@@ -22,6 +22,31 @@ struct ProbeContext {
 };
 } // namespace
 
+ReplayGainData readReplayGainTags(AVDictionary *container, AVDictionary *stream) {
+  auto number = [&](const char *key, bool gain) -> std::optional<double> {
+    // Stream-specific values take precedence; malformed values can fall back to the container.
+    for (auto *dictionary : {stream, container}) {
+      const auto *entry = av_dict_get(dictionary, key, nullptr, 0);
+      if (!entry) continue;
+      QString value = QString::fromUtf8(entry->value).trimmed();
+      if (gain && value.endsWith("dB", Qt::CaseInsensitive)) value.chop(2);
+      bool ok = false;
+      double result = value.trimmed().toDouble(&ok);
+      if (ok && std::isfinite(result) && (gain ? std::abs(result) <= 60 : result > 0 && result <= 64))
+        return result;
+    }
+    return {};
+  };
+  ReplayGainData result;
+  result.trackGainDb = number("REPLAYGAIN_TRACK_GAIN", true);
+  result.albumGainDb = number("REPLAYGAIN_ALBUM_GAIN", true);
+  result.trackPeak = number("REPLAYGAIN_TRACK_PEAK", false);
+  result.albumPeak = number("REPLAYGAIN_ALBUM_PEAK", false);
+  if (result.trackGainDb) result.trackSource = "tag";
+  if (result.albumGainDb) result.albumSource = "tag";
+  return result;
+}
+
 AudioFileInfo readAudioFileInfo(const QString &path,
                          const std::atomic_bool &cancelled) {
   if (cancelled.load())
@@ -76,6 +101,7 @@ AudioFileInfo readAudioFileInfo(const QString &path,
                          tag({"album_artist", "albumartist"}), tag({"genre"}), tag({"lyrics", "unsyncedlyrics"}),
                          number(tag({"date", "year"})), number(tag({"track", "tracknumber"})),
                          number(tag({"disc", "discnumber"}))};
+      result.replayGain = readReplayGainTags(format->metadata, stream->metadata);
       // Prefer the audio stream over container duration, which may include longer non-audio tracks.
       if (stream->duration != AV_NOPTS_VALUE && stream->duration > 0)
         duration = av_rescale_q(stream->duration, stream->time_base,

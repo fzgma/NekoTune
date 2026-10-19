@@ -5,6 +5,7 @@
 #include "controllers/settings_controller.h"
 #include "controllers/theme_controller.h"
 #include "controllers/library_controller.h"
+#include "controllers/history_controller.h"
 #include "controllers/lyrics_controller.h"
 #include "controllers/playback_controller.h"
 #include "controllers/playlist_controller.h"
@@ -23,6 +24,7 @@ class AppControllers final : public QObject {
     Q_PROPERTY(QueueController *queue MEMBER queue CONSTANT)
     Q_PROPERTY(PlaylistController *playlists MEMBER playlists CONSTANT)
     Q_PROPERTY(LibraryController *library MEMBER library CONSTANT)
+    Q_PROPERTY(HistoryController *history MEMBER history CONSTANT)
     Q_PROPERTY(TagController *tags MEMBER tags CONSTANT)
     Q_PROPERTY(LyricsController *lyrics MEMBER lyrics CONSTANT)
     Q_PROPERTY(SettingsController *settings MEMBER settings CONSTANT)
@@ -38,6 +40,7 @@ class AppControllers final : public QObject {
     QueueController *queue;
     PlaylistController *playlists;
     LibraryController *library;
+    HistoryController *history;
     TagController *tags;
     LyricsController *lyrics;
     SettingsController *settings;

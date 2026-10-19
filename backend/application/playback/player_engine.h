@@ -84,6 +84,9 @@ class PlayerEngine final : public QObject {
     void playbackRateChanged(double rate);
     void trackChanged();
     void songStarted(int songId);
+    void listeningStarted(const nekotune::QueueItem &item);
+    void listeningFinished(const QString &reason);
+    void seekRequested();
     void playbackModeChanged(nekotune::PlaybackMode mode);
     void lyricsNeeded(bool metadataReady);
     void errorOccurred(const QString &message);

@@ -10,6 +10,7 @@ Item {
     property bool playing: false
     property bool running: visible
     property bool reducedMotion: Theme.reducedMotion
+    property int updateInterval: 16
     readonly property bool hasWordTiming: lines.some(line => line.words && line.words.length > 0)
     property real displayPosition: position
     property real anchorPosition: position
@@ -33,7 +34,7 @@ Item {
     }
     Timer {
         objectName: "lyricsFrameTimer"
-        interval: 16
+        interval: Math.max(16, clock.updateInterval)
         repeat: true
         running: clock.running && clock.playing && clock.hasWordTiming && !clock.reducedMotion
         // Only smooth words between decoder ticks; never accumulate a wall-clock timeline.

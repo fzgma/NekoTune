@@ -1,4 +1,6 @@
 #include "infrastructure/playback/pcm_decoder.h"
+#include "infrastructure/library/audio_duration.h"
+#include "infrastructure/library/loudness_analysis.h"
 #include <QFile>
 #include <algorithm>
 #include <chrono>
@@ -50,6 +52,11 @@ int PcmDecoder::interrupted(void *opaque) {
 DecodedAudioInfo PcmDecoder::info() const {
     std::lock_guard lock(m_mutex);
     return m_info;
+}
+void PcmDecoder::updateReplayGainData(const ReplayGainData &analysis) {
+    std::lock_guard lock(m_mutex);
+    m_analysis = analysis;
+    m_info.replayGain = replaceReplayGainAnalysis(m_info.replayGain, analysis);
 }
 size_t PcmDecoder::available() const {
     std::lock_guard lock(m_mutex);
@@ -123,6 +130,7 @@ void PcmDecoder::decode(qint64 seekMs) {
     AVDictionary *options = nullptr;
     // Local proxy URLs already carry authentication and refresh upstream URLs.
     av_dict_set(&options, "rw_timeout", "15000000", 0);
+    if (source.isLocalFile()) av_dict_set(&options, "protocol_whitelist", "file", 0);
 #ifdef Q_OS_WIN
     const QByteArray filename = source.isLocalFile() ? source.toLocalFile().toUtf8() : source.toEncoded();
 #else
@@ -159,6 +167,7 @@ void PcmDecoder::decode(qint64 seekMs) {
     result = avcodec_parameters_to_context(codec, stream->codecpar);
     // Export skip/discard side data and trim exactly once before resampling.
     codec->flags2 |= AV_CODEC_FLAG2_SKIP_MANUAL;
+    codec->thread_count = 1;
     if (result >= 0)
         result = avcodec_open2(codec, implementation, nullptr);
     if (result < 0) {
@@ -196,9 +205,12 @@ void PcmDecoder::decode(qint64 seekMs) {
         }
         avcodec_flush_buffers(codec);
     }
+    const auto gainData = withReplayGainFallback(readReplayGainTags(format->metadata, stream->metadata),
+        source.isLocalFile() ? readLoudnessCache(source.toLocalFile()) : ReplayGainData{});
     {
         std::lock_guard lock(m_mutex);
         m_info.sampleRate = codec->sample_rate;
+        m_info.replayGain = m_analysis ? replaceReplayGainAnalysis(gainData, *m_analysis) : gainData;
         m_info.durationMs = stream->duration != AV_NOPTS_VALUE
                                 ? av_rescale_q(stream->duration, stream->time_base, AVRational{1, 1000})
                                 : (format->duration == AV_NOPTS_VALUE ? 0 : format->duration / 1000);

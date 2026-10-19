@@ -2,12 +2,16 @@
 #include <QString>
 #include <atomic>
 #include "domain/library/library_types.h"
+#include "domain/playback/replay_gain.h"
+struct AVDictionary;
 
 namespace nekotune {
 struct AudioFileInfo {
     qint64 durationMs = 0;
     EmbeddedMetadata metadata;
+    ReplayGainData replayGain;
 };
+ReplayGainData readReplayGainTags(AVDictionary *container, AVDictionary *stream);
 AudioFileInfo readAudioFileInfo(const QString &path, const std::atomic_bool &cancelled);
 // Returns milliseconds, or zero when the local audio cannot be inspected.
 /// Read local audio duration without requiring a live playback session.

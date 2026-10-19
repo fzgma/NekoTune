@@ -37,6 +37,12 @@
         <file>qml/components/PlaybackWindowSettings.qml</file>
         <file>qml/windows/MiniPlayerWindow.qml</file>
         <file>qml/windows/DesktopLyricsWindow.qml</file>
+        <file>qml/wallpaper/Wallpaper.qml</file>
+        <file>qml/wallpaper/WallpaperSettings.qml</file>
+        <file>qml/wallpaper/WallpaperTrackInfo.qml</file>
+        <file>qml/wallpaper/VinylWallpaper.qml</file>
+        <file>qml/wallpaper/LyricsWallpaper.qml</file>
+        <file>qml/wallpaper/qmldir</file>
         <file>qml/components/LyricsDebugPanel.qml</file>
         <file>qml/components/LyricsPanel.qml</file>
         <file>qml/components/LibraryPanel.qml</file>
@@ -56,6 +62,8 @@
         <file alias="themes/catalog.json">../../shared/themes/catalog.json</file>
         <file>qml/components/qmldir</file>
         <file>qml/pages/HomePage.qml</file>
+        <file>qml/pages/HistoryPage.qml</file>
+        <file>qml/components/ListeningSummary.qml</file>
         <file>qml/pages/LibraryPage.qml</file>
         <file>qml/pages/LyricsDebugPage.qml</file>
         <file>qml/pages/LyricsPage.qml</file>

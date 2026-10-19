@@ -54,7 +54,7 @@ jobs:
             libsecret-1-dev libpulse-dev libssl-dev libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 \
             libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 \
             libxcb-xkb1 gnome-keyring dbus-x11 libglib2.0-bin fonts-noto-cjk libpipewire-0.3-0 \
-            extra-cmake-modules libxkbcommon-dev libxcb1-dev libx11-dev
+            extra-cmake-modules libxkbcommon-dev libxcb1-dev libx11-dev libwayland-dev wayland-protocols
       - name: Install Linux Qt
         if: runner.os == 'Linux'
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
@@ -63,6 +63,23 @@ jobs:
           version: '6.11.2'
           modules: 'qtmultimedia qtshadertools'
           cache: true
+      - name: Build LayerShellQt with the release Qt
+        if: runner.os == 'Linux'
+        run: |
+          git clone https://github.com/KDE/extra-cmake-modules.git .ci-ecm
+          git -C .ci-ecm checkout a1dac86d6c848473d840b748b82694ef6916a3ca # 6.26.0
+          cmake -S .ci-ecm -B .ci-ecm/build -G Ninja -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/ecm"
+          cmake --install .ci-ecm/build
+          git clone https://github.com/KDE/layer-shell-qt.git .ci-layer-shell-qt
+          git -C .ci-layer-shell-qt checkout 1613a5f61150192d8187989466d4ff961f4ce2c4 # 6.7.4
+          cmake -S .ci-layer-shell-qt -B .ci-layer-shell-qt/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;$RUNNER_TEMP/ecm" \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/layershell" \
+            -DKDE_INSTALL_LIBDIR=lib -DKDE_INSTALL_QTPLUGINDIR=plugins -DCMAKE_SKIP_RPATH=ON
+          cmake --build .ci-layer-shell-qt/build --parallel 2
+          cmake --install .ci-layer-shell-qt/build
       - name: Build Linux Fcitx5-Qt 5.1.9 with the release Qt
         if: runner.os == 'Linux'
         run: |
@@ -71,7 +88,7 @@ jobs:
           # Backport upstream's explicit private-module lookup for Qt 6.10+.
           # https://github.com/fcitx/fcitx5-qt/commit/6ac4fdd8e90ff9c25a5219e15e83740fa38c9c71
           git -C .ci-fcitx5-qt apply "$PWD/scripts/ci/fcitx5-qt6-private-modules.patch"
-          # The distribution uses xcb; no Qt Wayland private API is needed.
+          # Qt's standard Wayland text input remains available without the optional workaround.
           cmake -S .ci-fcitx5-qt -B .ci-fcitx5-qt/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
             -DENABLE_QT4=OFF -DENABLE_QT5=OFF -DENABLE_QT6=ON \
@@ -129,15 +146,17 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;$RUNNER_TEMP/qtkeychain"
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;$RUNNER_TEMP/qtkeychain;$RUNNER_TEMP/layershell" \
+            -DNEKOTUNE_ENABLE_WALLPAPER=ON
           cmake --build build --parallel 2
+          test "$(jq -r .backend build/wallpaper-runtime.json)" = wayland
       - name: Configure and build Windows
         id: build_windows
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DNEKOTUNE_ENABLE_WALLPAPER=ON
           cmake --build build --parallel 2
 
       # Packaging also runs after test failures, so resolve its version first.
@@ -193,6 +212,8 @@ jobs:
           uv run --no-project --python 3.12 scripts/ci/package_release.py \
             --stage stage --qt-prefix "$QT_ROOT_DIR" --library-dir "$RUNNER_TEMP/qtkeychain/lib" \
             --plugin-dir "$RUNNER_TEMP/fcitx5-qt/plugins" --fcitx-source .ci-fcitx5-qt \
+            --library-dir "$RUNNER_TEMP/layershell/lib" --plugin-dir "$RUNNER_TEMP/layershell/plugins" \
+            --layershell-source .ci-layer-shell-qt \
             --platform linux --version "$VERSION"
           node scripts/ci/smoke_release.mjs stage
       - name: Bundle and smoke test Windows distribution

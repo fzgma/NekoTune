@@ -1,11 +1,13 @@
 # Build output
-/build/
+/build*/
 /cmake-build-*/
 /out/
 /stage/
 /dist/
 /.ci-qtkeychain/
 /.ci-fcitx5-qt/
+/.ci-ecm/
+/.ci-layer-shell-qt/
 /.ccache/
 
 # CMake generated files

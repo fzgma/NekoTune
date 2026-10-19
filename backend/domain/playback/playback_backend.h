@@ -56,6 +56,9 @@ class IPlaybackBackend : public QObject {
     virtual void authorizeTransition(quint64) {}
     virtual void finishAfterCurrent() {}
     virtual void setEqualizer(const EqualizerSettings &) {}
+    virtual void setReplayGain(const ReplayGainSettings &) {}
+    virtual ReplayGainData replayGainData() const { return {}; }
+    virtual void updateReplayGainData(const QUrl &, const ReplayGainData &) {}
     virtual int outputSampleRate() const { return 0; }
     virtual void setSource(const QUrl &url) = 0;
     virtual QUrl source() const = 0;
@@ -85,6 +88,7 @@ class IPlaybackBackend : public QObject {
     virtual void shutdown() { stop(); setSource({}); }
   signals:
     void backendChanged();
+    void replayGainChanged();
     void decoderFailure(const QString &message, bool fallbackEligible);
     void nextReady(quint64 token);
     void nextFailed(quint64 token, const QString &message);

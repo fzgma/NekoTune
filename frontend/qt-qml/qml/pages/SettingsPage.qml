@@ -30,6 +30,7 @@ Item {
         playback: page.controllers.playback || null
         desktop: page.shell.desktop || null
         windowModes: page.shell.windowModes || null
+        wallpaper: typeof wallpaperManager !== "undefined" ? wallpaperManager : null
         connected: page.transport.connected; translator: page.translator
         extensionSettings: page.settingsPages.map(item => ({id: item.id, title: page.extensions.label(item.title, page.translator.language)}))
         onExtensionSettingsRequested: function(id) { page.shell.navigate(id) }

@@ -5,6 +5,9 @@
 #include "infrastructure/lyrics/lyrics_storage.h"
 #include "infrastructure/playback/playback_backend_supervisor.h"
 #include "ipc/serialization/audio_serialization.h"
+#include <algorithm>
+#include <limits>
+#include <tuple>
 namespace nekotune {
 namespace {
 AudioSettings savedAudioSettings() {
@@ -36,7 +39,7 @@ LyricsService *createLyrics() {
 // Keep new feature wiring here rather than growing PlayerEngine.
 BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     : m_music(m_database), m_songs(m_database), m_queueRepository(m_database),
-      m_playlistRepository(m_database), m_tagRepository(m_database),
+      m_playlistRepository(m_database), m_tagRepository(m_database), m_historyRepository(m_database),
       m_library(m_songs, m_tagRepository, m_database), m_playlists(m_playlistRepository),
       m_tags(m_tagRepository), m_queue(m_queueRepository, m_songs, m_database),
       m_audio(audio ? std::move(audio) : std::make_unique<PlaybackBackendSupervisor>(savedAudioSettings().backend)),
@@ -46,6 +49,7 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
                [](PlaybackMode mode) { return AppPaths::saveSetting("playback_mode", toString(mode)); },
                AppPaths::setting("playback_rate").toDouble(1.0),
                [](double rate) { return AppPaths::saveSetting("playback_rate", rate); }),
+      m_history(m_player, *m_audio, m_historyRepository),
       m_audioOutputs(*m_audio, savedAudioOutput(), [](const AudioOutputSelection &selected) {
           return AppPaths::saveSetting("audio_output", QJsonObject{{"device_id", selected.id},
                                                                  {"device_name", selected.name},
@@ -75,8 +79,52 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     m_api.musicDirectory = m_music.directory();
     m_api.configDirectory = AppPaths::configDirectory();
     m_api.ai = &m_ai;
+    connect(&m_history, &ListeningHistoryService::changed, this, [this] {
+        m_server.broadcastEvent({{"event", "history.changed"}});
+    });
+    connect(&m_history, &ListeningHistoryService::errorOccurred, &m_player, &PlayerEngine::errorOccurred);
     m_api.audioOutputs = &m_audioOutputs;
     m_api.audioSettings = &m_audioSettings;
+    m_audioSettings.setAnalysisActions([this](const QVector<int> &ids) -> Result<void> {
+        for (int id : ids) if (!m_library.metadata(id)) return failure("Unknown song ID", ErrorCode::NotFound);
+        auto library = m_library.snapshot();
+        std::stable_sort(library.songs.begin(), library.songs.end(), [](const auto &a, const auto &b) {
+            const auto order = [](int value) { return value > 0 ? value : std::numeric_limits<int>::max(); };
+            return std::tuple(order(a.metadata.discNumber), order(a.metadata.trackNumber), a.metadata.id) <
+                   std::tuple(order(b.metadata.discNumber), order(b.metadata.trackNumber), b.metadata.id);
+        });
+        QMap<QString, LoudnessAnalysisGroup> grouped;
+        QSet<QString> selected, incomplete;
+        for (const auto &song : library.songs) {
+            const auto &meta = song.metadata;
+            if (meta.isRemote()) continue;
+            const auto album = meta.album.trimmed().toCaseFolded();
+            const auto artist = (meta.albumArtist.isEmpty() ? meta.artist : meta.albumArtist).trimmed().toCaseFolded();
+            const QString key = album.isEmpty() ? QString("track:%1").arg(meta.id) : album + QChar(0) + artist;
+            if (ids.isEmpty() || ids.contains(meta.id)) selected.insert(key);
+            if (song.path.isEmpty()) { incomplete.insert(key); continue; }
+            auto &group = grouped[key];
+            group.album = !album.isEmpty();
+            if (!group.paths.contains(song.path)) group.paths.append(song.path);
+        }
+        QVector<LoudnessAnalysisGroup> groups;
+        for (auto it = grouped.begin(); it != grouped.end(); ++it) {
+            if (!selected.contains(it.key())) continue;
+            auto group = it.value();
+            if (incomplete.contains(it.key())) group.album = false;
+            groups.append(group);
+        }
+        return m_loudness.start(groups);
+    }, [this] { m_loudness.cancel(); });
+    connect(&m_player, &PlayerEngine::stateChanged, &m_loudness, [this](PlayerState state) {
+        m_loudness.setPlaying(state == PlayerState::Playing || state == PlayerState::Loading);
+    });
+    connect(&m_loudness, &LoudnessAnalysis::changed, this, [this] {
+        m_audioSettings.setAnalysisStatus(m_loudness.status());
+    });
+    connect(&m_loudness, &LoudnessAnalysis::resultReady, this, [this](const QString &path, const ReplayGainData &data) {
+        m_audio->updateReplayGainData(QUrl::fromLocalFile(path), data);
+    });
     connect(&m_audioSettings, &AudioSettingsService::changed, this, [this] {
         auto event = m_api.audioSettingsStatus(); event.insert("event", "player.audio_settings_changed");
         event.insert("playback_rate_supported", m_audio->supportsPlaybackRate());
@@ -136,6 +184,7 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
                                          {"errors", QJsonArray::fromStringList(errors)}});
             });
     registerPlayerApi(m_router, m_api);
+    registerHistoryApi(m_router, m_history);
     registerLibraryApi(m_router, m_api);
     registerLyricsApi(m_router, m_api);
     registerAiApi(m_router, m_api);
@@ -251,6 +300,12 @@ BackendSession::~BackendSession() { shutdown(); }
 bool BackendSession::start() {
     if (!m_database.isReady() || !m_server.listen())
         return false;
+    const auto recovered = m_history.recover();
+    if (!recovered) {
+        m_database.setError(recovered.error().message);
+        m_server.shutdown();
+        return false;
+    }
     m_scanner.start();
     m_extensionBackend.start(
         [this](const QString &method, const QVariantMap &params, IExtensionBackend::Completion done) {
@@ -265,12 +320,13 @@ bool BackendSession::start() {
     return true;
 }
 QString BackendSession::errorString() const {
-    return m_database.isReady() ? m_server.errorString() : m_database.errorString();
+    return m_database.errorString().isEmpty() ? m_server.errorString() : m_database.errorString();
 }
 void BackendSession::shutdown() {
     if (m_stopped)
         return;
     m_stopped = true;
+    m_loudness.cancel();
     // Finish decoder I/O before revoking the extension proxy's leased URLs.
     m_player.shutdown();
     m_extensionBackend.shutdown();

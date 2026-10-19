@@ -13,6 +13,7 @@
 namespace nekotune {
 class ExtensionService;
 class MusicService;
+class ListeningHistoryService;
 /// Non-owning service references used by feature route registration.
 /// The composition root must outlive all captured handler references.
 /// Snapshot helpers join domain data with transport-specific presentation.
@@ -50,6 +51,7 @@ struct ApiContext {
     QJsonArray playlistList() const;
 };
 void registerPlayerApi(IpcRouter &, ApiContext &);
+void registerHistoryApi(IpcRouter &, ListeningHistoryService &);
 void registerLibraryApi(IpcRouter &, ApiContext &);
 void registerLyricsApi(IpcRouter &, ApiContext &);
 void registerAiApi(IpcRouter &, ApiContext &);

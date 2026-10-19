@@ -14,7 +14,7 @@ void registerPlayerApi(IpcRouter &router, ApiContext &api) {
     router.registerMethod("player.audio_settings", [&api](const auto &, auto done) {
         done(api.audioSettings ? success(api.audioSettingsStatus()) : error(failure("Audio settings unavailable", ErrorCode::Unavailable)));
     });
-    for (const auto &method : {QString("player.set_audio_backend"), QString("player.set_transition"), QString("player.set_equalizer")}) {
+    for (const auto &method : {QString("player.set_audio_backend"), QString("player.set_transition"), QString("player.set_equalizer"), QString("player.set_replay_gain")}) {
         router.registerMethod(method, [&api, method](const QJsonObject &params, auto done) {
             if (!api.audioSettings) { done(error(failure("Audio settings unavailable", ErrorCode::Unavailable))); return; }
             QJsonObject patch;
@@ -24,13 +24,35 @@ void registerPlayerApi(IpcRouter &router, ApiContext &api) {
             } else if (method == "player.set_transition") {
                 if (!params.contains("crossfade_seconds")) { done(error(failure("crossfade_seconds is required"))); return; }
                 patch.insert("crossfade_seconds", params.value("crossfade_seconds"));
-            } else patch.insert("equalizer", params);
+            } else patch.insert(method == "player.set_replay_gain" ? "replay_gain" : "equalizer", params);
             const auto candidate = parseAudioSettings(patch, api.audioSettings->settings());
             if (!candidate) { done(error(candidate.error())); return; }
             const auto result = api.audioSettings->update(candidate.value());
             done(response(result, api.audioSettingsStatus()));
         }, true);
     }
+    router.registerMethod("player.analyze_loudness", [&api](const QJsonObject &params, auto done) {
+        if (!api.audioSettings) { done(error(failure("Audio settings unavailable", ErrorCode::Unavailable))); return; }
+        QVector<int> ids;
+        if (params.contains("ids")) {
+            if (!params.value("ids").isArray() || params.value("ids").toArray().isEmpty() || params.value("ids").toArray().size() > 10000) {
+                done(error(failure("ids must contain 1 to 10000 song IDs"))); return;
+            }
+            for (const auto &value : params.value("ids").toArray()) {
+                const double id = value.toDouble(-1);
+                if (!value.isDouble() || !std::isfinite(id) || id < 1 || id > std::numeric_limits<int>::max() || std::floor(id) != id) {
+                    done(error(failure("ids must be positive integers"))); return;
+                }
+                if (!ids.contains(int(id))) ids.append(int(id));
+            }
+        }
+        const auto result = api.audioSettings->startAnalysis(ids);
+        done(response(result, api.audioSettingsStatus()));
+    }, true);
+    router.registerMethod("player.cancel_loudness_analysis", [&api](const auto &, auto done) {
+        if (!api.audioSettings) { done(error(failure("Audio settings unavailable", ErrorCode::Unavailable))); return; }
+        api.audioSettings->cancelAnalysis(); done(success(api.audioSettingsStatus()));
+    });
     router.registerMethod("player.audio_outputs", [&api](const auto &, auto done) {
         done(api.audioOutputs ? success(api.audioOutputStatus())
                               : error(failure("Audio outputs unavailable", ErrorCode::Unavailable)));

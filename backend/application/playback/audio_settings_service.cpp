@@ -6,7 +6,9 @@ AudioSettingsService::AudioSettingsService(IPlaybackBackend &backend, PlayerEngi
       m_save(std::move(save)) {
     m_player.setCrossfadeSeconds(m_settings.crossfadeSeconds);
     m_backend.setEqualizer(m_settings.equalizer);
+    m_backend.setReplayGain(m_settings.replayGain);
     connect(&backend, &IPlaybackBackend::backendChanged, this, &AudioSettingsService::changed);
+    connect(&backend, &IPlaybackBackend::replayGainChanged, this, &AudioSettingsService::changed);
 }
 Result<void> AudioSettingsService::update(const AudioSettings &settings) {
     auto valid = validateAudioSettings(settings);
@@ -19,6 +21,7 @@ Result<void> AudioSettingsService::update(const AudioSettings &settings) {
     m_settings = settings;
     m_player.setCrossfadeSeconds(settings.crossfadeSeconds);
     m_backend.setEqualizer(settings.equalizer);
+    m_backend.setReplayGain(settings.replayGain);
     emit changed();
     return {};
 }

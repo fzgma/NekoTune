@@ -1,4 +1,5 @@
 #include "infrastructure/playback/pcm_renderer.h"
+#include "infrastructure/playback/pcm_dsp.h"
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -15,6 +16,15 @@ struct Reader {
     int rate;
     qint64 nativeRead = 0, nativeOrigin = 0, produced = 0;
     bool drained = false, handedOff = false;
+    bool gainInitialized = false;
+    PcmGainEnvelope gain;
+    std::optional<ReplayGainData> analysis;
+    void updateGain(const ReplayGainSettings &settings) {
+        auto data = decoder->info().replayGain;
+        if (analysis) data = replaceReplayGainAnalysis(data, *analysis);
+        gain.setGain(resolveReplayGain(settings, data).gainDb, rate, !gainInitialized);
+        gainInitialized = true;
+    }
     std::vector<float> buffer;
     size_t offset = 0;
     static constexpr size_t CapacitySamples = 12 * 1024 * 1024 / sizeof(float);
@@ -93,6 +103,7 @@ struct PcmRenderer::Impl {
     int rate;
     std::unique_ptr<Reader> current, next;
     PreloadRequest request;
+    ReplayGainSettings replayGain;
     bool authorized = false, done = false, fading = false, awaitingPlan = true, followingFinal = false;
     qint64 frames = 0, fadeFrames = 0, faded = 0;
     std::vector<PcmBoundary> boundaries;
@@ -198,6 +209,14 @@ void PcmRenderer::cancelNext() {
 }
 qint64 PcmRenderer::framesRendered() const { return d->frames; }
 bool PcmRenderer::finished() const { return d->done; }
+void PcmRenderer::setReplayGain(const ReplayGainSettings &settings) { d->replayGain = settings; }
+void PcmRenderer::updateReplayGainData(const QUrl &source, const ReplayGainData &data) {
+    for (auto *reader : {d->current.get(), d->next.get()})
+        if (reader && reader->decoder->source == source) {
+            reader->analysis = data;
+            reader->decoder->updateReplayGainData(data);
+        }
+}
 std::vector<PcmBoundary> PcmRenderer::takeBoundaries() { return std::exchange(d->boundaries, {}); }
 std::vector<float> PcmRenderer::render(size_t requested) {
     std::vector<float> output;
@@ -212,6 +231,9 @@ std::vector<float> PcmRenderer::render(size_t requested) {
                 d->next->decoder->info().error.isEmpty()) {
                 d->startBoundary(d->frames);
                 d->releaseBoundary(d->frames);
+                // Keep a continuous 20 ms gain envelope at a gapless boundary.
+                d->next->gain = current.gain;
+                d->next->gainInitialized = true;
                 d->current = std::move(d->next);
                 d->authorized = false;
                 d->awaitingPlan = !d->followingFinal;
@@ -226,15 +248,17 @@ std::vector<float> PcmRenderer::render(size_t requested) {
             break;
         }
         size_t count = std::min(current.available(), requested - output.size() / 2);
+        current.updateGain(d->replayGain);
         if (d->fading) {
+            d->next->updateGain(d->replayGain);
             count = std::min({count, d->next->available(), size_t(d->fadeFrames - d->faded)});
             if (!count)
                 break;
             const float *a = current.data(), *b = d->next->data();
             for (size_t i = 0; i < count; ++i) {
                 const double phase = double(d->faded + qint64(i)) / double(d->fadeFrames - 1);
-                const float out = float(std::cos(phase * std::numbers::pi / 2));
-                const float in = float(std::sin(phase * std::numbers::pi / 2));
+                const float out = float(std::cos(phase * std::numbers::pi / 2)) * current.gain.next();
+                const float in = float(std::sin(phase * std::numbers::pi / 2)) * d->next->gain.next();
                 output.push_back(a[i * 2] * out + b[i * 2] * in);
                 output.push_back(a[i * 2 + 1] * out + b[i * 2 + 1] * in);
             }
@@ -263,7 +287,11 @@ std::vector<float> PcmRenderer::render(size_t requested) {
                 if (fadeLimit > 1 && current.available() > size_t(fadeLimit))
                     count = std::min(count, current.available() - size_t(fadeLimit));
             }
-            output.insert(output.end(), current.data(), current.data() + count * 2);
+            for (size_t i = 0; i < count; ++i) {
+                const float gain = current.gain.next();
+                output.push_back(current.data()[i * 2] * gain);
+                output.push_back(current.data()[i * 2 + 1] * gain);
+            }
             current.consume(count);
             d->frames += qint64(count);
         }

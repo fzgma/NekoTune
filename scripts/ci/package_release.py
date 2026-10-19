@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -30,12 +31,15 @@ def copy_linux_plugins(stage: Path, roots: list[Path]) -> None:
             "platforms", "platforminputcontexts", "xcbglintegrations", "imageformats",
             "tls", "sqldrivers", "multimedia", "styles", "iconengines",
             "networkinformation",
+            "wayland-decoration-client", "wayland-graphics-integration-client",
+            "wayland-shell-integration", "wayland-inputdevice-integration",
         ):
             for plugin in (root / kind).glob("*.so"):
                 if kind == "sqldrivers" and plugin.name != "libqsqlite.so":
                     continue
                 if kind == "platforms" and plugin.name not in {
                     "libqxcb.so", "libqoffscreen.so", "libqminimal.so",
+                    "libqwayland.so", "libqwayland-egl.so", "libqwayland-generic.so",
                 }:
                     continue
                 if kind == "imageformats" and not plugin.name.startswith("libq"):
@@ -58,6 +62,7 @@ def copy_fcitx_licenses(stage: Path, source: Path) -> None:
 
 def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
                  extra_plugin_dirs: list[Path]) -> None:
+    validate_build_qt(stage, qt)
     # Multimedia also installs optional Quick3D modules without their 3D dependencies.
     # Ship the host's 2D UI modules and the multimedia API used by extensions.
     for module in ("QtQml", "QtQuick", "Qt", "QtMultimedia"):
@@ -90,12 +95,14 @@ def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
             if stream.read(4) != b"\x7fELF":
                 continue
         seen.add(binary)
-        output = run("ldd", str(binary), env=environment)
-        if "=> not found" in output:
+        output = run("ldd", "-r", str(binary), env=environment)
+        if "=> not found" in output or "undefined symbol:" in output or "version `" in output and "not found" in output:
             raise RuntimeError(f"Unresolved dependency in {binary}:\n{output}")
         for name, filename in re.findall(r"^\s*(\S+) => (/\S+)", output, re.MULTILINE):
             if system_library.match(name):
                 continue
+            if name.startswith("libQt6"):
+                validate_qt_library(Path(filename), qt / "lib" / name)
             destination = library_dir / name
             if not destination.exists():
                 copy_file(Path(filename), destination)
@@ -115,6 +122,43 @@ def bundle_linux(stage: Path, qt: Path, extra_library_dirs: list[Path],
         "[Paths]\nPrefix=..\nLibraries=lib\nPlugins=plugins\nQmlImports=qml\n",
         encoding="utf-8",
     )
+
+
+def validate_build_qt(stage: Path, qt: Path) -> None:
+    """Private QtWayland ABI must match the Qt used to build the application."""
+    manifest = json.loads((stage / "wallpaper-runtime.json").read_text())
+    for name in ("qmake", "qmake6"):
+        tool = qt / "bin" / name
+        if tool.is_file():
+            version = run(str(tool), "-query", "QT_VERSION").strip()
+            if version != manifest["qt"]:
+                raise RuntimeError(f"Build Qt {manifest['qt']} differs from package Qt {version}")
+            return
+    raise RuntimeError("Cannot verify package Qt version: qmake is missing")
+
+
+def validate_qt_library(actual: Path, expected: Path) -> None:
+    if not expected.is_file():
+        raise RuntimeError(f"Qt dependency is outside the selected Qt distribution: {actual}")
+    if actual.resolve() == expected.resolve():
+        return
+    with actual.open("rb") as source, expected.open("rb") as reference:
+        if hashlib.file_digest(source, "sha256").digest() != hashlib.file_digest(reference, "sha256").digest():
+            raise RuntimeError(f"Mixed Qt ABI: {actual} does not match {expected}")
+
+
+def validate_wallpaper_runtime(stage: Path) -> None:
+    manifest = json.loads((stage / "wallpaper-runtime.json").read_text())
+    if manifest["backend"] != "wayland":
+        return
+    requirements = (
+        "lib/libLayerShellQtInterface.so*", "lib/libQt6WaylandClient.so*",
+        "plugins/platforms/libqwayland*.so", "plugins/wayland-shell-integration/libxdg-shell.so",
+        "plugins/wayland-graphics-integration-client/*.so", "qml/QtQuick/Effects/qmldir",
+    )
+    for pattern in requirements:
+        if not any(path.is_file() for path in stage.glob(pattern)):
+            raise RuntimeError(f"Incomplete Wayland wallpaper runtime: {pattern}")
 
 
 def bundle_windows(stage: Path, qt: Path) -> None:
@@ -185,6 +229,8 @@ def main() -> None:
                         help="Additional plugin root, built with --qt-prefix")
     parser.add_argument("--fcitx-source", type=Path,
                         help="Fcitx5-Qt source tree supplying bundled license notices")
+    parser.add_argument("--layershell-source", type=Path,
+                        help="LayerShellQt source tree built against --qt-prefix")
     parser.add_argument("--platform", choices=["linux", "windows"], required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, default=Path("dist"))
@@ -197,9 +243,14 @@ def main() -> None:
         copy_fcitx_licenses(stage, args.fcitx_source.resolve())
         bundle_linux(stage, qt, [directory.resolve() for directory in args.library_dir],
                      [directory.resolve() for directory in args.plugin_dir])
+        if json.loads((stage / "wallpaper-runtime.json").read_text())["backend"] == "wayland":
+            if args.layershell_source is None or not (args.layershell_source / "LICENSES").is_dir():
+                parser.error("--layershell-source with LICENSES is required for Wayland wallpaper distributions")
+            shutil.copytree(args.layershell_source / "LICENSES", stage / "licenses/LayerShellQt", dirs_exist_ok=True)
     else:
         bundle_windows(stage, qt)
     validate_audio_runtime(stage, args.platform)
+    validate_wallpaper_runtime(stage)
     licenses = stage / "licenses"
     licenses.mkdir(exist_ok=True)
     for filename in ("LICENSE", "README.md"):
@@ -224,6 +275,7 @@ def main() -> None:
         "QtKeychain source: https://github.com/frankosterfeld/qtkeychain/tree/0.17.0\n"
         "FFmpeg source and licenses: https://ffmpeg.org/legal.html\n"
         "MSYS2 package sources and notices: https://github.com/msys2/MINGW-packages\n"
+        "Optional LayerShellQt (LGPL): licenses/LayerShellQt; https://invent.kde.org/plasma/layer-shell-qt\n"
         + fcitx_notice,
         encoding="utf-8",
     )

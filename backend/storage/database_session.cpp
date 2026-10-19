@@ -339,6 +339,18 @@ bool DatabaseSession::migrate() {
         }
     }
     const QStringList statements{
+        QStringLiteral("CREATE TABLE IF NOT EXISTS listening_sessions (id TEXT PRIMARY KEY, song_key TEXT NOT NULL, "
+                       "title TEXT NOT NULL, artist TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', song_id INTEGER NOT NULL, "
+                       "queue_id INTEGER NOT NULL, started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, "
+                       "listened_ms INTEGER NOT NULL DEFAULT 0 CHECK(listened_ms>=0), duration_ms INTEGER NOT NULL, "
+                       "completed INTEGER NOT NULL DEFAULT 0)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_sessions_by_start ON listening_sessions(started_at DESC,id DESC)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_sessions_complete ON listening_sessions(completed,started_at DESC,id DESC)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS listening_intervals (session_id TEXT NOT NULL REFERENCES "
+                       "listening_sessions(id) ON DELETE CASCADE, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL, "
+                       "CHECK(ended_at>started_at))"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_intervals_by_end ON listening_intervals(ended_at,started_at)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_intervals_by_session ON listening_intervals(session_id)"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS managed_resources (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                        "hash TEXT UNIQUE, original_path TEXT NOT NULL DEFAULT '', source_name TEXT NOT NULL "
                        "DEFAULT '', path TEXT NOT NULL DEFAULT '')"),

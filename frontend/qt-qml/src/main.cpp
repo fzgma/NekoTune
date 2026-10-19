@@ -5,6 +5,7 @@
 #include "platform/system_media_bridge.h"
 #include "platform/system_tray_controller.h"
 #include "platform/playback_window_controller.h"
+#include "wallpaper/wallpaper_manager.h"
 #ifdef NEKOTUNE_MPRIS
 #include "platform/linux/mpris_service.h"
 #endif
@@ -95,7 +96,6 @@ int main(int argc, char *argv[]) {
         qCritical() << runtime.errorString();
         return 1;
     }
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, &runtime, &nekotune::BackendRuntime::stop);
     qInfo() << "NekoTune backend listening on" << runtime.serverName();
 #endif
 
@@ -116,6 +116,11 @@ int main(int argc, char *argv[]) {
     QQmlApplicationEngine engine;
     // Destroy auxiliary QML windows before the engine they were created in.
     PlaybackWindowController playbackWindows;
+    WallpaperManager wallpaper;
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &wallpaper, &WallpaperManager::shutdown);
+#ifdef NEKOTUNE_EMBED_BACKEND
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &runtime, &nekotune::BackendRuntime::stop);
+#endif
     desktopIntegration.setPlaybackWindows(&playbackWindows);
     engine.setNetworkAccessManagerFactory(new CoverNetworkManagerFactory);
     engine.rootContext()->setContextProperty(QStringLiteral("ipcClient"), &ipcClient);
@@ -123,6 +128,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("controllers"), &controllers);
     engine.rootContext()->setContextProperty(QStringLiteral("desktopIntegration"), &desktopIntegration);
     engine.rootContext()->setContextProperty(QStringLiteral("playbackWindows"), &playbackWindows);
+    engine.rootContext()->setContextProperty(QStringLiteral("wallpaperManager"), &wallpaper);
     engine.rootContext()->setContextProperty(QStringLiteral("lyricsDebugEnabled"),
                                              commandLine.isSet(QStringLiteral("lyrics-debug")) ||
                                                  commandLine.isSet(QStringLiteral("debug-lyrics")));
@@ -151,6 +157,7 @@ int main(int argc, char *argv[]) {
     if (!window) return 1;
     playbackWindows.initialize(&engine, window);
     desktopIntegration.attachWindow(window);
+    wallpaper.initialize(&engine, &ipcClient);
 
     return app.exec();
 }

@@ -7,6 +7,7 @@
 #include "infrastructure/extensions/extension_backend.h"
 #include "infrastructure/library/import_executor.h"
 #include "infrastructure/library/music_directory.h"
+#include "infrastructure/library/loudness_analysis.h"
 #include "infrastructure/lyrics/sidecar_store.h"
 #include "ipc/api/api_context.h"
 #include "ipc/ipc_server.h"
@@ -16,6 +17,8 @@
 #include "storage/queue_repository.h"
 #include "storage/song_repository.h"
 #include "storage/tag_repository.h"
+#include "storage/listening_history_repository.h"
+#include "application/playback/listening_history_service.h"
 #include <memory>
 namespace nekotune {
 /// Composition and lifetime owner for one embedded or standalone backend instance.
@@ -40,6 +43,7 @@ class BackendSession final : public QObject {
     QueueRepository m_queueRepository;
     PlaylistRepository m_playlistRepository;
     TagRepository m_tagRepository;
+    ListeningHistoryRepository m_historyRepository;
     LibraryService m_library;
     AiBackend m_aiBackend;
     AiService m_ai{m_aiBackend, m_library, m_tagRepository};
@@ -48,8 +52,10 @@ class BackendSession final : public QObject {
     QueueService m_queue;
     std::unique_ptr<IPlaybackBackend> m_audio;
     PlayerEngine m_player;
+    ListeningHistoryService m_history;
     AudioOutputService m_audioOutputs;
     AudioSettingsService m_audioSettings;
+    LoudnessAnalysis m_loudness;
     LyricsController m_lyrics;
     CoverService m_covers;
     SidecarStore m_sidecars;

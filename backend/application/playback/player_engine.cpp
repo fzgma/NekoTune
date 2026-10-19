@@ -70,11 +70,13 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
         refreshCapabilities();
     });
     connect(&backend, &IPlaybackBackend::ended, this, [this] {
+        emit listeningFinished("ended");
         auto result = advance(PlaybackAdvance::Ended);
         if (!result)
             emit errorOccurred(result.error().message);
     });
     connect(&backend, &IPlaybackBackend::failed, this, [this](const QString &message) {
+        emit listeningFinished("error");
         invalidatePreload(); m_decoderReady = false; m_metadataTimer.stop();
         const auto &current = m_queue.queue();
         if (current.currentIndex() >= 0 && current.at(current.currentIndex()).metadata.isRemote()) {
@@ -173,6 +175,7 @@ void PlayerEngine::refreshPreload() {
 }
 void PlayerEngine::startPreloaded(quint64 token) {
     if (m_shuttingDown) return;
+    emit listeningFinished("ended");
     if (!m_preloadSelection || token != m_preloadToken) {
         m_backend.stop();
         loadCurrent(m_playIntent, false);
@@ -255,6 +258,7 @@ void PlayerEngine::setState(PlayerState state) {
         const auto &queue = m_queue.queue();
         if (queue.currentIndex() >= 0) {
             m_playCounted = true;
+            emit listeningStarted(queue.at(queue.currentIndex()));
             emit songStarted(queue.at(queue.currentIndex()).metadata.id);
             emit trackChanged();
         }
@@ -266,6 +270,7 @@ void PlayerEngine::setState(PlayerState state) {
     refreshCapabilities();
 }
 void PlayerEngine::loadCurrent(bool play, bool resetPlayCount, PlayerState idleState) {
+    if (resetPlayCount) emit listeningFinished("replaced");
     m_idleState = idleState;
     if (resetPlayCount)
         m_playCounted = false;
@@ -340,6 +345,7 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount, PlayerState idleS
         setState(m_idleState);
 }
 void PlayerEngine::clearSource() {
+    emit listeningFinished("stopped");
     invalidatePreload();
     m_decoderReady = false;
     m_playCounted = false;
@@ -400,6 +406,7 @@ Result<void> PlayerEngine::pause() {
     return {};
 }
 Result<void> PlayerEngine::stop() {
+    emit listeningFinished("stopped");
     invalidatePreload();
     m_playIntent = false;
     m_idleState = PlayerState::Stopped;
@@ -433,6 +440,7 @@ void PlayerEngine::sourceUnavailable(const QString &provider) {
         return;
     if (m_waitingForReload || (!m_resolving && m_backend.source().isEmpty()))
         return;
+    emit listeningFinished("error");
     clearSource();
     setState(PlayerState::Error);
     emit errorOccurred("Music source unavailable: " + provider);
@@ -482,6 +490,7 @@ Result<void> PlayerEngine::advance(PlaybackAdvance reason, bool preserveState) {
     // Only a durable selection may consume the shuffle proposal and its playback history.
     m_order.confirm(std::move(selection));
     invalidatePreload();
+    emit listeningFinished(reason == PlaybackAdvance::Ended ? "ended" : "skipped");
     m_backend.stop();
     loadCurrent(resume, true, preserveState && previousState == PlayerState::Stopped
                                   ? PlayerState::Stopped : PlayerState::Paused);
@@ -497,6 +506,7 @@ Result<void> PlayerEngine::seek(qint64 position) {
         return failure(QStringLiteral("Position must be greater than or equal to 0"));
     invalidatePreload();
     m_failedPreloadKey.clear();
+    emit seekRequested();
     m_backend.seek(position);
     return {};
 }
@@ -552,6 +562,7 @@ Result<void> PlayerEngine::replaceQueue(PlayerQueue queue, bool play) {
     if (!saved)
         return saved;
     m_order.reset(m_queue.queue());
+    emit listeningFinished("replaced");
     m_backend.stop();
     loadCurrent(play);
     return {};
@@ -584,6 +595,7 @@ Result<void> PlayerEngine::removeItem(int id) {
     if (!result)
         return result;
     if (current) {
+        emit listeningFinished("removed");
         m_backend.stop();
         loadCurrent(resume);
     }
@@ -594,6 +606,7 @@ void PlayerEngine::applyCommittedQueue(PlayerQueue queue, bool currentChanged, b
     if (resetOrder)
         m_order.reset(m_queue.queue());
     if (currentChanged) {
+        emit listeningFinished("replaced");
         m_backend.stop();
         loadCurrent(resume);
     }
@@ -621,6 +634,7 @@ void PlayerEngine::metadataBatchUpdated(const QVector<SongMetadata> &metadata) {
     }
 }
 void PlayerEngine::shutdown() {
+    emit listeningFinished("shutdown");
     m_shuttingDown = true;
     invalidatePreload();
     ++m_sourceGeneration;

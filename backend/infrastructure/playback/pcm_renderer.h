@@ -30,6 +30,8 @@ class PcmRenderer final {
     std::vector<PcmBoundary> takeBoundaries();
     qint64 framesRendered() const;
     bool finished() const;
+    void setReplayGain(const ReplayGainSettings &settings);
+    void updateReplayGainData(const QUrl &source, const ReplayGainData &data);
 
   private:
     struct Impl;

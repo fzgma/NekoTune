@@ -432,6 +432,14 @@ Item {
                     }
                 }
             }
+
+            ListeningSummary {
+                Layout.fillWidth: true
+                history: page.controllers.history || null
+                translator: page.translator
+                transport: page.transport
+                onOpenHistory: page.shell.navigate("history")
+            }
         }
     }
 }

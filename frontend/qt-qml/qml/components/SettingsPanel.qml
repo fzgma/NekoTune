@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../wallpaper"
 
 // Settings displays account capability flags rather than stored credentials.
 // The password input is write-only and cleared on hiding/submission.
@@ -18,6 +19,7 @@ Item {
     property var playback: null
     property var desktop: null
     property var windowModes: null
+    property var wallpaper: null
     property bool saving: false
     property string message: ""
     property bool failed: false
@@ -96,6 +98,13 @@ Item {
             Layout.fillWidth: true
             visible: root.windowModes !== null
             manager: root.windowModes
+            translator: root.translator
+        }
+
+        WallpaperSettings {
+            Layout.fillWidth: true
+            visible: root.wallpaper !== null
+            manager: root.wallpaper
             translator: root.translator
         }
 

@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTORCC ON)
+option(NEKOTUNE_ENABLE_WALLPAPER "Enable desktop music wallpaper platform backends" ON)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS
     Core

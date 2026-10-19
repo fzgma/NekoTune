@@ -89,6 +89,7 @@ class PcmOutputWorker final : public QObject {
     }
     void createRenderer() {
         renderer = std::make_unique<PcmRenderer>(rate, loaded);
+        renderer->setReplayGain(replayGain);
         dsp = std::make_unique<PcmDsp>(rate);
         dsp->setSettings(equalizer);
     }
@@ -197,22 +198,30 @@ class PcmOutputWorker final : public QObject {
         }
         for (auto &event : clock.advance(consumed)) {
             if (event.token) {
+                const auto outgoingPosition = publicBaseMs + std::max<qint64>(0, event.frame - publicStart) * 1000 / rate;
+                post([outgoingPosition](auto &backend) {
+                    backend.m_position = outgoingPosition;
+                    emit backend.positionChanged(outgoingPosition);
+                });
                 publicSource = event.source;
                 publicBaseMs = 0;
                 publicStart = event.frame;
                 loaded = nextDecoder;
+                if (loaded) event.info.replayGain = loaded->info().replayGain;
                 nextDecoder.reset();
                 nextRequest = {};
                 reportedNext = false;
                 post([event](auto &backend) {
                     backend.m_source = event.source;
                     backend.m_metadata = event.info.metadata;
+                    backend.m_replayGainData = event.info.replayGain;
                     backend.m_duration = event.info.durationMs;
                     backend.m_seekable = event.info.seekable;
                     backend.m_position = 0;
                     emit backend.nextTrackStarted(event.token);
                     emit backend.durationChanged(backend.m_duration);
                     emit backend.metadataChanged();
+                    emit backend.replayGainChanged();
                     emit backend.seekableChanged();
                 });
             }
@@ -223,7 +232,11 @@ class PcmOutputWorker final : public QObject {
             }
             if (event.ended) {
                 playing = false;
-                post([](auto &backend) { emit backend.ended(); });
+                post([value = position()](auto &backend) {
+                    backend.m_position = value;
+                    emit backend.positionChanged(value);
+                    emit backend.ended();
+                });
             }
         }
         if (seeking && (consumed > 0 || !playing) && reportedReady &&
@@ -321,9 +334,11 @@ class PcmOutputWorker final : public QObject {
             reportedReady = true;
             post([info](auto &backend) {
                 backend.m_metadata = info.metadata;
+                backend.m_replayGainData = info.replayGain;
                 backend.m_duration = info.durationMs;
                 backend.m_seekable = info.seekable;
                 emit backend.metadataChanged();
+                emit backend.replayGainChanged();
                 emit backend.durationChanged(info.durationMs);
                 emit backend.seekableChanged();
             });
@@ -425,6 +440,7 @@ class PcmOutputWorker final : public QObject {
     QUrl publicSource;
     qint64 publicBaseMs = 0, publicStart = 0, consumed = 0, writtenBytes = 0, lastPositionNotification = -1;
     EqualizerSettings equalizer;
+    ReplayGainSettings replayGain;
     std::unique_ptr<QAudioSink> sink;
     QIODevice *io = nullptr;
     SwrContext *outputConverter = nullptr;
@@ -470,10 +486,12 @@ void FFmpegPlaybackBackend::setSource(const QUrl &url) {
     m_position = 0;
     m_duration = 0;
     m_metadata = {};
+    m_replayGainData = {};
     m_seekable = false;
     const auto generation = ++m_generation;
     dispatch([url, generation](auto &worker) { worker.reset(url, 0, generation, false); });
     emit seekableChanged();
+    emit replayGainChanged();
 }
 void FFmpegPlaybackBackend::play() {
     if (!audioOutputAvailable()) {
@@ -564,6 +582,21 @@ void FFmpegPlaybackBackend::setEqualizer(const EqualizerSettings &settings) {
         worker.equalizer = settings;
         if (worker.dsp)
             worker.dsp->setSettings(settings);
+    });
+}
+void FFmpegPlaybackBackend::setReplayGain(const ReplayGainSettings &settings) {
+    dispatch([settings](auto &worker) {
+        worker.replayGain = settings;
+        if (worker.renderer) worker.renderer->setReplayGain(settings);
+    });
+}
+void FFmpegPlaybackBackend::updateReplayGainData(const QUrl &source, const ReplayGainData &data) {
+    if (source == m_source) {
+        m_replayGainData = replaceReplayGainAnalysis(m_replayGainData, data);
+        emit replayGainChanged();
+    }
+    dispatch([source, data](auto &worker) {
+        if (worker.renderer) worker.renderer->updateReplayGainData(source, data);
     });
 }
 } // namespace nekotune

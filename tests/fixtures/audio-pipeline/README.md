@@ -21,3 +21,12 @@ ffmpeg -f lavfi -i sine=frequency=997:sample_rate=48000 \
 The non-frame-aligned duration exercises priming, end padding, Opus pre-skip,
 and the MP4 edit-list end time. The acceptance assertion counts decoded frames;
 lossy codec samples are not compared to their uncompressed source bit-for-bit.
+
+`replaygain.flac` is the same generated FLAC, remuxed without re-encoding to
+exercise tag probing and decoding. Regenerate with:
+
+```sh
+ffmpeg -i trim.flac -map 0:a -c copy \
+  -metadata REPLAYGAIN_TRACK_GAIN='-4.50 dB' -metadata REPLAYGAIN_TRACK_PEAK='0.125' \
+  -metadata REPLAYGAIN_ALBUM_GAIN='-2.00 dB' -metadata REPLAYGAIN_ALBUM_PEAK='0.25' replaygain.flac
+```
