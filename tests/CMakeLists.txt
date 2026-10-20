@@ -6,6 +6,30 @@ function(nekotune_add_qt_test)
 endfunction()
 
 set(CMAKE_WIN32_EXECUTABLE OFF)
+# Native extension fixtures, laid out as mountable development directories.
+set(NEKOTUNE_TEST_EXTENSIONS_DIR "${CMAKE_CURRENT_BINARY_DIR}/native-extensions")
+nekotune_add_extension(nekotune_test_faulty_extension
+    MANIFEST native_extensions/faulty/extension.json
+    SOURCES native_extensions/faulty/plugin.cpp
+    OUTPUT_DIRECTORY "${NEKOTUNE_TEST_EXTENSIONS_DIR}/test.faulty")
+nekotune_add_extension(nekotune_test_slow_extension
+    MANIFEST native_extensions/slow/extension.json
+    SOURCES native_extensions/slow/plugin.cpp
+    OUTPUT_DIRECTORY "${NEKOTUNE_TEST_EXTENSIONS_DIR}/test.slow")
+nekotune_add_extension(nekotune_test_dedicated_source
+    MANIFEST fixtures/dedicated-source/extension.json
+    SOURCES fixtures/dedicated-source/plugin.cpp
+    FILES fixtures/dedicated-source/Page.qml fixtures/dedicated-source/Settings.qml
+    OUTPUT_DIRECTORY "${NEKOTUNE_TEST_EXTENSIONS_DIR}/test.dedicated-source")
+add_custom_target(nekotune_test_extension_fixtures DEPENDS
+    nekotune_test_faulty_extension nekotune_test_slow_extension nekotune_test_dedicated_source
+    nekotune_example_lyrics nekotune_example_automation nekotune_example_custom_ui nekotune_example_test_source
+    nekotune_example_custom_ui_package)
+set(NEKOTUNE_TEST_EXTENSION_DEFINITIONS
+    NEKOTUNE_EXAMPLE_EXTENSIONS="${CMAKE_BINARY_DIR}/extensions"
+    NEKOTUNE_TEST_EXTENSIONS="${NEKOTUNE_TEST_EXTENSIONS_DIR}"
+    NEKOTUNE_TEST_SOURCES="${CMAKE_CURRENT_SOURCE_DIR}/native_extensions"
+    NEKOTUNE_EXAMPLE_PACKAGES="${CMAKE_BINARY_DIR}/packages")
 add_executable(nekotune_library_storage_test library_storage_test.cpp)
 target_link_libraries(nekotune_library_storage_test PRIVATE nekotune_core Qt6::Test Qt6::Gui)
 nekotune_add_qt_test(NAME nekotune_library_storage_test COMMAND nekotune_library_storage_test)
@@ -120,7 +144,8 @@ set_tests_properties(nekotune_slider_quick_test PROPERTIES
 
 add_executable(nekotune_refactor_test refactor_test.cpp ../frontend/qt-qml/resources.qrc)
 target_link_libraries(nekotune_refactor_test PRIVATE nekotune_core nekotune_frontend Qt6::Test Qt6::Quick Qt6::QuickControls2)
-target_compile_definitions(nekotune_refactor_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(nekotune_refactor_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}" ${NEKOTUNE_TEST_EXTENSION_DEFINITIONS})
+add_dependencies(nekotune_refactor_test nekotune_test_extension_fixtures)
 nekotune_add_qt_test(NAME nekotune_refactor_test COMMAND nekotune_refactor_test)
 set_tests_properties(nekotune_refactor_test PROPERTIES
  ENVIRONMENT "QT_QPA_PLATFORM=${NEKOTUNE_TEST_QPA};QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Fusion")
@@ -168,25 +193,14 @@ set_tests_properties(nekotune_audio_output_test PROPERTIES ENVIRONMENT "QT_QPA_P
 
 add_executable(nekotune_extensions_test extensions_test.cpp ../frontend/qt-qml/resources.qrc)
 target_link_libraries(nekotune_extensions_test PRIVATE nekotune_core nekotune_frontend Qt6::Test Qt6::Quick Qt6::QuickControls2)
-target_compile_definitions(nekotune_extensions_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(nekotune_extensions_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}" ${NEKOTUNE_TEST_EXTENSION_DEFINITIONS})
+add_dependencies(nekotune_extensions_test nekotune_test_extension_fixtures)
 nekotune_add_qt_test(NAME nekotune_extensions_test COMMAND nekotune_extensions_test)
 set_tests_properties(nekotune_extensions_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=${NEKOTUNE_TEST_QPA};QT_QUICK_BACKEND=software")
-if(NOT NEKOTUNE_NATIVE_EXTENSIONS)
-    add_test(NAME nekotune_extension_sdk_test COMMAND "${NEKOTUNE_NODE_BINARY}" --test tests/packages.test.mjs tests/audio.test.mjs tests/runtime.test.mjs tests/themes.test.mjs)
-    set_tests_properties(nekotune_extension_sdk_test PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" TIMEOUT 120)
-endif()
-nekotune_add_extension(nekotune_test_faulty_extension
-    MANIFEST native_extensions/faulty/extension.json
-    SOURCES native_extensions/faulty/plugin.cpp
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-extensions/test.faulty")
 add_executable(nekotune_native_extensions_test native_extensions_test.cpp)
-target_link_libraries(nekotune_native_extensions_test PRIVATE nekotune_core Qt6::Test)
-target_compile_definitions(nekotune_native_extensions_test PRIVATE
-    NEKOTUNE_EXAMPLE_EXTENSIONS="${CMAKE_BINARY_DIR}/extensions"
-    NEKOTUNE_TEST_EXTENSIONS="${CMAKE_CURRENT_BINARY_DIR}/native-extensions"
-    NEKOTUNE_TEST_SOURCES="${CMAKE_CURRENT_SOURCE_DIR}/native_extensions")
-add_dependencies(nekotune_native_extensions_test nekotune_example_lyrics nekotune_example_automation
-    nekotune_example_custom_ui nekotune_test_faulty_extension)
+target_link_libraries(nekotune_native_extensions_test PRIVATE nekotune_core Qt6::Network Qt6::Test)
+target_compile_definitions(nekotune_native_extensions_test PRIVATE ${NEKOTUNE_TEST_EXTENSION_DEFINITIONS})
+add_dependencies(nekotune_native_extensions_test nekotune_test_extension_fixtures)
 nekotune_add_qt_test(NAME nekotune_native_extensions_test COMMAND nekotune_native_extensions_test)
 set_tests_properties(nekotune_native_extensions_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_DISABLE_STACK_DUMP=1")
 

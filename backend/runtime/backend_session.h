@@ -5,11 +5,7 @@
 #include "application/playback/listening_history_service.h"
 #include "domain/playback/playback_backend.h"
 #include "infrastructure/ai/ai_backend.h"
-#ifdef NEKOTUNE_NATIVE_EXTENSIONS
 #include "infrastructure/extensions/plugin_manager.h"
-#else
-#include "infrastructure/extensions/extension_backend.h"
-#endif
 #include "infrastructure/library/import_executor.h"
 #include "infrastructure/library/loudness_analysis.h"
 #include "infrastructure/library/music_directory.h"
@@ -75,11 +71,7 @@ class BackendSession final : public QObject {
     IpcRouter m_router;
     LibraryScanner m_scanner;
     IpcServer m_server;
-#ifdef NEKOTUNE_NATIVE_EXTENSIONS
     PluginManager m_extensionBackend;
-#else
-    ExtensionBackend m_extensionBackend;
-#endif
     ExtensionService m_extensions{m_extensionBackend};
     MusicService m_musicSources;
     LibraryMaintenance m_maintenance;

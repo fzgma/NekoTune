@@ -447,7 +447,7 @@ class WallpaperTest final : public QObject {
         send(snapshot());
         QTRY_VERIFY(m_manager->dataReady());
         QTRY_VERIFY(m_controllers->extensions->appearanceReady());
-        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        const auto example = QFINDTESTDATA("../examples/extensions/theme-qml/Wallpaper.qml");
         QVERIFY(!example.isEmpty());
         const auto folder = QFileInfo(example).absolutePath();
         publishTheme(folder);
@@ -533,7 +533,7 @@ class WallpaperTest final : public QObject {
         QVERIFY(!output.value("themeError").toString().isEmpty());
         QVERIFY(changes.count() > 0);
         QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
-        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        const auto example = QFINDTESTDATA("../examples/extensions/theme-qml/Wallpaper.qml");
         QVERIFY(!example.isEmpty());
         const auto directory = QFileInfo(example).absolutePath();
         publishTheme(directory, "Wallpaper.qml", 2);
@@ -559,7 +559,7 @@ class WallpaperTest final : public QObject {
         setup();
         QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
         QVERIFY(!m_manager->requestedEnabled());
-        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        const auto example = QFINDTESTDATA("../examples/extensions/theme-qml/Wallpaper.qml");
         QVERIFY(!example.isEmpty());
         publishTheme(QFileInfo(example).absolutePath());
         send(snapshot());
@@ -589,7 +589,7 @@ class WallpaperTest final : public QObject {
         send(snapshot());
         QTRY_VERIFY(m_manager->dataReady());
         QTRY_VERIFY(m_controllers->extensions->appearanceReady());
-        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        const auto example = QFINDTESTDATA("../examples/extensions/theme-qml/Wallpaper.qml");
         QVERIFY(!example.isEmpty());
         const auto directory = QFileInfo(example).absolutePath();
         publishTheme(directory);
@@ -782,7 +782,7 @@ class WallpaperTest final : public QObject {
                 QVERIFY(window()->grabWindow().save(directory + "/native-wallpaper-" + style + ".png"));
         }
         qputenv("NEKOTUNE_SAFE_MODE", "0");
-        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        const auto example = QFINDTESTDATA("../examples/extensions/theme-qml/Wallpaper.qml");
         QVERIFY(!example.isEmpty());
         const auto themeDirectory = QFileInfo(example).absolutePath();
         publishTheme(themeDirectory);

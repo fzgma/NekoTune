@@ -6,3 +6,5 @@ nekotune_add_extension(nekotune_example_custom_ui
     MANIFEST custom-ui/extension.json
     SOURCES custom-ui/plugin.cpp
     FILES custom-ui/Page.qml custom-ui/Player.qml custom-ui/Shell.qml custom-ui/Toolbar.qml)
+nekotune_add_extension(nekotune_example_test_source MANIFEST test-source/extension.json SOURCES test-source/plugin.cpp)
+target_link_libraries(nekotune_example_test_source PRIVATE Qt6::Network)

@@ -1,7 +1,7 @@
 #include "infrastructure/extensions/extension_manifest.h"
 #include "infrastructure/extensions/semver.h"
+#include "infrastructure/extensions/theme_package.h"
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -106,15 +106,14 @@ Result<ExtensionManifest> readManifest(const QString &directory) {
                     return source.error();
         }
     }
+    for (const auto &theme : contributes.value("themes").toList())
+        if (auto valid = themes::validate(theme.toMap(), directory, manifest.isTheme()); !valid)
+            return valid.error();
     if (manifest.isTheme()) {
-        if (hasLibrary || data.value("nativeModules").toBool() || !manifest.dependencies().isEmpty() ||
-            contributes.value("themes").toList().isEmpty() || contributes.size() != 1)
-            return failure("Theme packages may only contribute themes, without a backend or native modules");
-        QDirIterator files(directory, QDir::Files | QDir::Hidden | QDir::NoSymLinks, QDirIterator::Subdirectories);
-        static const QRegularExpression code(R"(\.(qml|js|mjs)$)", QRegularExpression::CaseInsensitiveOption);
-        while (files.hasNext())
-            if (code.match(files.next()).hasMatch())
-                manifest.themeHasCode = true;
+        const auto info = themes::inspectPackage(directory, data);
+        if (!info)
+            return info.error();
+        manifest.themeHasCode = info.value().hasCode;
     }
     return manifest;
 }

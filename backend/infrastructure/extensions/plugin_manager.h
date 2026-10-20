@@ -10,6 +10,10 @@
 class QPluginLoader;
 
 namespace nekotune {
+class AudioProxy;
+}
+
+namespace nekotune {
 /// In-process native extension runtime. Loads trusted apiVersion 2 libraries with QPluginLoader
 /// and serves the same request/snapshot protocol the Node supervisor provided, so
 /// ExtensionService, MusicService and the frontend stay unchanged.
@@ -72,6 +76,8 @@ class PluginManager final : public IExtensionBackend {
     void install(const QVariantMap &params, Completion done);
     void uninstall(const QVariantMap &params, Completion done);
     Result<QVariantMap> select(const QVariantMap &params);
+    Result<QVariantMap> exportTheme(const QVariantMap &params);
+    void cleanUnusedPackages();
     Result<QVariantMap> setConfig(const QString &id, const QVariant &config);
     QVariantMap readConfig(const QString &id) const;
     void invoke(const QString &id, QString service, const QVariantMap &params, Completion done);
@@ -97,11 +103,15 @@ class PluginManager final : public IExtensionBackend {
     QHash<QString, QPluginLoader *> m_loaders;
     QHash<QString, QList<QVariantMap>> m_logs;
     QSet<QString> m_secrets;
+    /// Extensions whose native QML modules were loaded this session, and every directory holding
+    /// code that is mapped into this process; neither may be replaced or deleted before restart.
+    QSet<QString> m_nativeActivated, m_retainedDirectories;
     QVariantMap m_selections;
     QStringList m_developmentDirectories;
     QVariantMap m_extraState;
     std::deque<std::pair<Mutation, Completion>> m_mutations;
     HostCall m_hostCall;
+    std::unique_ptr<AudioProxy> m_audio;
     quint64 m_generation = 0;
     bool m_mutating = false;
     bool m_catalogueReady = false;

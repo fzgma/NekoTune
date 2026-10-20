@@ -3,6 +3,10 @@
 #include "infrastructure/extensions/extension_manifest.h"
 #include "infrastructure/extensions/plugin_manager.h"
 #include "infrastructure/extensions/semver.h"
+#include "infrastructure/extensions/zip_archive.h"
+#include <QDirIterator>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -356,6 +360,91 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(entry(*manager, "example.lyrics").value("state").toString(), "disabled");
         QVERIFY(entry(*manager, "example.lyrics").value("enabled").toBool());
         QVERIFY(!call(*manager, "extensions.enable", {{"id", "example.lyrics"}}));
+    }
+
+    void zipPackagesAndThemes() {
+        auto manager = startManager();
+        const auto exported = m_home->filePath("ocean.zip");
+        const auto builtin = call(*manager, "extensions.export_theme", {{"contribution", "builtin/ocean"}, {"path", exported}});
+        QVERIFY2(builtin, qPrintable(errorOf(builtin)));
+        const auto installed = call(*manager, "extensions.install", {{"path", exported}, {"themeOnly", true}});
+        QVERIFY2(installed, qPrintable(errorOf(installed)));
+        const auto theme = installed.value().value("extension").toMap();
+        QCOMPARE(theme.value("type").toString(), "theme");
+        QVERIFY(!theme.value("hasCode").toBool());
+        const auto id = theme.value("id").toString();
+        QVERIFY(theme.value("directory").toString().contains("/packages/" + id + "-1.0.0-"));
+        // Data-only themes need no trust decision.
+        QVERIFY(call(*manager, "extensions.enable", {{"id", id}}));
+        const auto contribution = id + "/theme";
+        QVERIFY(call(*manager, "extensions.select", {{"slot", "theme"}, {"contribution", contribution}}));
+        const auto again = m_home->filePath("again.nktheme.zip");
+        QVERIFY(call(*manager, "extensions.export_theme", {{"contribution", contribution}, {"path", again}}));
+        const auto replaced = call(*manager, "extensions.install", {{"path", again}, {"replace", true}, {"expectedId", id}});
+        QVERIFY2(replaced, qPrintable(errorOf(replaced)));
+        QCOMPARE(entry(*manager, id).value("state").toString(), "running");
+        // The replaced package directory is collected once nothing references it.
+        QCOMPARE(QDir(QDir(AppPaths::extensionsDirectory()).filePath("packages")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 1);
+
+        zip::Writer writer;
+        const QDir lyrics(examples + "/example.lyrics");
+        QDirIterator files(lyrics.path(), QDir::Files, QDirIterator::Subdirectories);
+        while (files.hasNext()) {
+            const auto file = files.next();
+            QVERIFY(writer.addFile(lyrics.relativeFilePath(file), file));
+        }
+        const auto package = m_home->filePath("lyrics.zip");
+        QVERIFY(writer.save(package));
+        const auto code = call(*manager, "extensions.install", {{"path", package}});
+        QVERIFY2(code, qPrintable(errorOf(code)));
+        enable(*manager, "example.lyrics");
+        QVERIFY(!call(*manager, "extensions.install", {{"path", package}, {"themeOnly", true}}));
+        // Packages produced by nekotune_add_extension (libarchive) install as well.
+        const auto built = call(*manager, "extensions.install",
+                                {{"path", QStringLiteral(NEKOTUNE_EXAMPLE_PACKAGES "/example.custom-ui-") + extensionPlatform() +
+                                              ".nekotune.zip"}});
+        QVERIFY2(built, qPrintable(errorOf(built)));
+        enable(*manager, "example.custom-ui");
+
+        zip::Writer unsafe;
+        unsafe.add("../escape.txt", "x");
+        QVERIFY(unsafe.save(m_home->filePath("unsafe.zip")));
+        QVERIFY(!call(*manager, "extensions.install", {{"path", m_home->filePath("unsafe.zip")}}));
+        QVERIFY(!QFileInfo::exists(m_home->filePath("escape.txt")));
+        QCOMPARE(QDir(QDir(AppPaths::extensionsDirectory()).filePath("packages")).entryList({".staging-*"}, QDir::Dirs | QDir::Hidden).size(), 0);
+    }
+
+    void audioProxyAndDownloads() {
+        auto manager = startManager();
+        install(*manager, examples + "/example.test-source");
+        enable(*manager, "example.test-source");
+        const auto leased = call(*manager, "extensions.resolve_audio", {{"source", "example.test-source/tones"}, {"id", "two"}});
+        QVERIFY2(leased, qPrintable(errorOf(leased)));
+        const QUrl url(leased.value().value("url").toString());
+        QCOMPARE(url.host(), "127.0.0.1");
+        QCOMPARE(leased.value().value("extension").toString(), "wav");
+        QNetworkAccessManager network;
+        QNetworkRequest request(url);
+        request.setRawHeader("Range", "bytes=0-11");
+        std::unique_ptr<QNetworkReply> reply(network.get(request));
+        QTRY_VERIFY_WITH_TIMEOUT(reply->isFinished(), 10'000);
+        QCOMPARE(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(), 206);
+        QCOMPARE(reply->rawHeader("Content-Range"), "bytes 0-11/352844");
+        const auto prefix = reply->readAll();
+        QVERIFY(prefix.startsWith("RIFF") && prefix.endsWith("WAVE"));
+        QVERIFY(call(*manager, "extensions.release_audio", {{"url", url.toString()}}));
+        reply.reset(network.get(QNetworkRequest(url)));
+        QTRY_VERIFY_WITH_TIMEOUT(reply->isFinished(), 10'000);
+        QCOMPARE(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(), 404);
+
+        QSignalSpy events(manager.get(), &IExtensionBackend::eventReady);
+        const auto base = m_home->filePath("download");
+        const auto downloaded = call(*manager, "extensions.download_audio",
+                                     {{"source", "example.test-source/tones"}, {"id", "one"}, {"base", base}, {"task", "t1"}});
+        QVERIFY2(downloaded, qPrintable(errorOf(downloaded)));
+        QCOMPARE(downloaded.value().value("path").toString(), base + ".wav");
+        QCOMPARE(QFileInfo(base + ".wav").size(), 352844);
+        QVERIFY(QDir(m_home->path()).entryList({"download.partial-*"}).isEmpty());
     }
 
     void uninstallClearsData() {

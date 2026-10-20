@@ -1,8 +1,11 @@
 #include "infrastructure/extensions/plugin_manager.h"
 #include "app_paths.h"
+#include "infrastructure/extensions/audio_proxy.h"
 #include "infrastructure/extensions/crash_guard.h"
 #include "infrastructure/extensions/extension_secrets.h"
 #include "infrastructure/extensions/semver.h"
+#include "infrastructure/extensions/theme_package.h"
+#include "infrastructure/extensions/zip_archive.h"
 #include <nekotune/sdk/extension_plugin.h>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -384,7 +387,16 @@ template <class F> bool PluginManager::guarded(const QString &id, F &&call) {
     return false;
 }
 
-PluginManager::PluginManager(QObject *parent) : IExtensionBackend(parent) {}
+PluginManager::PluginManager(QObject *parent) : IExtensionBackend(parent) {
+    m_audio = std::make_unique<AudioProxy>(
+        [this](const QString &source, const QString &id, const QString &purpose, Completion done) {
+            providerCall({{"source", source},
+                          {"kind", "music"},
+                          {"operation", purpose == "download" ? "download" : "resolve"},
+                          {"params", QVariantMap{{"id", id}, {"purpose", purpose}}}},
+                         std::move(done));
+        });
+}
 PluginManager::~PluginManager() { shutdown(); }
 
 QString PluginManager::root() const { return AppPaths::extensionsDirectory(); }
@@ -410,6 +422,9 @@ Result<void> PluginManager::addRegistration(const std::shared_ptr<Run> &run, con
     if (sourceKinds.contains(kind))
         if (auto source = containedFile(run->directory, descriptor.value("source").toString()); !source)
             return source.error();
+    if (kind == "themes")
+        if (auto valid = themes::validate(descriptor, run->directory); !valid)
+            return valid.error();
     descriptor.insert("id", run->id + "/" + id);
     descriptor.insert("localId", id);
     descriptor.insert("extensionId", run->id);
@@ -589,6 +604,9 @@ void PluginManager::runMutations() {
     m_mutations.pop_front();
     QPointer<PluginManager> guard(this);
     mutation([guard, done](Result<QVariantMap> result) {
+        // Only collect after the complete operation, including dependent restarts and rollback.
+        if (guard)
+            guard->cleanUnusedPackages();
         done(std::move(result));
         if (!guard)
             return;
@@ -680,6 +698,7 @@ void PluginManager::shutdown() {
     if (m_closing)
         return;
     m_closing = true;
+    m_audio->close();
     for (auto it = m_order.crbegin(); it != m_order.crend(); ++it)
         stop(*it);
     const auto mutations = std::exchange(m_mutations, {});
@@ -900,6 +919,10 @@ void PluginManager::startOne(const QString &id, Done done) {
         done(failure(entry.error));
         return;
     }
+    if (entry.manifest.data.value("nativeModules").toBool()) {
+        m_nativeActivated.insert(id);
+        m_retainedDirectories.insert(entry.directory);
+    }
     QDir().mkpath(dataDirectory(id));
     QFile::setPermissions(dataDirectory(id), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     entry.error.clear();
@@ -937,6 +960,8 @@ void PluginManager::startOne(const QString &id, Done done) {
                                              : QStringLiteral("Unsupported extension interface %1").arg(iid)));
         return;
     }
+    // Once mapped, the package directory must survive until exit (Windows also locks the DLL).
+    m_retainedDirectories.insert(entry.directory);
     bool loaded = false;
 #ifdef Q_OS_WIN
     // Windows does not search a DLL's own directory for its dependencies. SetDllDirectory is
@@ -1008,6 +1033,7 @@ void PluginManager::stop(const QString &id) {
     if (!run || run->state == "stopping")
         return;
     run->state = "stopping";
+    m_audio->revoke(id);
     run->startTimer.reset();
     run->debounce.reset();
     run->watcher.reset();
@@ -1111,40 +1137,82 @@ void PluginManager::install(const QVariantMap &params, Completion done) {
         done(failure("Local package path required"));
         return;
     }
-    if (!params.value("development").toBool()) {
-        done(failure("ZIP packages are not supported by the native runtime yet; mount the directory instead"));
-        return;
+    const bool development = params.value("development").toBool();
+    const bool themeOnly = params.value("themeOnly").toBool() || path.endsWith(".nktheme.zip");
+    QString directory;
+    if (development) {
+        directory = QFileInfo(path).canonicalFilePath();
+        if (directory.isEmpty() || !QFileInfo(directory).isDir()) {
+            done(failure("Extension directory not found"));
+            return;
+        }
+    } else {
+        // Unpack into a staging directory first; only a validated package gets its final name.
+        const QDir packages(QDir(root()).filePath("packages"));
+        packages.mkpath(".");
+        const auto stage = packages.filePath(".staging-" + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        zip::Limits limits;
+        if (themeOnly) {
+            limits.archiveBytes = themes::archiveLimit;
+            limits.unpackedBytes = themes::unpackedLimit;
+        }
+        const auto extracted = zip::extract(path, stage, limits);
+        const auto staged = extracted ? readManifest(stage) : Result<ExtensionManifest>(extracted.error());
+        if (!staged) {
+            QDir(stage).removeRecursively();
+            done(staged.error());
+            return;
+        }
+        if (staged.value().isTheme() && QFileInfo(path).size() > themes::archiveLimit) {
+            QDir(stage).removeRecursively();
+            done(failure("Theme archive exceeds 20 MiB"));
+            return;
+        }
+        directory = packages.filePath(QStringLiteral("%1-%2-%3").arg(staged.value().id(), staged.value().version(),
+                                                                     QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        if (!QDir().rename(stage, directory)) {
+            QDir(stage).removeRecursively();
+            done(failure("Cannot move extension package into place", ErrorCode::Io));
+            return;
+        }
     }
-    const auto directory = QFileInfo(path).canonicalFilePath();
-    if (directory.isEmpty() || !QFileInfo(directory).isDir()) {
-        done(failure("Extension directory not found"));
-        return;
-    }
+    // Re-read at the final location: library paths in the manifest are absolute.
     auto read = readManifest(directory);
     if (!read) {
+        if (!development)
+            QDir(directory).removeRecursively();
         done(read.error());
         return;
     }
+    const auto discard = [this, development, directory, done](const QString &message) {
+        if (!development)
+            QDir(directory).removeRecursively();
+        done(failure(message));
+    };
     const auto manifest = read.value();
     const auto id = manifest.id();
     if (params.contains("expectedId")) {
         const auto expected = params.value("expectedId").toString();
         if (!m_entries.contains(expected)) {
-            done(failure("Extension to update is not installed"));
+            discard("Extension to update is not installed");
             return;
         }
         if (id != expected) {
-            done(failure("theme_update_id_mismatch"));
+            discard("theme_update_id_mismatch");
             return;
         }
     }
     if (params.value("themeOnly").toBool() && !manifest.isTheme()) {
-        done(failure("Use the extension manager to install executable extensions"));
+        discard("Use the extension manager to install executable extensions");
+        return;
+    }
+    if (m_nativeActivated.contains(id)) {
+        discard("Native QML modules were loaded; restart in safe mode before updating");
         return;
     }
     const bool hadOld = m_entries.contains(id);
     if (hadOld && !params.value("replace").toBool()) {
-        done(failure("Extension already installed; set replace to update"));
+        discard("Extension already installed; set replace to update");
         return;
     }
     const auto old = m_entries.value(id);
@@ -1157,7 +1225,7 @@ void PluginManager::install(const QVariantMap &params, Completion done) {
     const bool codeNeedsTrust = manifest.isTheme() && manifest.themeHasCode && !trustRetained;
     Entry entry;
     entry.directory = directory;
-    entry.development = true;
+    entry.development = development;
     entry.manifest = manifest;
     entry.trusted = trustRetained;
     // Importing code into a formerly data-only theme waits for an explicit trust decision.
@@ -1283,8 +1351,10 @@ Result<QVariantMap> PluginManager::select(const QVariantMap &params) {
     const auto slot = params.value("slot").toString();
     const auto contribution = params.value("contribution").toString();
     if (!contribution.isEmpty()) {
-        // Built-in theme IDs come from shared/themes/catalog.json, which the frontend validates.
-        bool available = slot == "theme" && contribution.startsWith("builtin/");
+        bool available = false;
+        if (slot == "theme")
+            for (const auto &theme : themes::catalog().value("themes").toList())
+                available = available || theme.toMap().value("id") == contribution;
         for (const auto &value : snapshot().value("extensions").toList())
             for (const auto &item : value.toMap().value("contributes").toMap().value(slot == "theme" ? "themes" : "slots").toList()) {
                 const auto map = item.toMap();
@@ -1302,6 +1372,82 @@ Result<QVariantMap> PluginManager::select(const QVariantMap &params) {
     }
     notifyChanged();
     return snapshot();
+}
+void PluginManager::cleanUnusedPackages() {
+    const QDir packages(QDir(root()).filePath("packages"));
+    const QFileInfo rootInfo(packages.path());
+    if (!rootInfo.exists())
+        return;
+    if (rootInfo.isSymLink() || !rootInfo.isDir()) {
+        reportError("Extension package cleanup skipped: packages is not a real directory");
+        return;
+    }
+    // References on disk also protect the last committed version if saving a mutation failed.
+    const auto stored = readJson(QDir(root()).filePath("registry.json"), QVariant()).toMap();
+    if (!stored.value("entries").canConvert<QVariantList>())
+        return;
+    QStringList references = m_developmentDirectories + stored.value("developmentDirectories").toStringList();
+    for (const auto &directory : std::as_const(m_retainedDirectories))
+        references.append(directory);
+    for (const auto &run : std::as_const(m_runs))
+        references.append(run->directory);
+    for (const auto &entry : std::as_const(m_entries))
+        references << entry.directory << entry.previous.value("directory").toString();
+    for (const auto &value : stored.value("entries").toList())
+        references << value.toMap().value("directory").toString()
+                   << value.toMap().value("previous").toMap().value("directory").toString();
+    QSet<QString> retained;
+    for (const auto &reference : std::as_const(references))
+        if (!reference.isEmpty()) {
+            // Keep both spellings: a development directory may point into a package via a link.
+            retained.insert(QDir::cleanPath(QFileInfo(reference).absoluteFilePath()));
+            if (const auto canonical = QFileInfo(reference).canonicalFilePath(); !canonical.isEmpty())
+                retained.insert(canonical);
+        }
+    static const QString uuid = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+    static const QRegularExpression staging("^\\.staging-" + uuid + "$");
+    static const QRegularExpression package("^([a-z][a-z0-9._-]{1,100})-(v?\\d+\\.\\d+\\.\\d+[^/]*)-" + uuid + "$");
+    const auto base = rootInfo.canonicalFilePath();
+    for (const auto &item : QDir(base).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden)) {
+        const auto match = package.match(item.fileName());
+        if (!staging.match(item.fileName()).hasMatch() &&
+            !(match.hasMatch() && semver::parse(match.captured(2).startsWith('v') ? match.captured(2).mid(1) : match.captured(2))))
+            continue;
+        const auto target = base + "/" + item.fileName();
+        bool keep = item.isSymLink();
+        for (const auto &reference : std::as_const(retained))
+            keep = keep || reference == target || reference.startsWith(target + "/") || target.startsWith(reference + "/");
+        if (keep)
+            continue;
+        if (!QDir(target).removeRecursively())
+            reportError("Cannot clean extension package " + target);
+    }
+}
+Result<QVariantMap> PluginManager::exportTheme(const QVariantMap &params) {
+    const auto id = params.value("contribution").toString().isEmpty() ? QStringLiteral("builtin/yozakura")
+                                                                       : params.value("contribution").toString();
+    const auto destination = params.value("path").toString();
+    for (const auto &theme : themes::catalog().value("themes").toList())
+        if (theme.toMap().value("id") == id)
+            return themes::exportTheme(theme.toMap(), {}, {}, destination);
+    const auto owner = id.section('/', 0, 0), local = id.section('/', 1);
+    if (!m_entries.contains(owner))
+        return failure("Theme is unavailable for export");
+    const auto &entry = m_entries[owner];
+    QVariantMap theme;
+    for (const auto &value : entry.manifest.contributes().value("themes").toList())
+        if (value.toMap().value("id") == local)
+            theme = value.toMap();
+    if (theme.isEmpty())
+        if (const auto run = m_runs.value(owner))
+            theme = run->registrations.value("themes").value(local);
+    if (theme.isEmpty())
+        return failure("Theme is unavailable for export");
+    if (auto manifest = readManifest(entry.directory); !manifest)
+        return manifest.error();
+    if (auto valid = themes::validate(theme, entry.directory); !valid)
+        return valid.error();
+    return themes::exportTheme(theme, entry.directory, entry.manifest.data, destination);
 }
 QVariantMap PluginManager::readConfig(const QString &id) const {
     return readJson(QDir(dataDirectory(id)).filePath("config.json"), m_entries.value(id).manifest.data.value("config", QVariantMap{}))
@@ -1425,18 +1571,23 @@ void PluginManager::providerCall(const QVariantMap &params, Completion done) {
 }
 void PluginManager::resolveAudio(const QVariantMap &params, Completion done) {
     const auto source = params.value("source").toString();
+    const auto id = params.value("id").toString();
     const auto data = QFileInfo(dataDirectory(source.section('/', 0, 0))).canonicalFilePath();
-    providerCall({{"source", source}, {"kind", "music"}, {"operation", "resolve"}, {"params", QVariantMap{{"id", params.value("id")}, {"purpose", "play"}}}},
-                 [data, done](Result<QVariantMap> result) {
+    QPointer<PluginManager> guard(this);
+    providerCall({{"source", source}, {"kind", "music"}, {"operation", "resolve"}, {"params", QVariantMap{{"id", id}, {"purpose", "play"}}}},
+                 [guard, source, id, data, done](Result<QVariantMap> result) {
+                     if (!guard)
+                         return;
                      if (!result) {
                          done(result);
                          return;
                      }
                      const QUrl url(result.value().value("url").toString());
                      if (!url.isLocalFile()) {
-                         done(failure("Streaming extension audio over HTTP is not supported by the native runtime yet"));
+                         guard->m_audio->lease(source, id, result.value(), done);
                          return;
                      }
+                     // Prepared local files play directly but must stay inside the extension's data.
                      const auto file = QFileInfo(url.toLocalFile()).canonicalFilePath();
                      if (data.isEmpty() || file.isEmpty() || !file.startsWith(data + "/") || !QFileInfo(file).isFile()) {
                          done(failure("Extension audio files must be inside the extension data directory"));
@@ -1521,15 +1672,32 @@ void PluginManager::request(const QString &method, const QVariantMap &params, Co
         providerCall(params, std::move(done));
     else if (method == "extensions.resolve_audio")
         resolveAudio(params, std::move(done));
-    else if (method == "extensions.release_audio" || method == "extensions.cancel_download")
+    else if (method == "extensions.release_audio") {
+        m_audio->release(params.value("url").toString());
         done(QVariantMap{});
-    else if (method == "extensions.download_audio")
-        done(failure("Extension downloads are not supported by the native runtime yet"));
+    } else if (method == "extensions.cancel_download") {
+        m_audio->cancelDownload(params.value("task").toString());
+        done(QVariantMap{});
+    } else if (method == "extensions.download_audio") {
+        const auto source = params.value("source").toString();
+        const auto task = params.value("task").toString();
+        QPointer<PluginManager> guard(this);
+        m_audio->download(
+            source, params.value("id").toString(), params.value("base").toString(), task,
+            dataDirectory(source.section('/', 0, 0)),
+            [guard, task](qint64 received, qint64 total) {
+                if (guard)
+                    emit guard->eventReady({{"event", "music.download"},
+                                            {"task", task},
+                                            {"state", "running"},
+                                            {"received", received},
+                                            {"total", total}});
+            },
+            std::move(done));
+    }
     else if (method == "extensions.download_completed")
         providerCall({{"source", params.value("source")}, {"kind", "music"}, {"operation", "downloaded"}, {"params", params}},
                      std::move(done));
-    else if (method == "extensions.export_theme")
-        done(failure("Theme export is not supported by the native runtime yet"));
     else
         enqueue(
             [this, method, params, id](Completion finish) {
@@ -1547,6 +1715,8 @@ void PluginManager::request(const QString &method, const QVariantMap &params, Co
                     finish(setConfig(id, params.value("config")));
                 else if (method == "extensions.select")
                     finish(select(params));
+                else if (method == "extensions.export_theme")
+                    finish(exportTheme(params));
                 else if (!m_entries.contains(id))
                     finish(failure(method == "extensions.enable" || method == "extensions.disable" ||
                                            method == "extensions.reload"
