@@ -49,7 +49,7 @@ Result<SongMetadata> LibraryService::importFile(const ImportedFile &file, const 
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     auto song = m_songs.getOrCreateSong(file.hash, file.path, title, artist, file.sourceName, file.durationMs,
                                       file.importSource, file.metadata);
-    if (!song || !tx.commit())
+    if (!song || !m_songs.saveImportedAssets(song->id, file) || !tx.commit())
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     emit durationUpdated(*song);
     emit changed();
@@ -63,6 +63,35 @@ Result<void> LibraryService::recordPlayback(int id) {
     if (!song || !tx.commit())
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     emit statisticsUpdated(*song);
+    emit changed();
+    return {};
+}
+Result<SongMetadata> LibraryService::importDownloaded(const ImportedFile &file, const SongMetadata &remote) {
+    if (remote.providerId.isEmpty())
+        return importFile(file, remote.customTitle, remote.artist);
+    Transaction tx(m_transaction);
+    if (!tx)
+        return failure(m_transaction.errorString(), ErrorCode::Storage);
+    auto song = m_songs.getOrCreateRemote(remote);
+    if (!song || !m_songs.saveImportedAssets(song->id, file) || !tx.commit())
+        return failure(m_transaction.errorString(), ErrorCode::Storage);
+    auto updated = m_songs.songById(song->id);
+    if (!updated)
+        return failure("Downloaded song disappeared", ErrorCode::Storage);
+    emit metadataChanged(*updated);
+    emit changed();
+    return *updated;
+}
+Result<void> LibraryService::attachFile(int id, const ImportedFile &file) {
+    Transaction tx(m_transaction);
+    if (!tx)
+        return failure(m_transaction.errorString(), ErrorCode::Storage);
+    if (!m_songs.songById(id) || !m_songs.saveImportedAssets(id, file) ||
+        (file.durationMs > 0 && !m_songs.updateDuration(id, file.durationMs)) || !tx.commit())
+        return failure(m_songs.errorString(), ErrorCode::Storage);
+    const auto song = m_songs.songById(id);
+    if (song)
+        emit metadataChanged(*song);
     emit changed();
     return {};
 }

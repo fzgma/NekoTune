@@ -19,10 +19,18 @@ class ImportExecutor final : public IFileInspector {
     /// The mapper may register managed paths because it runs after returning to the SQL owner.
     /// An unknown duration does not turn an otherwise valid audio inspection into failure.
     void inspect(const QString &path, Completion completion) override;
+    void inspectAssets(const QString &path, Completion completion) override {
+        inspectUnmanaged(path, [this, completion = std::move(completion)](Result<ImportedFile> result) {
+            completion(result && m_mapper ? m_mapper(result.value()) : std::move(result));
+        });
+    }
     /// Inspect a remembered source without invoking the configured managed-path mapper.
     /// Use this when recovering legacy duration rather than registering a new managed resource.
     /// Completion still returns to the executor's owning thread.
     void inspectUnmanaged(const QString &path, Completion completion);
+    void inspectObject(const QString &path, Completion completion) {
+        inspectFile(path, std::move(completion), false, false);
+    }
     /// Discover supported local audio and numbered references without traversing linked directories.
     /// The callback receives paths to inspect, not registered library records.
     /// Discovery is off-thread and does not choose a playback context.
@@ -35,8 +43,14 @@ class ImportExecutor final : public IFileInspector {
     /// Accepted inspection callbacks are completed with cancellation rather than silently dropped.
     /// No worker-owned database connection is needed because mapping remains on the owner thread.
     void shutdown() override;
+    void setRoot(const QString &root) { m_root = root; }
+    void setCleanup(std::function<void(const ImportedFile &)> cleanup) { m_cleanup = std::move(cleanup); }
+    void releaseStaging(const QString &path) override;
 
   private:
+    void inspectFile(const QString &path, Completion completion, bool copy, bool probe = true);
+    QString m_root;
+    std::function<void(const ImportedFile &)> m_cleanup;
     void complete(quint64 id, Result<ImportedFile> result);
     QThread m_thread;
     QObject *m_worker;

@@ -1,5 +1,7 @@
 #pragma once
 #include "domain/playback/playback_backend.h"
+#include <QJsonObject>
+#include <QLockFile>
 #include <QObject>
 #include <QThread>
 #include <functional>
@@ -28,6 +30,9 @@ class BackendRuntime final : public QObject {
     QString serverName() const { return m_serverName; }
 
   private:
+    void wireSession();
+    void restore(const QJsonObject &journal, const QString &task);
+    std::unique_ptr<QLockFile> m_libraryLock, m_databaseLock;
     PlaybackBackendFactory m_audioFactory;
     QThread m_thread;
     QObject *m_context = nullptr;

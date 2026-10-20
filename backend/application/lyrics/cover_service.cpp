@@ -25,6 +25,11 @@ QString CoverService::cachedCover(const QString &trackId) const {
 }
 
 QString CoverService::resolve(const QString &path, const QString &trackId) const {
+    const auto stored = m_storedCover ? m_storedCover(trackId) : QString();
+    if (!stored.isEmpty() && QFileInfo(stored).isFile())
+        return QUrl::fromLocalFile(stored).toString();
+    if (!m_offline && (stored.startsWith("https://") || stored.startsWith("http://")))
+        return stored;
     auto localCover = [&](const QString &base, bool managed) -> QString {
         for (const auto &suffix : {".jpg", ".jpeg", ".png", ".webp"})
             if (const QFileInfo cover(base + QLatin1String(suffix)); cover.isFile()) {
@@ -51,7 +56,8 @@ QString CoverService::resolve(const QString &path, const QString &trackId) const
         const auto base = audio.dir().filePath(audio.completeBaseName());
         bool numbered = false;
         audio.completeBaseName().toLongLong(&numbered);
-        if (const auto cover = localCover(base, numbered && audio.completeBaseName() == audio.dir().dirName());
+        if (const auto cover =
+                localCover(base, numbered && audio.completeBaseName() == audio.dir().dirName());
             !cover.isEmpty())
             return cover;
         if (audio.isSymLink() && audio.exists()) {

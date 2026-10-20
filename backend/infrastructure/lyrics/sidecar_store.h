@@ -2,6 +2,7 @@
 #include "domain/lyrics/lyrics_types.h"
 #include <QNetworkAccessManager>
 #include <QPointer>
+#include <functional>
 
 namespace nekotune {
 /// Saves selected lyrics/artwork beside managed audio; late cover replies cannot replace newer assets.
@@ -23,6 +24,9 @@ class SidecarStore final : public QObject {
     /// Aborting a reply can emit completion, so callbacks are disconnected first.
     /// Already published local lyric files are not removed by cancellation.
     void shutdown();
+    using Writer =
+        std::function<bool(const QString &, const LyricsDocument &, const QByteArray &, const QString &)>;
+    void setWriter(Writer writer) { m_writer = std::move(writer); }
   signals:
     void saved(const QString &hash);
     void failed(const QString &hash, const QString &message);
@@ -36,5 +40,7 @@ class SidecarStore final : public QObject {
     QString m_hash;
     quint64 m_revision = 0, m_generation = 0;
     bool m_offline = false;
+    Writer m_writer;
+    LyricsDocument m_document;
 };
 } // namespace nekotune

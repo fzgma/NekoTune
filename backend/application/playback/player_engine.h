@@ -20,6 +20,7 @@ class PlayerEngine final : public QObject {
     /// No change notification is emitted when the requested mode is already active.
     Result<void> setPlaybackMode(PlaybackMode mode);
     PlaybackSnapshot snapshot() const;
+    QUrl loadedSource() const { return m_backend.source(); }
     /// Resume a loaded source or load the selected persisted occurrence.
     /// A nonempty unselected queue first persists selection of its first item.
     /// An empty queue fails instead of reviving the last cleared decoder source.

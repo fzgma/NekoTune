@@ -339,38 +339,85 @@ bool DatabaseSession::migrate() {
         }
     }
     const QStringList statements{
-        QStringLiteral("CREATE TABLE IF NOT EXISTS listening_sessions (id TEXT PRIMARY KEY, song_key TEXT NOT NULL, "
-                       "title TEXT NOT NULL, artist TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', song_id INTEGER NOT NULL, "
-                       "queue_id INTEGER NOT NULL, started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, "
-                       "listened_ms INTEGER NOT NULL DEFAULT 0 CHECK(listened_ms>=0), duration_ms INTEGER NOT NULL, "
+        "CREATE TABLE IF NOT EXISTS audio_objects(hash TEXT PRIMARY KEY, "
+        "relative_path TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, mtime "
+        "INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'ready', retained "
+        "INTEGER NOT NULL DEFAULT 1)",
+        "CREATE TABLE IF NOT EXISTS artwork_objects(hash TEXT PRIMARY KEY, "
+        "relative_path TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, mtime INTEGER "
+        "NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'ready', retained "
+        "INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS song_assets(song_id INTEGER PRIMARY KEY "
+        "REFERENCES songs(id) ON DELETE CASCADE, audio_hash TEXT REFERENCES "
+        "audio_objects(hash), cover_hash TEXT REFERENCES "
+        "artwork_objects(hash))",
+        "CREATE INDEX IF NOT EXISTS song_assets_audio ON "
+        "song_assets(audio_hash)",
+        "CREATE TABLE IF NOT EXISTS song_lyrics(song_id INTEGER NOT NULL "
+        "REFERENCES songs(id) ON DELETE CASCADE, kind TEXT NOT NULL, document "
+        "TEXT NOT NULL, raw_krc BLOB NOT NULL DEFAULT X'', PRIMARY "
+        "KEY(song_id,kind))",
+        "CREATE TABLE IF NOT EXISTS storage_tasks(id TEXT PRIMARY KEY, kind "
+        "TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS storage_migrations(song_id INTEGER PRIMARY "
+        "KEY REFERENCES songs(id) ON DELETE CASCADE, state TEXT NOT NULL, "
+        "source TEXT NOT NULL, error TEXT NOT NULL DEFAULT '')",
+        QStringLiteral("CREATE TABLE IF NOT EXISTS listening_sessions (id TEXT "
+                       "PRIMARY KEY, song_key TEXT NOT NULL, "
+                       "title TEXT NOT NULL, artist TEXT NOT NULL, reason TEXT "
+                       "NOT NULL DEFAULT '', song_id INTEGER NOT NULL, "
+                       "queue_id INTEGER NOT NULL, started_at INTEGER NOT "
+                       "NULL, updated_at INTEGER NOT NULL, "
+                       "listened_ms INTEGER NOT NULL DEFAULT 0 "
+                       "CHECK(listened_ms>=0), duration_ms INTEGER NOT NULL, "
                        "completed INTEGER NOT NULL DEFAULT 0)"),
-        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_sessions_by_start ON listening_sessions(started_at DESC,id DESC)"),
-        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_sessions_complete ON listening_sessions(completed,started_at DESC,id DESC)"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS listening_intervals (session_id TEXT NOT NULL REFERENCES "
-                       "listening_sessions(id) ON DELETE CASCADE, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL, "
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_sessions_by_start "
+                       "ON listening_sessions(started_at DESC,id DESC)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_sessions_complete ON "
+                       "listening_sessions(completed,started_at DESC,id DESC)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS listening_intervals "
+                       "(session_id TEXT NOT NULL REFERENCES "
+                       "listening_sessions(id) ON DELETE CASCADE, started_at "
+                       "INTEGER NOT NULL, ended_at INTEGER NOT NULL, "
                        "CHECK(ended_at>started_at))"),
-        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_intervals_by_end ON listening_intervals(ended_at,started_at)"),
-        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_intervals_by_session ON listening_intervals(session_id)"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS managed_resources (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                       "hash TEXT UNIQUE, original_path TEXT NOT NULL DEFAULT '', source_name TEXT NOT NULL "
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_intervals_by_end "
+                       "ON listening_intervals(ended_at,started_at)"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS listening_intervals_by_session ON "
+                       "listening_intervals(session_id)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS managed_resources (id "
+                       "INTEGER PRIMARY KEY AUTOINCREMENT, "
+                       "hash TEXT UNIQUE, original_path TEXT NOT NULL DEFAULT "
+                       "'', source_name TEXT NOT NULL "
                        "DEFAULT '', path TEXT NOT NULL DEFAULT '')"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS resource_sources (provider_hash TEXT PRIMARY KEY, "
+        QStringLiteral("CREATE TABLE IF NOT EXISTS resource_sources (provider_hash TEXT "
+                       "PRIMARY KEY, "
                        "resource_id INTEGER NOT NULL REFERENCES managed_resources(id))"),
         QStringLiteral("CREATE TABLE IF NOT EXISTS scan_ignored (hash TEXT PRIMARY KEY)"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS playlists (id INTEGER PRIMARY KEY AUTOINCREMENT, name "
+        QStringLiteral("CREATE TABLE IF NOT EXISTS playlists (id INTEGER "
+                       "PRIMARY KEY AUTOINCREMENT, name "
                        "TEXT NOT NULL)"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS playlist_items (playlist_id INTEGER NOT NULL REFERENCES "
-                       "playlists(id) ON DELETE CASCADE, song_id INTEGER NOT NULL REFERENCES songs(id), path "
-                       "TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY (playlist_id, song_id))"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT "
+        QStringLiteral("CREATE TABLE IF NOT EXISTS playlist_items (playlist_id "
+                       "INTEGER NOT NULL REFERENCES "
+                       "playlists(id) ON DELETE CASCADE, song_id INTEGER NOT "
+                       "NULL REFERENCES songs(id), path "
+                       "TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY "
+                       "(playlist_id, song_id))"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY "
+                       "KEY AUTOINCREMENT, name TEXT NOT "
                        "NULL, normalized_name TEXT NOT NULL UNIQUE)"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS song_tags (song_id INTEGER NOT NULL REFERENCES songs(id) "
-                       "ON DELETE CASCADE, tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, "
+        QStringLiteral("CREATE TABLE IF NOT EXISTS song_tags (song_id INTEGER "
+                       "NOT NULL REFERENCES songs(id) "
+                       "ON DELETE CASCADE, tag_id INTEGER NOT NULL REFERENCES "
+                       "tags(id) ON DELETE CASCADE, "
                        "PRIMARY KEY (song_id, tag_id))"),
-        QStringLiteral("CREATE TABLE IF NOT EXISTS song_paths (song_id INTEGER NOT NULL REFERENCES songs(id) "
-                       "ON DELETE CASCADE, path TEXT NOT NULL, PRIMARY KEY (song_id, path))"),
-        QStringLiteral("INSERT OR IGNORE INTO song_paths (song_id, path) SELECT id, first_path FROM songs"),
-        QStringLiteral("CREATE INDEX IF NOT EXISTS song_tags_by_tag ON song_tags(tag_id, song_id)"),
+        QStringLiteral("CREATE TABLE IF NOT EXISTS song_paths (song_id INTEGER "
+                       "NOT NULL REFERENCES songs(id) "
+                       "ON DELETE CASCADE, path TEXT NOT NULL, PRIMARY KEY "
+                       "(song_id, path))"),
+        QStringLiteral("INSERT OR IGNORE INTO song_paths (song_id, path) "
+                       "SELECT id, first_path FROM songs"),
+        QStringLiteral("CREATE INDEX IF NOT EXISTS song_tags_by_tag ON "
+                       "song_tags(tag_id, song_id)"),
     };
     for (const auto &statement : statements) {
         if (!query.exec(statement)) {
@@ -379,6 +426,24 @@ bool DatabaseSession::migrate() {
             return false;
         }
     }
+    QSet<QString> artworkColumns;
+    if (!query.exec("PRAGMA table_info(artwork_objects)")) {
+        setError(query.lastError().text());
+        m_db.rollback();
+        return false;
+    }
+    while (query.next())
+        artworkColumns.insert(query.value(1).toString());
+    query.finish();
+    for (const auto &column : {QString("retained"), QString("mtime"), QString("state")})
+        if (!artworkColumns.contains(column) &&
+            !query.exec(
+                "ALTER TABLE artwork_objects ADD COLUMN " + column +
+                (column == "state" ? " TEXT NOT NULL DEFAULT 'ready'" : " INTEGER NOT NULL DEFAULT 0"))) {
+            setError(query.lastError().text());
+            m_db.rollback();
+            return false;
+        }
     if (!migrateFolders()) {
         m_db.rollback();
         return false;

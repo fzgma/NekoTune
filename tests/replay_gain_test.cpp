@@ -461,8 +461,12 @@ class ReplayGainTest : public QObject {
                      .value("total")
                      .toInt(),
                  2);
-        QTRY_VERIFY_WITH_TIMEOUT(readLoudnessCache(b).albumGainDb.has_value(), 10000);
-        QCOMPARE(readLoudnessCache(a).albumGainDb, readLoudnessCache(b).albumGainDb);
+        const auto ownedA =
+            first.call("song.metadata", {{"song_id", aId}})["data"].toObject()["first_path"].toString();
+        const auto ownedB =
+            first.call("song.metadata", {{"song_id", bId}})["data"].toObject()["first_path"].toString();
+        QTRY_VERIFY_WITH_TIMEOUT(readLoudnessCache(ownedB).albumGainDb.has_value(), 10000);
+        QCOMPARE(readLoudnessCache(ownedA).albumGainDb, readLoudnessCache(ownedB).albumGainDb);
         QCOMPARE(hash(a), beforeA);
         QCOMPARE(hash(b), beforeB);
         first.socket.abort();

@@ -17,6 +17,10 @@ class IFileInspector : public QObject {
     using Completion = std::function<void(Result<ImportedFile>)>;
     using QObject::QObject;
     virtual void inspect(const QString &path, Completion completion) = 0;
+    virtual void inspectAssets(const QString &path, Completion completion) {
+        inspect(path, std::move(completion));
+    }
+    virtual void releaseStaging(const QString &) {}
     virtual void shutdown() = 0;
 };
 } // namespace nekotune

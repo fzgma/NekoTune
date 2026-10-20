@@ -1,10 +1,14 @@
 #include "runtime/backend_session.h"
 #include "app_paths.h"
+#include "application/transaction.h"
 #include "infrastructure/extensions/extension_lyrics_provider.h"
 #include "infrastructure/lyrics/lrclib_provider.h"
 #include "infrastructure/lyrics/lyrics_storage.h"
 #include "infrastructure/playback/playback_backend_supervisor.h"
 #include "ipc/serialization/audio_serialization.h"
+#include "storage/resource_repository.h"
+#include <QSqlQuery>
+#include <QTimer>
 #include <algorithm>
 #include <limits>
 #include <tuple>
@@ -42,23 +46,28 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
       m_playlistRepository(m_database), m_tagRepository(m_database), m_historyRepository(m_database),
       m_library(m_songs, m_tagRepository, m_database), m_playlists(m_playlistRepository),
       m_tags(m_tagRepository), m_queue(m_queueRepository, m_songs, m_database),
-      m_audio(audio ? std::move(audio) : std::make_unique<PlaybackBackendSupervisor>(savedAudioSettings().backend)),
-      m_player(*m_audio, m_queue, std::make_unique<ShuffleBagStrategy>(),
-               playbackModeFromString(AppPaths::setting("playback_mode").toString())
-                   .value_or(PlaybackMode::Sequential),
-               [](PlaybackMode mode) { return AppPaths::saveSetting("playback_mode", toString(mode)); },
-               AppPaths::setting("playback_rate").toDouble(1.0),
-               [](double rate) { return AppPaths::saveSetting("playback_rate", rate); }),
+      m_audio(audio ? std::move(audio)
+                    : std::make_unique<PlaybackBackendSupervisor>(savedAudioSettings().backend)),
+      m_player(
+          *m_audio, m_queue, std::make_unique<ShuffleBagStrategy>(),
+          playbackModeFromString(AppPaths::setting("playback_mode").toString())
+              .value_or(PlaybackMode::Sequential),
+          [](PlaybackMode mode) { return AppPaths::saveSetting("playback_mode", toString(mode)); },
+          AppPaths::setting("playback_rate").toDouble(1.0),
+          [](double rate) { return AppPaths::saveSetting("playback_rate", rate); }),
       m_history(m_player, *m_audio, m_historyRepository),
-      m_audioOutputs(*m_audio, savedAudioOutput(), [](const AudioOutputSelection &selected) {
-          return AppPaths::saveSetting("audio_output", QJsonObject{{"device_id", selected.id},
-                                                                 {"device_name", selected.name},
-                                                                 {"port_id", selected.portId},
-                                                                 {"port_name", selected.portName}});
-      }),
-      m_audioSettings(*m_audio, m_player, savedAudioSettings(), [](const AudioSettings &settings) {
-          return AppPaths::saveSetting("audio_engine", audioSettingsJson(settings));
-      }),
+      m_audioOutputs(*m_audio, savedAudioOutput(),
+                     [](const AudioOutputSelection &selected) {
+                         return AppPaths::saveSetting("audio_output",
+                                                      QJsonObject{{"device_id", selected.id},
+                                                                  {"device_name", selected.name},
+                                                                  {"port_id", selected.portId},
+                                                                  {"port_name", selected.portName}});
+                     }),
+      m_audioSettings(*m_audio, m_player, savedAudioSettings(),
+                      [](const AudioSettings &settings) {
+                          return AppPaths::saveSetting("audio_engine", audioSettingsJson(settings));
+                      }),
       m_lyrics(m_player, createLyrics()), m_covers(std::make_unique<LyricsStorage>()),
       m_collections(m_songs, m_queueRepository, m_playlistRepository, m_database, m_library, m_queue,
                     m_player, &m_music),
@@ -70,63 +79,144 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
       m_server(m_router, [this] { return m_api.status(); }),
       m_musicSources(
           m_extensions, m_library, m_imports, m_router.commands(),
-          [this](const QString &id, const QString &title) { return m_music.reserveDownload(id, title); }) {
+          [this](const QString &id, const QString &title) { return m_music.reserveDownload(id, title); }),
+      m_maintenance(m_database, m_music, m_imports, m_songs, m_playlistRepository, m_library, m_player,
+                    m_router) {
+    m_maintenance.install();
+    connect(&m_maintenance, &LibraryMaintenance::event, &m_server, &IpcServer::broadcastEvent);
+    connect(&m_maintenance, &LibraryMaintenance::restoreReady, this, &BackendSession::restoreRequested);
+    connect(m_audio.get(), &IPlaybackBackend::sourceReleased, &m_maintenance,
+            &LibraryMaintenance::retryCleanup);
     m_covers.updateLyrics(m_lyrics.snapshot());
     m_imports.setMapper([this](const ImportedFile &file) { return m_music.manage(file); });
+    m_imports.setRoot(m_music.directory());
+    m_imports.setCleanup([this](const ImportedFile &file) {
+        QSqlQuery q(m_database.database());
+        q.prepare("SELECT 1 FROM song_assets WHERE audio_hash=?");
+        q.addBindValue(file.hash);
+        if (q.exec() && q.next())
+            m_imports.releaseStaging(file.stagingDirectory);
+    });
+    m_lyrics.setStoredLyricsResolver([this](int id) {
+        ResourceRepository assets(m_database);
+        const auto song = m_songs.songById(id);
+        return LyricsController::StoredLyrics{assets.lyrics(id, "local"), assets.lyrics(id, "selected"),
+                                              assets.hasAudio(id) || (song && !song->providerId.isEmpty())};
+    });
+    m_covers.setStoredCoverResolver([this](const QString &key) {
+        ResourceRepository assets(m_database);
+        if (!m_resourceIds.contains(key))
+            for (const auto &song : m_songs.songs())
+                m_resourceIds[song.resourceKey()] = song.id;
+        if (m_resourceIds.contains(key)) {
+            const auto id = m_resourceIds.value(key);
+            const auto path = assets.coverPath(id);
+            if (!path.isEmpty())
+                return path;
+            const auto selected = assets.lyrics(id, "selected");
+            if (selected)
+                return selected->coverUrl;
+        }
+        return QString();
+    });
+    m_sidecars.setWriter([this](const QString &key, const LyricsDocument &doc, const QByteArray &image,
+                                const QString &suffix) {
+        const auto current = m_player.snapshot().song;
+        if (!current || current->metadata.resourceKey() != key)
+            return false;
+        ImportedFile assets;
+        if (!image.isEmpty()) {
+            assets.sidecars[suffix] = image;
+            if (!m_music.publishArtwork(assets))
+                return false;
+        }
+        Transaction tx(m_database);
+        if (!tx)
+            return false;
+        if (!ResourceRepository(m_database).saveLyrics(current->metadata.id, doc, "selected"))
+            return false;
+        if (assets.sidecars.contains("cover_hash")) {
+            QSqlQuery q(m_database.database());
+            q.prepare("INSERT INTO song_assets(song_id,cover_hash) VALUES(?,?) ON "
+                      "CONFLICT(song_id) DO UPDATE SET cover_hash=excluded.cover_hash");
+            q.addBindValue(current->metadata.id);
+            q.addBindValue(QString::fromLatin1(assets.sidecars["cover_hash"]));
+            if (!q.exec())
+                return false;
+        }
+        return tx.commit();
+    });
     m_covers.setManagedBaseResolver([this](const QString &hash) { return m_music.baseFor(hash); });
     m_lyrics.setManagedBaseResolver([this](const QString &hash) { return m_music.baseFor(hash); });
     m_api.scan = [this] { return m_scanner.start(); };
     m_api.musicDirectory = m_music.directory();
     m_api.configDirectory = AppPaths::configDirectory();
     m_api.ai = &m_ai;
-    connect(&m_history, &ListeningHistoryService::changed, this, [this] {
-        m_server.broadcastEvent({{"event", "history.changed"}});
-    });
+    connect(&m_history, &ListeningHistoryService::changed, this,
+            [this] { m_server.broadcastEvent({{"event", "history.changed"}}); });
     connect(&m_history, &ListeningHistoryService::errorOccurred, &m_player, &PlayerEngine::errorOccurred);
     m_api.audioOutputs = &m_audioOutputs;
     m_api.audioSettings = &m_audioSettings;
-    m_audioSettings.setAnalysisActions([this](const QVector<int> &ids) -> Result<void> {
-        for (int id : ids) if (!m_library.metadata(id)) return failure("Unknown song ID", ErrorCode::NotFound);
-        auto library = m_library.snapshot();
-        std::stable_sort(library.songs.begin(), library.songs.end(), [](const auto &a, const auto &b) {
-            const auto order = [](int value) { return value > 0 ? value : std::numeric_limits<int>::max(); };
-            return std::tuple(order(a.metadata.discNumber), order(a.metadata.trackNumber), a.metadata.id) <
-                   std::tuple(order(b.metadata.discNumber), order(b.metadata.trackNumber), b.metadata.id);
-        });
-        QMap<QString, LoudnessAnalysisGroup> grouped;
-        QSet<QString> selected, incomplete;
-        for (const auto &song : library.songs) {
-            const auto &meta = song.metadata;
-            if (meta.isRemote()) continue;
-            const auto album = meta.album.trimmed().toCaseFolded();
-            const auto artist = (meta.albumArtist.isEmpty() ? meta.artist : meta.albumArtist).trimmed().toCaseFolded();
-            const QString key = album.isEmpty() ? QString("track:%1").arg(meta.id) : album + QChar(0) + artist;
-            if (ids.isEmpty() || ids.contains(meta.id)) selected.insert(key);
-            if (song.path.isEmpty()) { incomplete.insert(key); continue; }
-            auto &group = grouped[key];
-            group.album = !album.isEmpty();
-            if (!group.paths.contains(song.path)) group.paths.append(song.path);
-        }
-        QVector<LoudnessAnalysisGroup> groups;
-        for (auto it = grouped.begin(); it != grouped.end(); ++it) {
-            if (!selected.contains(it.key())) continue;
-            auto group = it.value();
-            if (incomplete.contains(it.key())) group.album = false;
-            groups.append(group);
-        }
-        return m_loudness.start(groups);
-    }, [this] { m_loudness.cancel(); });
+    m_audioSettings.setAnalysisActions(
+        [this](const QVector<int> &ids) -> Result<void> {
+            for (int id : ids)
+                if (!m_library.metadata(id))
+                    return failure("Unknown song ID", ErrorCode::NotFound);
+            auto library = m_library.snapshot();
+            std::stable_sort(library.songs.begin(), library.songs.end(), [](const auto &a, const auto &b) {
+                const auto order = [](int value) {
+                    return value > 0 ? value : std::numeric_limits<int>::max();
+                };
+                return std::tuple(order(a.metadata.discNumber), order(a.metadata.trackNumber),
+                                  a.metadata.id) <
+                       std::tuple(order(b.metadata.discNumber), order(b.metadata.trackNumber), b.metadata.id);
+            });
+            QMap<QString, LoudnessAnalysisGroup> grouped;
+            QSet<QString> selected, incomplete;
+            for (const auto &song : library.songs) {
+                const auto &meta = song.metadata;
+                if (meta.isRemote())
+                    continue;
+                const auto album = meta.album.trimmed().toCaseFolded();
+                const auto artist =
+                    (meta.albumArtist.isEmpty() ? meta.artist : meta.albumArtist).trimmed().toCaseFolded();
+                const QString key =
+                    album.isEmpty() ? QString("track:%1").arg(meta.id) : album + QChar(0) + artist;
+                if (ids.isEmpty() || ids.contains(meta.id))
+                    selected.insert(key);
+                if (song.path.isEmpty()) {
+                    incomplete.insert(key);
+                    continue;
+                }
+                auto &group = grouped[key];
+                group.album = !album.isEmpty();
+                if (!group.paths.contains(song.path))
+                    group.paths.append(song.path);
+            }
+            QVector<LoudnessAnalysisGroup> groups;
+            for (auto it = grouped.begin(); it != grouped.end(); ++it) {
+                if (!selected.contains(it.key()))
+                    continue;
+                auto group = it.value();
+                if (incomplete.contains(it.key()))
+                    group.album = false;
+                groups.append(group);
+            }
+            return m_loudness.start(groups);
+        },
+        [this] { m_loudness.cancel(); });
     connect(&m_player, &PlayerEngine::stateChanged, &m_loudness, [this](PlayerState state) {
         m_loudness.setPlaying(state == PlayerState::Playing || state == PlayerState::Loading);
     });
-    connect(&m_loudness, &LoudnessAnalysis::changed, this, [this] {
-        m_audioSettings.setAnalysisStatus(m_loudness.status());
-    });
-    connect(&m_loudness, &LoudnessAnalysis::resultReady, this, [this](const QString &path, const ReplayGainData &data) {
-        m_audio->updateReplayGainData(QUrl::fromLocalFile(path), data);
-    });
+    connect(&m_loudness, &LoudnessAnalysis::changed, this,
+            [this] { m_audioSettings.setAnalysisStatus(m_loudness.status()); });
+    connect(&m_loudness, &LoudnessAnalysis::resultReady, this,
+            [this](const QString &path, const ReplayGainData &data) {
+                m_audio->updateReplayGainData(QUrl::fromLocalFile(path), data);
+            });
     connect(&m_audioSettings, &AudioSettingsService::changed, this, [this] {
-        auto event = m_api.audioSettingsStatus(); event.insert("event", "player.audio_settings_changed");
+        auto event = m_api.audioSettingsStatus();
+        event.insert("event", "player.audio_settings_changed");
         event.insert("playback_rate_supported", m_audio->supportsPlaybackRate());
         event.insert("playback_rate", m_audio->playbackRate());
         m_server.broadcastEvent(event);
@@ -190,7 +280,10 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     registerAiApi(m_router, m_api);
     registerExtensionsApi(m_router, m_api);
     registerMusicApi(m_router, m_api);
-    auto libraryChanged = [this] { m_server.broadcastEvent({{"event", "library.changed"}}); };
+    auto libraryChanged = [this] {
+        m_resourceIds.clear();
+        m_server.broadcastEvent({{"event", "library.changed"}});
+    };
     auto playlistsChanged = [this] {
         m_server.broadcastEvent({{"event", "playlist.changed"}, {"playlists", m_api.playlistList()}});
     };
@@ -199,14 +292,16 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     connect(&m_collections, &CollectionService::libraryChanged, this, libraryChanged);
     connect(&m_collections, &CollectionService::playlistsChanged, this, playlistsChanged);
     connect(&m_playlists, &PlaylistService::changed, this, playlistsChanged);
-    // Duration enrichment updates every queued occurrence through library identity.
-    // Playlist snapshots are also invalidated so all views share the same stored duration.
-    // Neither notification selects another track or rebuilds collection membership.
+    // Duration enrichment updates every queued occurrence through library
+    // identity. Playlist snapshots are also invalidated so all views share the
+    // same stored duration. Neither notification selects another track or
+    // rebuilds collection membership.
     connect(&m_library, &LibraryService::durationUpdated, &m_player, &PlayerEngine::metadataUpdated);
     connect(&m_library, &LibraryService::durationUpdated, this,
             [playlistsChanged](const SongMetadata &) { playlistsChanged(); });
     connect(&m_library, &LibraryService::metadataChanged, &m_player, &PlayerEngine::metadataUpdated);
-    connect(&m_library, &LibraryService::metadataBatchChanged, &m_player, &PlayerEngine::metadataBatchUpdated);
+    connect(&m_library, &LibraryService::metadataBatchChanged, &m_player,
+            &PlayerEngine::metadataBatchUpdated);
     connect(&m_library, &LibraryService::metadataBatchChanged, this,
             [playlistsChanged](const QVector<SongMetadata> &) { playlistsChanged(); });
     connect(&m_library, &LibraryService::statisticsUpdated, &m_queue, &QueueService::updateMetadata);
@@ -261,9 +356,10 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     connect(&m_player, &PlayerEngine::errorOccurred, this, [this](const QString &message) {
         m_server.broadcastEvent({{"event", "player.error"}, {"message", message}});
     });
-    // Update the sidecar's accepted identity before handling later assetsReady notifications.
-    // The same lyric snapshot also updates cover resolution for every collection view.
-    // Request revisions protect both presentation and eventual filesystem publication.
+    // Update the sidecar's accepted identity before handling later assetsReady
+    // notifications. The same lyric snapshot also updates cover resolution for
+    // every collection view. Request revisions protect both presentation and
+    // eventual filesystem publication.
     connect(&m_lyrics, &LyricsController::changed, this, [this](const LyricsSnapshot &state) {
         m_sidecars.setCurrent(state.trackId, state.revision, state.offline);
         m_covers.updateLyrics(state);
@@ -271,8 +367,6 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     });
     connect(&m_lyrics, &LyricsController::assetsReady, this,
             [this](const QString &hash, const LyricsDocument &document, quint64 revision) {
-                if (hash.startsWith("remote-"))
-                    return;
                 m_sidecars.save(hash, revision, m_music.baseFor(hash), document);
             });
     connect(&m_sidecars, &SidecarStore::saved, &m_covers, &CoverService::assetsUpdated);
@@ -280,9 +374,10 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
         m_server.broadcastEvent(
             {{"event", "library.assets_failed"}, {"song_hash", hash}, {"message", message}});
     });
-    // Artwork changes affect current track, library, playlists and repeated queue occurrences.
-    // Broadcast all their existing snapshot channels instead of giving each view a resolver.
-    // This keeps local/offline cover precedence consistent even when only one asset was updated.
+    // Artwork changes affect current track, library, playlists and repeated queue
+    // occurrences. Broadcast all their existing snapshot channels instead of
+    // giving each view a resolver. This keeps local/offline cover precedence
+    // consistent even when only one asset was updated.
     connect(&m_covers, &CoverService::changed, this,
             [libraryChanged, playlistsChanged, queueChanged, trackChanged] {
                 trackChanged();
@@ -307,6 +402,7 @@ bool BackendSession::start() {
         return false;
     }
     m_scanner.start();
+    QTimer::singleShot(0, &m_maintenance, &LibraryMaintenance::startAutomatic);
     m_extensionBackend.start(
         [this](const QString &method, const QVariantMap &params, IExtensionBackend::Completion done) {
             m_router.dispatch({{"method", method}, {"params", QJsonObject::fromVariantMap(params)}},
@@ -326,6 +422,7 @@ void BackendSession::shutdown() {
     if (m_stopped)
         return;
     m_stopped = true;
+    m_maintenance.shutdown();
     m_loudness.cancel();
     // Finish decoder I/O before revoking the extension proxy's leased URLs.
     m_player.shutdown();

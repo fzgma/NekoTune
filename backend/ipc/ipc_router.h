@@ -19,6 +19,7 @@ class IpcRouter final : public QObject {
     /// Shutdown rejects new dispatch while admitted asynchronous handlers finish or cancel.
     void dispatch(const QJsonObject &request, Completion completion);
     void shutdown();
+    void setMaintenance(bool enabled) { m_maintenance = enabled; }
     CommandScheduler &commands() { return m_commands; }
 
   private:
@@ -34,5 +35,6 @@ class IpcRouter final : public QObject {
     QHash<QString, Route> m_routes;
     CommandScheduler m_commands;
     bool m_stopping = false;
+    bool m_maintenance = false;
 };
 } // namespace nekotune

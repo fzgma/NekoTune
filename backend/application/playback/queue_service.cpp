@@ -12,7 +12,7 @@ QueueService::QueueService(IQueueRepository &repository, ISongRepository &songs,
     for (int i = 0; i < snapshot.items.size(); ++i) {
         const auto &record = snapshot.items[i];
         auto song = songs.songById(record.songId);
-        if (!song || (!song->isRemote() && record.path.isEmpty()))
+        if (!song)
             continue;
         // Dropped stale records shift indices; restore selection in the filtered in-memory queue.
         if (i == snapshot.currentIndex)
@@ -45,10 +45,20 @@ void QueueService::adoptCommitted(PlayerQueue next) {
 }
 void QueueService::updateMetadata(const SongMetadata &metadata) {
     m_queue.updateSongMetadata(metadata);
+    if (metadata.hasLocalAudio)
+        for (int i = 0; i < m_queue.size(); ++i)
+            if (m_queue[i].metadata.id == metadata.id)
+                m_queue[i].path = metadata.firstPath;
     emit changed();
 }
 void QueueService::updateMetadataBatch(const QVector<SongMetadata> &metadata) {
-    for (const auto &song : metadata) m_queue.updateSongMetadata(song);
+    for (const auto &song : metadata) {
+        m_queue.updateSongMetadata(song);
+        if (song.hasLocalAudio)
+            for (int i = 0; i < m_queue.size(); ++i)
+                if (m_queue[i].metadata.id == song.id)
+                    m_queue[i].path = song.firstPath;
+    }
     emit changed();
 }
 } // namespace nekotune

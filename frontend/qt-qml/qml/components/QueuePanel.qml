@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 // One panel displays either live queue occurrences or a saved playlist.
 // Source selection changes the identity used by play/remove actions.
@@ -16,6 +17,13 @@ Item {
     property var playlistController: null
     property var queueController: null
     property var playbackController: null
+    property var storage: null
+    property int exportingPlaylist: 0
+    FolderDialog {
+        id: exportFolder
+        title: i18n.text("storage_export", i18n.language)
+        onAccepted: if (root.storage) root.storage.exportPlaylist(root.exportingPlaylist, selectedFolder.toString())
+    }
     property string playbackMode: "sequential"
     property var currentSong: ({})
     property real duration: 0
@@ -159,6 +167,7 @@ Item {
                 Label { text: i18n.countText("tracks", root.sourceItems.length, i18n.language); font.pixelSize: Theme.fontCaption; color: Theme.textMuted }
             }
             TextButton { visible: Boolean(root.currentPlaylist); text: i18n.text("play_all", i18n.language); enabled: root.visibleItems.length > 0 && root.connected; onClicked: root.playAll() }
+            TextButton { objectName: "playlistExport"; visible: Boolean(root.currentPlaylist) && root.storage !== null; text: i18n.text("storage_export", i18n.language); enabled: root.connected && root.storage && !root.storage.busy; onClicked: { root.exportingPlaylist = root.currentPlaylist; exportFolder.open() } }
             TextButton { visible: !root.compact; text: i18n.text("import_music", i18n.language); subtle: true; enabled: root.connected; onClicked: root.addRequested(root.currentPlaylist) }
             TextButton {
                 objectName: "clearQueueButton"

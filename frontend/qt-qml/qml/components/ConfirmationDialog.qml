@@ -13,6 +13,8 @@ Popup {
     property string message: ""
     property string errorText: ""
     property bool busy: false
+    property string confirmText: i18n.text("confirm_delete", i18n.language)
+    property bool destructive: true
     signal confirmed()
     parent: Overlay.overlay
     anchors.centerIn: parent
@@ -33,7 +35,7 @@ Popup {
         RowLayout {
             Layout.alignment: Qt.AlignRight
             TextButton { text: i18n.text("cancel", i18n.language); subtle: true; enabled: !dialog.busy; onClicked: dialog.close() }
-            TextButton { objectName: "confirmActionButton"; text: i18n.text("confirm_delete", i18n.language); lavenderColor: Theme.statusError; enabled: !dialog.busy; onClicked: { dialog.busy = true; dialog.confirmed() } }
+            TextButton { objectName: "confirmActionButton"; text: dialog.confirmText; lavenderColor: dialog.destructive ? Theme.statusError : Theme.accentPrimary; enabled: !dialog.busy; onClicked: { dialog.busy = true; dialog.confirmed() } }
         }
     }
 }

@@ -28,6 +28,7 @@ Item {
         client: page.controllers.settings; ai: page.controllers.ai
         audioOutput: page.controllers.audioOutput || null
         playback: page.controllers.playback || null
+        storage: page.controllers.storage || null
         desktop: page.shell.desktop || null
         windowModes: page.shell.windowModes || null
         wallpaper: typeof wallpaperManager !== "undefined" ? wallpaperManager : null

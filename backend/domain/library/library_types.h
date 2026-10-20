@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QByteArray>
 #include <QCryptographicHash>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -30,14 +32,16 @@ struct SongMetadata {
     int trackNumber = 0;
     int discNumber = 0;
     QString lastPlayedAt; // UTC ISO 8601 with milliseconds; empty when no playback was recorded.
-    bool isRemote() const { return !providerId.isEmpty(); }
+    bool hasLocalAudio = false;
+    bool isRemote() const { return !providerId.isEmpty() && !hasLocalAudio; }
     QString resourceKey() const {
-        return isRemote() ? QStringLiteral("remote-") +
-                                QString::fromLatin1(QCryptographicHash::hash(providerId.toUtf8() + '\0' +
-                                                                                 providerTrackId.toUtf8(),
-                                                                             QCryptographicHash::Sha256)
-                                                        .toHex())
-                          : hash;
+        return !providerId.isEmpty()
+                   ? QStringLiteral("remote-") +
+                         QString::fromLatin1(
+                             QCryptographicHash::hash(providerId.toUtf8() + '\0' + providerTrackId.toUtf8(),
+                                                      QCryptographicHash::Sha256)
+                                 .toHex())
+                   : hash;
     }
 };
 
@@ -73,6 +77,9 @@ struct ImportedFile {
     QString managedReferencePath;
     QString importSource = QStringLiteral("local");
     EmbeddedMetadata metadata;
+    QString sourcePath;
+    QString stagingDirectory;
+    QMap<QString, QByteArray> sidecars;
 };
 
 /// Persisted membership contains a song ID plus the chosen path.

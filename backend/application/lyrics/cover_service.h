@@ -15,6 +15,9 @@ class CoverService final : public QObject {
     QString resolve(const QString &path, const QString &trackId) const;
     void updateLyrics(const LyricsSnapshot &state);
     void assetsUpdated(const QString &trackId);
+    void setStoredCoverResolver(std::function<QString(const QString &)> resolver) {
+        m_storedCover = std::move(resolver);
+    }
     void setManagedBaseResolver(std::function<QString(const QString &)> resolver) {
         m_managedBase = std::move(resolver);
     }
@@ -28,5 +31,6 @@ class CoverService final : public QObject {
     QHash<QString, quint64> m_localVersions;
     bool m_offline = false;
     std::function<QString(const QString &)> m_managedBase;
+    std::function<QString(const QString &)> m_storedCover;
 };
 } // namespace nekotune

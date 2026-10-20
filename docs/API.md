@@ -326,9 +326,9 @@ Linux 编入 libpulse 支持时，设备对象还包含 `ports`（每项为 `id,
 
 ### 曲库与标签
 
-`library.import` 传入本地音频 `path`，按文件内容 hash 记录歌曲并持久保存该路径，只更新曲库，不加入队列或开始播放。返回 `song_id` 和绝对路径；曲库变化广播 `library.changed`。
+`library.import` 传入本地音频 `path`，复制音频、按完整文件 hash 去重并保存库内资源关联，只更新曲库，不加入队列或开始播放。返回 `song_id` 和绝对路径；曲库变化广播 `library.changed`。
 
-首次导入在工作线程通过 FFmpeg 同时提取时长与内嵌资料：`title`、`artist`、`album`、`album_artist`、`genre`、`date/year`、`track/tracknumber`、`disc/discnumber` 和 `lyrics/unsyncedlyrics`。写入歌曲对象的 `custom_title`、`artist`、`album`、`album_artist`、`genre`、`year`、`track_number`、`disc_number`、`lyrics`；日期取年份，`2/12` 等编号取分子。数字 `0` 表示未知；没有标签或探测失败时仍按原有文件名／未知时长规则导入。曲库、歌单、队列和扫描发现新歌曲使用相同资料。重复 hash 保留已有文本、编号和手工清空的字段，不自动覆盖旧曲库；已有资料可在编辑器中补全。此功能不改写原音频标签，不提取内嵌图片。
+首次导入在工作线程通过 FFmpeg 同时提取时长与内嵌资料：`title`、`artist`、`album`、`album_artist`、`genre`、`date/year`、`track/tracknumber`、`disc/discnumber` 和 `lyrics/unsyncedlyrics`。写入歌曲对象的 `custom_title`、`artist`、`album`、`album_artist`、`genre`、`year`、`track_number`、`disc_number`、`lyrics`；日期取年份，`2/12` 等编号取分子。数字 `0` 表示未知；没有标签或探测失败时仍按原有文件名／未知时长规则导入。曲库、歌单和队列导入使用相同资料。重复 hash 保留已有文本、编号和手工清空的字段，不自动覆盖旧曲库；已有资料可在编辑器中补全。此功能不改写原音频标签，不提取内嵌图片。
 
 ```json
 {"id":25,"method":"library.import","params":{"path":"/home/user/Music/NekoTune/song.mp3"}}
@@ -365,7 +365,7 @@ Linux 编入 libpulse 支持时，设备对象还包含 `ports`（每项为 `id,
 {"id":26,"method":"playlist.play","params":{"id":2,"song_ids":[9,7],"song_id":9}}
 ```
 
-`library.delete` 接收非空、无重复的 `song_ids` 整数数组和可选布尔值 `clean_files`（默认 `false`）。成功时在同一数据库事务中移除对应的曲库记录、标签关联、所有歌单关联及队列项，返回 `data.deleted_count`，并广播曲库、歌单和队列变化。默认保留本地文件；`clean_files: true` 同时清理已登记的编号目录中的音频、软链接或 `.audio.json` 引用和同名 `.krc`、`.lrc`、`.jpg`、`.jpeg`、`.png`、`.webp`，保留外部原文件和目录中的其他文件，只删除清理后的空目录。目录软链接或越界路径会拒绝清理。
+`library.delete` 接收非空、无重复的 `song_ids` 和可选布尔值 `clean_files`（默认 `false`）。在同一事务内移除歌曲、标签关联、歌单关联和队列项，返回 `deleted_count` 及 `cleanup_errors`。默认明确保留音频和封面对象；`clean_files: true` 仅删除已无其他引用且未被要求保留的托管对象。外部原文件不参与清理。备份、导出或校验正在保护资源时，清理请求返回暂时不可用。文件暂存与数据库回滚、重启恢复使用清理日志。
 
 清理先暂存文件，再提交数据库删除；任何 ID 无效、暂存失败或数据库写入失败时整批回滚。数据库提交后删除暂存文件，未能删除的路径通过 `data.cleanup_errors` 返回，界面明确提示已移除歌曲但仍有文件待清理。扩展下载正在进行时暂不允许清理。若正在播放的歌曲被删除，尝试继续播放后续队列项；没有后续项则停止。
 
@@ -472,8 +472,8 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 - `library.scan`：无参数，异步扫描音乐目录，返回 `data.started`。`true` 表示启动新任务，`false` 表示已有扫描正在进行。后端启动及独立前端首次连接自动发起扫描。
 - 扫描同时为已有曲库中可访问但缺少时长的歌曲补齐记录，包括音乐目录之外的旧导入路径；不改动歌曲文件、标签或队列顺序。读取失败或文件丢失时保留未知时长，后续扫描可重试。
-- `library.scan_finished`：事件包含 `imported`、`skipped`、`failed` 和 `errors`（路径与安全错误信息数组）。扫描支持编号 `.audio.json` 引用，并验证实际音频内容 SHA-256；损坏引用、不可读音频或内容不匹配通过 `errors` 报告。扫描按内容 SHA-256 去重，不修改队列或自动联网获取配套文件；忽略 `config`、临时文件、目录软链接和曾删除的歌曲。
-- `library.import`、`playlist.add` 的路径导入、`queue.add`、带路径的 `player.play`：参数结构保持原样，外部音频优先建立编号原生软链接，链接创建失败时保存编号 `.audio.json` 引用。`library.import` 返回的 `data.path`，以及歌单、队列和播放器的歌曲 `path`，均为可供解码的音频路径：软链接模式返回编号音频路径，引用模式返回外部原音频的绝对路径，不返回 JSON 路径。
+- `library.scan_finished`：事件包含 `imported`（当前为 0）、`skipped`、`failed` 和 `errors`。增量校验登记的音频对象并补全已知歌曲缺失时长；内容不符标记为损坏，丢失标记为缺失。扫描不自动导入任意目录文件、不联网获取配套资料，也不修改队列。
+- `library.import`、`playlist.add` 的路径导入、`queue.add`、带路径的 `player.play`：参数结构不变，成功后返回独立托管副本的可解码绝对路径。所有入口统一后台复制和校验，不再创建软链接或 JSON 引用；文件发布成功后才提交歌曲／集合关联。
 - `library.delete`：默认保留音频及配套文件；`clean_files: true` 清理托管文件。两种操作都会在事务内记录内容 hash 的扫描忽略状态。手动导入或下载可恢复；扫描不会恢复。
 - `library.assets_failed`：配套文件保存或封面下载失败事件，包含 `song_hash` 和 `message`；不会中断音频播放。
 
@@ -485,7 +485,7 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 `play_count` 在解码器确认成功进入播放状态时累加一次，同时在同一条 SQL、同一事务内写入 `last_played_at`，任一写入失败则两者都不更新。暂停/继续、缓冲恢复和扩展热重载不重复计数或更新时间；重新选歌、停止后重新播放、切换到重复队列项及单曲循环再次开始都会更新两项。仅加载、页面切换、搜索、排序、资料预览、播放失败或没有音频输出时不更新。统计持久化后通过 `library.changed`、`queue.changed`、`playlist.changed` 和 `player.track_changed` 同步；`song.update_metadata` 不用于修改这些只读字段。
 
-每首歌曲使用独立的递增编号目录，例如 `000001/000001.flac`。下载音频为真实文件，外部音频为绝对软链接或 `.audio.json` 引用；程序获取的同编号 KRC、LRC 和封面始终为真实文件。成功在线匹配或手动选定后更新配套文件；结果受歌曲 hash 和歌词 revision 约束，过期请求不能覆盖新选择。原音频离线或断链后保留歌曲资料和配套文件，曲库 `available` 为 `false`。
+音频对象位于 `media/<哈希前两位>/<哈希>.<扩展名>`，封面位于 `artwork/`，歌词文档和选择保存在 SQLite。成功在线匹配或手动选择经过歌曲身份和 revision 检查后更新资源。旧编号目录仅用于迁移读取；新导入不再依赖它。移走外部原文件不会影响已收取的音乐及配套资料。
 
 设置和缓存集中在 `config`；首次默认目录迁移保留旧数据库和缓存，不覆盖已有目标。账号密钥和会话迁入系统密钥环，回读校验成功后删除旧明文凭据；失败保留原文件并返回 `credential_error`。设置页保存的语言优先于系统语言，`NEKOTUNE_LANGUAGE` 优先于保存语言；`lyrics.set_offline` 持久保存到 `config/settings.json`。
 
@@ -580,3 +580,22 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 必须传入 `confirm: true`。删除全部会话及收听片段，成功返回空 `data` 并广播 `history.changed`。保留曲库、歌单、`play_count` 与 `last_played_at`；当前轮次也停止写入历史，直到下一次重新起播，避免清空数据被暂停续播重新生成。界面使用确认弹窗，失败保留重试入口。
 
 `history.changed` 表示历史检查点、会话结束或清空已提交，客户端应合并刷新。每 5 秒和播放边界保存实际收听片段；异常退出仅保留最后成功检查点，重启标记为 `interrupted`，从不补算离线时间。首次启用返回空历史，不将旧播放次数折算为历史时长。
+
+## 音乐库维护任务
+
+以下接口仅供本地 IPC 使用；返回 `{task}` 的操作通过 `library.task` 事件报告状态，也可按任务 ID 查询。事件结构为 `{event:"library.task", data:{task,kind,state,phase,files,bytes,total_files?,message?,result?}}`；状态为 `running`、`switching`、`finished`、`failed`、`cancelled` 或 `interrupted`。结果中的逐项失败不会被当作成功导出项。重连后使用 `library.storage_status` 读取正在运行的任务和最近任务。
+
+| 方法 | 参数 | 返回与行为 |
+| --- | --- | --- |
+| `library.storage_status` | 无 | 根目录、歌曲／对象数量、容量、缺失数量、待迁移数量、迁移问题、任务及回退副本 ID |
+| `library.migrate` | 无 | `{task}`；迁移及重试旧引用，成功后清理旧托管文件 |
+| `library.verify` | 无 | `{task}`；完整检查登记音频和封面 |
+| `library.export` | `song_ids` 或 `playlist_id`，`directory` | `{task}`；独立子目录，原音频、当前歌词、封面，歌单另含 M3U8 |
+| `library.backup` | `directory` | `{task}`；目标须在曲库外，结果包含备份路径和缺失资源摘要 |
+| `library.restore_preview` | `directory` | `{task}`；完整验证备份，结果含版本、歌曲数、容量、缺失资源 |
+| `library.restore` | `preview_task`，`confirmed:true` | `{task}`；重新校验预览对应备份，替换曲库并保留回退副本 |
+| `library.task` | `task` | 读取该任务的持久状态 |
+| `library.cancel` | `task` | 请求取消当前任务；恢复切换阶段及回退副本清理拒绝取消，事件中 `cancellable:false` |
+| `library.remove_rollback` | `id`，`confirmed:true` | `{task}`；清理指定恢复前副本，不影响当前曲库，开始删除后不可取消 |
+
+恢复准备期间拒绝普通写入，仅保留任务查询、取消及状态接口；切换时 IPC 会短暂断开。重连后按原任务 ID 查询最终结果，播放保持停止。备份和导出允许播放；缺失或纯在线歌曲的导出会跳过并报告，恢复不触发联网补下载。详见 [音乐库存储与恢复](library-storage.md)。

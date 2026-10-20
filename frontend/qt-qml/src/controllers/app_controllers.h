@@ -2,15 +2,16 @@
 #include "controllers/ai_controller.h"
 #include "controllers/audio_output_controller.h"
 #include "controllers/extensions_controller.h"
-#include "controllers/settings_controller.h"
-#include "controllers/theme_controller.h"
-#include "controllers/library_controller.h"
 #include "controllers/history_controller.h"
+#include "controllers/library_controller.h"
+#include "controllers/library_storage_controller.h"
 #include "controllers/lyrics_controller.h"
 #include "controllers/playback_controller.h"
 #include "controllers/playlist_controller.h"
 #include "controllers/queue_controller.h"
+#include "controllers/settings_controller.h"
 #include "controllers/tag_controller.h"
+#include "controllers/theme_controller.h"
 /// Owns stable feature controller objects for the QML engine lifetime.
 /// Each feature subscribes only to relevant events and response fields.
 /// This separates frequent playback updates from library selection state.
@@ -24,6 +25,7 @@ class AppControllers final : public QObject {
     Q_PROPERTY(QueueController *queue MEMBER queue CONSTANT)
     Q_PROPERTY(PlaylistController *playlists MEMBER playlists CONSTANT)
     Q_PROPERTY(LibraryController *library MEMBER library CONSTANT)
+    Q_PROPERTY(LibraryStorageController *storage MEMBER storage CONSTANT)
     Q_PROPERTY(HistoryController *history MEMBER history CONSTANT)
     Q_PROPERTY(TagController *tags MEMBER tags CONSTANT)
     Q_PROPERTY(LyricsController *lyrics MEMBER lyrics CONSTANT)
@@ -40,6 +42,7 @@ class AppControllers final : public QObject {
     QueueController *queue;
     PlaylistController *playlists;
     LibraryController *library;
+    LibraryStorageController *storage;
     HistoryController *history;
     TagController *tags;
     LyricsController *lyrics;

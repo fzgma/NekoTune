@@ -31,7 +31,7 @@ class LibraryService final : public QObject {
     /// @return Full metadata including custom lyrics, or NotFound for a missing song.
     /// Use this lookup for editing instead of the lightweight IPC list representation.
     Result<SongMetadata> metadata(int id) const;
-    bool containsAudioHash(const QString &hash) const { return m_songs.songByHash(hash).has_value(); }
+    bool containsAudioHash(const QString &hash) const { return m_songs.containsAudioHash(hash); }
     QVector<SongTag> tagsFor(int id) const;
     /// @param file A completed inspection result with audio hash and registered source path.
     /// @param title Initial custom title for a newly registered hash.
@@ -40,6 +40,8 @@ class LibraryService final : public QObject {
     /// Known audio retains user edits; this operation does not append to the queue.
     Result<SongMetadata> importFile(const ImportedFile &file, const QString &title = {},
                                     const QString &artist = {});
+    Result<SongMetadata> importDownloaded(const ImportedFile &file, const SongMetadata &remote);
+    Result<void> attachFile(int songId, const ImportedFile &file);
     /// Apply a background probe only to an existing matching audio identity.
     /// A positive duration already stored by a newer import wins.
     /// Missing/deleted records are ignored rather than recreated.

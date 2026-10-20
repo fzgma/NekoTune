@@ -23,6 +23,7 @@ Item {
         anchors.fill: parent
         anchors.margins: 20
         playlistController: page.controllers.playlists
+        storage: page.controllers.storage || null
         queueController: page.controllers.queue
         playbackController: page.controllers.playback
         playbackMode: page.controllers.playback.playbackMode

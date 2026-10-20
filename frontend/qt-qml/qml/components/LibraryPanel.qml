@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import "../dialogs" as Dialogs
 
 // Presentation state complements controller-owned filtering/selection.
@@ -12,6 +13,13 @@ import "../dialogs" as Dialogs
 Item {
     id: root
     required property var controller
+    property var storage: null
+    property var exportingIds: []
+    FolderDialog {
+        id: exportFolder
+        title: i18n.text("storage_export", i18n.language)
+        onAccepted: if (root.storage) root.storage.exportSongs(root.exportingIds, selectedFolder.toString())
+    }
     readonly property var selectedTagIds: controller.selectedTagIds
     property var playlists: []
     property var addingSong: ({})
@@ -170,6 +178,13 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spaceSm
+            TextButton {
+                objectName: "libraryExportSelected"
+                text: i18n.text("storage_export", i18n.language)
+                visible: root.storage !== null
+                enabled: root.connected && root.selectedSongIds.length > 0 && root.storage && !root.storage.busy
+                onClicked: { root.exportingIds = root.selectedSongIds.slice(); exportFolder.open() }
+            }
             InputField {
                 id: search
                 objectName: "librarySearchField"

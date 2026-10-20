@@ -1,8 +1,132 @@
 #include "storage/song_repository.h"
+#include "domain/lyrics/krc_parser.h"
+#include "domain/lyrics/lrc_parser.h"
+#include "storage/resource_repository.h"
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
 #include <QSet>
 #include <QSqlError>
 namespace nekotune {
+bool SongRepository::containsAudioHash(const QString &hash) const {
+    QSqlQuery q(m_db);
+    q.prepare("SELECT 1 FROM songs WHERE hash=? UNION SELECT 1 FROM song_assets WHERE audio_hash=? LIMIT 1");
+    q.addBindValue(hash);
+    q.addBindValue(hash);
+    return q.exec() && q.next();
+}
+bool SongRepository::retainAssets(int id) {
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE audio_objects SET retained=1 WHERE hash=(SELECT audio_hash "
+              "FROM song_assets WHERE song_id=?)");
+    q.addBindValue(id);
+    if (!q.exec()) {
+        setError(q.lastError().text());
+        return false;
+    }
+    q.prepare("UPDATE artwork_objects SET retained=1 WHERE hash=(SELECT "
+              "cover_hash FROM song_assets WHERE song_id=?)");
+    q.addBindValue(id);
+    if (q.exec())
+        return true;
+    setError(q.lastError().text());
+    return false;
+}
+QStringList SongRepository::cleanupKeys(int id) const {
+    QStringList keys;
+    QSqlQuery q(m_db);
+    q.prepare("SELECT audio_hash,cover_hash FROM song_assets WHERE song_id=?");
+    q.addBindValue(id);
+    if (q.exec() && q.next()) {
+        if (!q.value(0).toString().isEmpty())
+            keys << q.value(0).toString();
+        if (!q.value(1).toString().isEmpty())
+            keys << "cover/" + q.value(1).toString();
+    }
+    return keys;
+}
+void SongRepository::resolveAssets(SongMetadata &song) const {
+    ResourceRepository resources(m_session);
+    if (!resources.hasAudio(song.id))
+        return;
+    song.hash = resources.audioHash(song.id);
+    song.firstPath = resources.audioPath(song.id);
+    song.hasLocalAudio = QFileInfo(song.firstPath).isFile();
+}
+bool SongRepository::saveImportedAssets(int id, const ImportedFile &file) {
+    QSqlQuery q(m_db);
+    q.prepare("SELECT 1 FROM audio_objects WHERE hash=?");
+    q.addBindValue(file.hash);
+    if (!q.exec()) {
+        setError(q.lastError().text());
+        return false;
+    }
+    if (!q.next())
+        return true; // Repository-only legacy callers have no managed file
+                     // publication.
+    ResourceRepository resources(m_session);
+    if (!resources.attach(id, file.hash))
+        return false;
+    LyricsDocument document;
+    document.source = "local";
+    if (file.sidecars.contains("krc")) {
+        auto text = KrcParser::read(file.sidecars.value("krc"));
+        if (!text || KrcParser::parse(*text).isEmpty()) {
+            setError("Invalid KRC sidecar");
+            return false;
+        }
+        document.krcLyrics = *text;
+    }
+    if (file.sidecars.contains("lrc")) {
+        const auto text = QString::fromUtf8(file.sidecars.value("lrc"));
+        if (LrcParser::looksLikeLrc(text))
+            document.syncedLyrics = text;
+        else
+            document.plainLyrics = text;
+        if (text.trimmed().isEmpty()) {
+            setError("Empty lyric sidecar");
+            return false;
+        }
+    }
+    if (file.sidecars.contains("txt")) {
+        LyricsDocument plain;
+        plain.source = "local";
+        plain.plainLyrics = QString::fromUtf8(file.sidecars.value("txt"));
+        if (plain.plainLyrics.trimmed().isEmpty()) {
+            setError("Empty text lyric sidecar");
+            return false;
+        }
+        if (document.plainLyrics.isEmpty())
+            document.plainLyrics = plain.plainLyrics;
+        else if (!resources.saveLyrics(id, plain, "local_txt"))
+            return false;
+    }
+    if (!document.isEmpty() && !resources.lyrics(id, "local") &&
+        !resources.saveLyrics(id, document, "local", file.sidecars.value("krc")))
+        return false;
+    if (file.sidecars.contains("cover_hash")) {
+        q.prepare("UPDATE song_assets SET cover_hash=? WHERE song_id=? AND "
+                  "cover_hash IS NULL");
+        q.addBindValue(QString::fromLatin1(file.sidecars.value("cover_hash")));
+        q.addBindValue(id);
+        if (!q.exec()) {
+            setError(q.lastError().text());
+            return false;
+        }
+    }
+    for (const auto &sql :
+         {"UPDATE songs SET first_path='' WHERE id=?", "DELETE FROM song_paths WHERE song_id=?",
+          "UPDATE queue_items SET path='' WHERE song_id=?",
+          "UPDATE playlist_items SET path='' WHERE song_id=?"}) {
+        q.prepare(sql);
+        q.addBindValue(id);
+        if (!q.exec()) {
+            setError(q.lastError().text());
+            return false;
+        }
+    }
+    return true;
+}
 std::optional<SongMetadata> SongRepository::getOrCreateSong(const QString &hash, const QString &path,
                                                             const QString &customTitle, const QString &artist,
                                                             const QString &sourceName, qint64 durationMs,
@@ -122,6 +246,7 @@ QVector<SongMetadata> SongRepository::songs() const {
         return items;
     }
 
+    const auto locations = ResourceRepository(m_session).audioLocations();
     while (query.next()) {
         items.append(SongMetadata{
             query.value(0).toInt(),
@@ -142,6 +267,13 @@ QVector<SongMetadata> SongRepository::songs() const {
             query.value(17).toInt(), query.value(18).toInt(),
             query.value(19).toString(),
         });
+        auto &song = items.last();
+        const auto location = locations.constFind(song.id);
+        if (location != locations.cend()) {
+            song.hash = location->first;
+            song.firstPath = location->second;
+            song.hasLocalAudio = QFileInfo(song.firstPath).isFile();
+        }
     }
 
     return items;
@@ -198,6 +330,9 @@ std::optional<SongMetadata> SongRepository::updateMetadata(const SongMetadata &s
 // Do not replace song identity simply because one candidate disappears.
 QVector<QString> SongRepository::pathsForSong(int songId) const {
     QVector<QString> paths;
+    ResourceRepository resources(m_session);
+    if (resources.hasAudio(songId))
+        return {resources.audioPath(songId)};
     if (!m_session.isReady() || songId <= 0)
         return paths;
     QSqlQuery query(m_db);
@@ -246,6 +381,9 @@ QHash<int, QVector<QString>> SongRepository::songPaths() const {
         while (query.next())
             paths[query.value(0).toInt()].append(query.value(1).toString());
     }
+    const auto locations = ResourceRepository(m_session).audioLocations();
+    for (auto it = locations.cbegin(); it != locations.cend(); ++it)
+        paths[it.key()] = {it.value().second};
     return paths;
 }
 
@@ -282,15 +420,17 @@ std::optional<SongMetadata> SongRepository::readSongFromQuery(QSqlQuery &query) 
         return std::nullopt;
     }
 
-    return SongMetadata{
-        query.value(0).toInt(),    query.value(1).toString(),   query.value(2).toString(),
-        query.value(3).toString(), query.value(4).toString(),   query.value(5).toString(),
-        query.value(6).toString(), query.value(7).toLongLong(), query.value(8).toString(),
-        query.value(9).toString(), query.value(10).toString(),  query.value(11).toString(),
-        query.value(12).toString(), query.value(13).toLongLong(),
-        query.value(14).toString(), query.value(15).toString(), query.value(16).toInt(),
-        query.value(17).toInt(), query.value(18).toInt(), query.value(19).toString(),
+    SongMetadata song{
+        query.value(0).toInt(),     query.value(1).toString(),    query.value(2).toString(),
+        query.value(3).toString(),  query.value(4).toString(),    query.value(5).toString(),
+        query.value(6).toString(),  query.value(7).toLongLong(),  query.value(8).toString(),
+        query.value(9).toString(),  query.value(10).toString(),   query.value(11).toString(),
+        query.value(12).toString(), query.value(13).toLongLong(), query.value(14).toString(),
+        query.value(15).toString(), query.value(16).toInt(),      query.value(17).toInt(),
+        query.value(18).toInt(),    query.value(19).toString(),
     };
+    resolveAssets(song);
+    return song;
 }
 // Only positive probe results can replace a stored duration.
 // Zero is unknown and must not erase useful duration from a prior import.

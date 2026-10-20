@@ -125,9 +125,12 @@ void LyricsService::load(const LyricsQuery &query, const QString &path, const QS
     publish(QStringLiteral("loading"));
     // Refresh must not bypass a user's local file, and a local read error must stay visible.
     // A synthetic basename locates managed sidecars without pretending a reference is audio.
-    auto local = managedBase.isEmpty() ? m_storage->readLocal(query, path)
-                                      : m_storage->readLocal(query, managedBase + ".audio");
-    if (local && !local.value() && !managedBase.isEmpty())
+    auto local = m_owned                 ? Result<std::optional<LyricsDocument>>(m_storedLocal)
+                 : managedBase.isEmpty() ? m_storage->readLocal(query, path)
+                                         : m_storage->readLocal(query, managedBase + ".audio");
+    if (m_owned || m_storedLocal)
+        local = Result<std::optional<LyricsDocument>>(m_storedLocal);
+    if (!m_owned && local && !local.value() && !managedBase.isEmpty())
         local = m_storage->readLocal(query, path);
     if (!local) {
         publish(QStringLiteral("error"), local.error().message);
@@ -150,7 +153,7 @@ void LyricsService::load(const LyricsQuery &query, const QString &path, const QS
             apply(document, false);
             return;
         }
-        const auto cached = m_storage->readCache(query);
+        const auto cached = m_storedSelected ? m_storedSelected : m_storage->readCache(query);
         if (cached) {
             m_snapshot.cached = true;
             apply(*cached, false);
@@ -397,7 +400,7 @@ void LyricsService::apply(const LyricsDocument &document, bool cache) {
     m_snapshot.candidates.clear();
     m_snapshot.document = document;
     // Cache failure is non-fatal: the fetched document can still be shown and saved as a sidecar.
-    const bool cacheFailed = cache && !m_storage->writeCache(m_query, document);
+    const bool cacheFailed = cache && !m_catalog && !m_storage->writeCache(m_query, document);
     m_snapshot.cacheWarning = cacheFailed;
     publish(document.instrumental ? QStringLiteral("instrumental") : QStringLiteral("ready"));
     if (cache) emit assetsReady(m_query, document, m_revision);

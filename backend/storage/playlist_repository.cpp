@@ -1,4 +1,5 @@
 #include "storage/playlist_repository.h"
+#include "storage/resource_repository.h"
 #include <QSet>
 #include <QSqlError>
 namespace nekotune {
@@ -16,12 +17,16 @@ QVector<Playlist> PlaylistRepository::playlists() const {
             QStringLiteral("SELECT p.id, p.name, i.path, i.song_id FROM playlists p "
                            "LEFT JOIN playlist_items i ON i.playlist_id = p.id ORDER BY p.id, i.position")))
         return result;
+    const auto locations = ResourceRepository(m_session).audioLocations();
     while (query.next()) {
         const int id = query.value(0).toInt();
         if (result.isEmpty() || result.last().id != id)
             result.append({id, query.value(1).toString(), {}});
-        if (!query.value(3).isNull())
-            result.last().items.append({query.value(2).toString(), query.value(3).toInt()});
+        if (!query.value(3).isNull()) {
+            const auto id = query.value(3).toInt();
+            result.last().items.append(
+                {locations.contains(id) ? locations.value(id).second : query.value(2).toString(), id});
+        }
     }
     return result;
 }
@@ -117,7 +122,10 @@ bool PlaylistRepository::addPlaylistSong(int id, const QueueRecord &song) {
                                  "ON CONFLICT (playlist_id, song_id) DO UPDATE SET path = excluded.path"));
     query.bindValue(QStringLiteral(":id"), id);
     query.bindValue(QStringLiteral(":song_id"), song.songId);
-    query.bindValue(QStringLiteral(":path"), song.path.isNull() ? QStringLiteral("") : song.path);
+    query.bindValue(QStringLiteral(":path"),
+                    ResourceRepository(m_session).hasAudio(song.songId) || song.path.isNull()
+                        ? QStringLiteral("")
+                        : song.path);
     if (!query.exec()) {
         setError(query.lastError().text());
         return false;

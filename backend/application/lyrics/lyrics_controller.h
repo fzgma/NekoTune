@@ -33,6 +33,13 @@ class LyricsController final : public QObject {
     void setManagedBaseResolver(std::function<QString(const QString &)> resolver) {
         m_managedBase = std::move(resolver);
     }
+    struct StoredLyrics {
+        std::optional<LyricsDocument> local, selected;
+        bool owned = false;
+    };
+    void setStoredLyricsResolver(std::function<StoredLyrics(int)> resolver) {
+        m_storedLyrics = std::move(resolver);
+    }
     /// Disconnect player-triggered loads before cancelling the worker's active request.
     /// Cancellation is invoked while the worker event loop is still running.
     /// Join before destruction so queued network work cannot outlive its owning service.
@@ -53,5 +60,6 @@ class LyricsController final : public QObject {
     quint64 m_revision = 0;
     bool m_ready = false;
     std::function<QString(const QString &)> m_managedBase;
+    std::function<StoredLyrics(int)> m_storedLyrics;
 };
 } // namespace nekotune

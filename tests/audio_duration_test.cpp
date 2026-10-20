@@ -129,6 +129,7 @@ private slots:
     StoreFixture store(dir.filePath("songs.sqlite3"));
     MusicDirectory music(store.db, dir.filePath("music"));
     ImportExecutor imports;
+    imports.setRoot(music.directory());
     imports.setMapper([&](const ImportedFile &file) { return music.manage(file); });
     std::optional<ImportedFile> file;
     imports.inspect(source, [&](Result<ImportedFile> result) { QVERIFY(result); file = result.value(); });
@@ -315,6 +316,7 @@ private slots:
     StoreFixture store(dir.filePath("db.sqlite3"));
     MusicDirectory music(store.db, dir.filePath("music"));
     ImportExecutor imports;
+    imports.setRoot(music.directory());
     imports.setMapper(
         [&](const ImportedFile &file) { return music.manage(file); });
     std::optional<ImportedFile> inspected;
@@ -325,7 +327,8 @@ private slots:
     QTRY_VERIFY(inspected.has_value());
     QCOMPARE(inspected->durationMs, 1500);
     QCOMPARE(inspected->hash, hash(bytes));
-    QVERIFY(QFileInfo(inspected->path).isSymLink());
+    QVERIFY(!QFileInfo(inspected->path).isSymLink());
+    QVERIFY(inspected->path != path);
     const auto imported = store.library.importFile(*inspected);
     QVERIFY(imported);
     QCOMPARE(imported.value().durationMs, 1500);
@@ -424,6 +427,9 @@ private slots:
     connect(&store.library, &LibraryService::durationUpdated, &queue,
             &QueueService::updateMetadata);
     MusicDirectory music(store.db, managedRoot);
+    const auto owned = music.manage({managedRoot + "/new.wav", hash(wav(2500))});
+    QVERIFY(owned);
+    QVERIFY(store.library.importFile(owned.value()));
     ImportExecutor imports;
     CommandScheduler commands;
     LibraryScanner scanner(imports, music, store.library, commands);

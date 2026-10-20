@@ -155,7 +155,10 @@ void PlayerEngine::refreshPreload() {
         m_preloadSource = url;
         m_backend.preloadNext({url, token, strategy, m_crossfadeSeconds});
     };
-    if (!item.metadata.isRemote()) { prepared(QUrl::fromLocalFile(item.path)); return; }
+    if (item.metadata.providerId.isEmpty() || QFileInfo(item.path).isFile()) {
+        prepared(QUrl::fromLocalFile(item.path));
+        return;
+    }
     if (!m_sourceResolver || m_reloadingExtensions.contains(item.metadata.providerId.section('/', 0, 0))) {
         m_failedPreloadKey = key; invalidatePreload(); return;
     }
@@ -296,7 +299,7 @@ void PlayerEngine::loadCurrent(bool play, bool resetPlayCount, PlayerState idleS
     // Local lyrics can load before decoder tags arrive; online matching waits for the timer.
     emit lyricsNeeded(false);
     const auto &item = queue.at(queue.currentIndex());
-    if (item.metadata.isRemote()) {
+    if (!item.metadata.providerId.isEmpty() && !QFileInfo(item.path).isFile()) {
         m_backend.setSource({});
         m_resolving = true;
         setState(play ? PlayerState::Loading : m_idleState);

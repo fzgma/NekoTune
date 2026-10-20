@@ -13,6 +13,8 @@ class DatabaseSession final : public ITransaction {
     bool isReady() const { return m_ready; }
     QString errorString() const override { return m_error; }
     QString databasePath() const { return m_databasePath; }
+    QString libraryRoot() const { return m_libraryRoot; }
+    void setLibraryRoot(const QString &root) { m_libraryRoot = root; }
     QSqlDatabase database() const { return m_db; }
     void setError(const QString &message) { m_error = message; }
     bool begin() override;
@@ -27,6 +29,7 @@ class DatabaseSession final : public ITransaction {
     QSqlDatabase m_db;
     QString m_connectionName;
     QString m_databasePath;
+    QString m_libraryRoot;
     QString m_error;
     bool m_ready = false;
     bool m_transactionActive = false;

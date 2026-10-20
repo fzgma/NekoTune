@@ -12,6 +12,13 @@ namespace nekotune {
 class LyricsService final : public QObject {
     Q_OBJECT
   public:
+    void setStoredLyrics(std::optional<LyricsDocument> local, std::optional<LyricsDocument> selected,
+                         bool owned, bool catalog) {
+        m_storedLocal = std::move(local);
+        m_storedSelected = std::move(selected);
+        m_owned = owned;
+        m_catalog = catalog;
+    }
     explicit LyricsService(const QVector<LyricsProvider *> &providers,
                            std::unique_ptr<ILyricsStorage> storage, QObject *parent = nullptr);
     QVector<LyricsSource> sources() const;
@@ -72,6 +79,8 @@ class LyricsService final : public QObject {
     LyricsProvider *findProviderForSource(const QString &sourceProvider, const QString &importSource) const;
 
     std::unique_ptr<ILyricsStorage> m_storage;
+    std::optional<LyricsDocument> m_storedLocal, m_storedSelected;
+    bool m_owned = false, m_catalog = false;
     QHash<QString, LyricsProvider *> m_providers;
     LyricsProvider *m_defaultProvider = nullptr;
     LyricsProvider *m_provider;

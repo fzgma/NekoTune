@@ -83,11 +83,13 @@ void LyricsController::load(bool ready, bool force) {
     }
     // Resolve SQL-owned resource paths before crossing to the lyrics worker.
     const auto managedBase = m_managedBase ? m_managedBase(request.trackId) : QString();
-    QMetaObject::invokeMethod(
-        m_service, [service = m_service, request, item = *current.song, revision, ready, force, managedBase] {
-            service->load(request, item.path, item.metadata.lyrics, revision, ready, force, managedBase,
-                          item.metadata.providerId, item.metadata.importSource);
-        });
+    const auto stored = m_storedLyrics ? m_storedLyrics(current.song->metadata.id) : StoredLyrics{};
+    QMetaObject::invokeMethod(m_service, [service = m_service, request, item = *current.song, revision, ready,
+                                          force, managedBase, stored] {
+        service->setStoredLyrics(stored.local, stored.selected, stored.owned, bool(stored.owned));
+        service->load(request, item.path, item.metadata.lyrics, revision, ready, force, managedBase,
+                      item.metadata.providerId, item.metadata.importSource);
+    });
 }
 Result<void> LyricsController::refresh(const QString &trackId) {
     if (trackId.isEmpty() || trackId != query().trackId)

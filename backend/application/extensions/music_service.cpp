@@ -91,6 +91,10 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                 [guard, song, source, report, task](Result<QVariantMap> result) {
                     if (!guard)
                         return;
+                    if (guard->m_cancelled.contains(task)) {
+                        report("cancelled");
+                        return;
+                    }
                     if (!result) {
                         report("failed", result.error().message);
                         return;
@@ -102,10 +106,20 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                                 done();
                                 return;
                             }
-                            guard->m_imports.inspect(path, [guard, song, source, report, done,
+                            if (guard->m_cancelled.contains(task)) {
+                                done();
+                                report("cancelled");
+                                return;
+                            }
+                            guard->m_imports.inspect(path, [guard, song, source, path, report, done,
                                                             task](Result<ImportedFile> file) {
                                 if (!guard) {
                                     done();
+                                    return;
+                                }
+                                if (guard->m_cancelled.contains(task)) {
+                                    done();
+                                    report("cancelled");
                                     return;
                                 }
                                 if (!file) {
@@ -117,8 +131,7 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                                 file.value().importSource = source.section('/', 0, 0);
                                 if (file.value().metadata.album.isEmpty())
                                     file.value().metadata.album = song.album;
-                                auto saved =
-                                    guard->m_library.importFile(file.value(), song.customTitle, song.artist);
+                                auto saved = guard->m_library.importDownloaded(file.value(), song);
                                 done();
                                 if (!saved) {
                                     report("failed", saved.error().message);
@@ -134,17 +147,49 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                                     "extensions.download_completed",
                                     {{"source", source},
                                      {"id", song.providerTrackId},
-                                     {"path", importedPath},
+                                     {"path", path},
                                      {"song_id", songId},
                                      {"existing", existing}},
-                                    [guard, report, songId, importedPath](Result<QVariantMap> assets) {
+                                    [guard, report, songId, importedPath, path,
+                                     hash = file.value().hash](Result<QVariantMap> assets) {
                                         QVariantMap details =
                                             assets ? assets.value()
                                                    : QVariantMap{{"asset_warning", assets.error().message}};
                                         details.insert("path", importedPath);
-                                        if (guard)
-                                            emit guard->m_library.changed();
-                                        report("finished", {}, songId, details);
+                                        if (!guard)
+                                            return;
+                                        guard->m_imports.inspectAssets(
+                                            path, [guard, report, songId, hash, path,
+                                                   details](Result<ImportedFile> collected) mutable {
+                                                if (!guard)
+                                                    return;
+                                                guard->m_commands.submit(
+                                                    [guard, report, songId, hash, path, details,
+                                                     collected = std::move(collected)](auto done) mutable {
+                                                        if (!guard) {
+                                                            done();
+                                                            return;
+                                                        }
+                                                        if (!collected)
+                                                            details["asset_warning"] =
+                                                                collected.error().message;
+                                                        else if (collected.value().hash != hash)
+                                                            details["asset_warning"] =
+                                                                "Download callback changed "
+                                                                "the audio";
+                                                        else {
+                                                            auto saved = guard->m_library.attachFile(
+                                                                songId, collected.value());
+                                                            if (!saved)
+                                                                details["asset_warning"] =
+                                                                    saved.error().message;
+                                                            else if (!details.contains("asset_warning"))
+                                                                guard->m_imports.releaseStaging(path);
+                                                        }
+                                                        done();
+                                                        report("finished", {}, songId, details);
+                                                    });
+                                            });
                                     });
                             });
                         },

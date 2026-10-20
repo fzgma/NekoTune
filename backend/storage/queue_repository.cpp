@@ -1,4 +1,5 @@
 #include "storage/queue_repository.h"
+#include "storage/resource_repository.h"
 #include <QSet>
 #include <QSqlError>
 namespace nekotune {
@@ -23,7 +24,10 @@ bool QueueRepository::saveQueue(const QueueSnapshot &snapshot) {
     for (int index = 0; index < snapshot.items.size(); ++index) {
         const auto &item = snapshot.items.at(index);
         query.bindValue(QStringLiteral(":position"), index);
-        query.bindValue(QStringLiteral(":path"), item.path.isNull() ? QStringLiteral("") : item.path);
+        query.bindValue(QStringLiteral(":path"),
+                        ResourceRepository(m_session).hasAudio(item.songId) || item.path.isNull()
+                            ? QStringLiteral("")
+                            : item.path);
         query.bindValue(QStringLiteral(":song_id"), item.songId);
         query.bindValue(QStringLiteral(":current_index"), snapshot.currentIndex);
         query.bindValue(QStringLiteral(":play_next"), item.playNext);
@@ -52,8 +56,11 @@ QueueSnapshot QueueRepository::loadQueue() const {
         return snapshot;
     }
 
+    const auto locations = ResourceRepository(m_session).audioLocations();
     while (query.next()) {
         snapshot.items.append({query.value(0).toString(), query.value(1).toInt(), query.value(3).toBool()});
+        if (locations.contains(snapshot.items.last().songId))
+            snapshot.items.last().path = locations.value(snapshot.items.last().songId).second;
         snapshot.currentIndex = query.value(2).toInt();
     }
     if (snapshot.items.isEmpty()) {

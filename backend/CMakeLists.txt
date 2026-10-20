@@ -13,6 +13,7 @@ target_include_directories(nekotune_domain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nekotune_domain PUBLIC Qt6::Core ZLIB::ZLIB)
 
 add_library(nekotune_storage STATIC
+    storage/resource_repository.cpp
     storage/listening_history_repository.cpp
     storage/database_session.cpp
     storage/playlist_repository.cpp
@@ -39,6 +40,8 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/library/loudness_analysis.cpp
     infrastructure/library/audio_reference.cpp
     infrastructure/library/import_executor.cpp
+    infrastructure/library/library_file_io.cpp
+    infrastructure/library/library_archive.cpp
     infrastructure/library/music_directory.cpp
     infrastructure/lyrics/lyrics_cache.cpp
     infrastructure/lyrics/lyrics_storage.cpp
@@ -106,6 +109,7 @@ add_library(nekotune_ipc STATIC
 target_link_libraries(nekotune_ipc PUBLIC nekotune_application nekotune_paths Qt6::Network)
 
 add_library(nekotune_core STATIC
+    runtime/library_maintenance.cpp
     runtime/backend_runtime.cpp
     runtime/backend_session.cpp
     runtime/library_scanner.cpp

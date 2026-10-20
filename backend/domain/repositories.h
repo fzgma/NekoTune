@@ -39,6 +39,12 @@ class ISongRepository {
                                                         const EmbeddedMetadata &metadata = {}) = 0;
     virtual QVector<SongMetadata> songs() const = 0;
     virtual std::optional<SongMetadata> getOrCreateRemote(const SongMetadata &) { return std::nullopt; }
+    virtual bool saveImportedAssets(int, const ImportedFile &) { return true; }
+    virtual bool retainAssets(int) { return true; }
+    virtual QStringList cleanupKeys(int id) const {
+        const auto song = songById(id);
+        return song && !song->hash.isEmpty() ? QStringList{song->hash} : QStringList{};
+    }
     virtual std::optional<SongMetadata> songById(int songId) const = 0;
     virtual std::optional<SongMetadata> songByHash(const QString &hash) const {
         for (const auto &song : songs())
@@ -46,6 +52,7 @@ class ISongRepository {
                 return song;
         return std::nullopt;
     }
+    virtual bool containsAudioHash(const QString &hash) const { return songByHash(hash).has_value(); }
     virtual std::optional<SongMetadata> updateMetadata(const SongMetadata &metadata) = 0;
     /// Paths are candidates rather than a promise of file availability.
     /// A song may outlive a removed file or a broken managed symlink.

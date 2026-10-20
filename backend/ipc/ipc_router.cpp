@@ -29,6 +29,11 @@ void IpcRouter::dispatch(const QJsonObject &request, Completion completion) {
         completion(result);
     };
     const auto method = request.value("method").toString();
+    if (m_maintenance && method != "library.task" && method != "library.storage_status" &&
+        method != "library.cancel" && method != "player.status") {
+        done(error(failure("Library restore is in progress", ErrorCode::Unavailable)));
+        return;
+    }
     if (m_stopping) {
         done(error(failure(QStringLiteral("Backend is shutting down"), ErrorCode::Cancelled)));
         return;

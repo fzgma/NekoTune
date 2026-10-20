@@ -15,8 +15,12 @@ class SongRepository final : public ISongRepository {
                                                         const EmbeddedMetadata &metadata = {}) override;
     QVector<SongMetadata> songs() const override;
     std::optional<SongMetadata> getOrCreateRemote(const SongMetadata &) override;
+    bool saveImportedAssets(int songId, const ImportedFile &file) override;
+    bool retainAssets(int songId) override;
+    QStringList cleanupKeys(int songId) const override;
     std::optional<SongMetadata> songById(int songId) const override;
     std::optional<SongMetadata> songByHash(const QString &hash) const override;
+    bool containsAudioHash(const QString &hash) const override;
     std::optional<SongMetadata> updateMetadata(const SongMetadata &metadata) override;
     QVector<QString> pathsForSong(int songId) const override;
     QHash<int, QVector<QString>> songPaths() const override;
@@ -28,6 +32,7 @@ class SongRepository final : public ISongRepository {
     void setError(const QString &message) { m_session.setError(message); }
     bool rememberSongPath(int songId, const QString &path);
     std::optional<SongMetadata> readSongFromQuery(QSqlQuery &query) const;
+    void resolveAssets(SongMetadata &song) const;
     DatabaseSession &m_session;
     QSqlDatabase m_db;
 };

@@ -1,14 +1,17 @@
 #include "controllers/app_controllers.h"
 #include "extensions/extension_view.h"
 AppControllers::AppControllers(IpcClient &client)
-    : playback(new PlaybackController(client)), audioOutput(new AudioOutputController(client)), queue(new QueueController(client)),
-      playlists(new PlaylistController(client)), library(new LibraryController(client)), history(new HistoryController(client)),
-      tags(new TagController(client)), lyrics(new LyricsController(client)),
-      settings(new SettingsController(client)),
-      ai(new AiController(client)), extensions(new ExtensionsController(client)), theme(new ThemeController(client, *extensions)) {
+    : playback(new PlaybackController(client)), audioOutput(new AudioOutputController(client)),
+      queue(new QueueController(client)), playlists(new PlaylistController(client)),
+      library(new LibraryController(client)), storage(new LibraryStorageController(client)),
+      history(new HistoryController(client)), tags(new TagController(client)),
+      lyrics(new LyricsController(client)), settings(new SettingsController(client)),
+      ai(new AiController(client)), extensions(new ExtensionsController(client)),
+      theme(new ThemeController(client, *extensions)) {
     registerExtensionQmlTypes();
-    for (QObject *object : QList<QObject *>{static_cast<QObject *>(playback), audioOutput, queue, playlists, library, history, tags,
-                                            lyrics, settings, ai, extensions, theme})
+    for (QObject *object :
+         QList<QObject *>{static_cast<QObject *>(playback), audioOutput, queue, playlists, library, history,
+                          tags, lyrics, settings, ai, extensions, theme, storage})
         object->setParent(this);
     connect(&client, &IpcClient::eventReceived, this, [this](const QJsonObject &event) {
         if (event.value("event") != "server.connected")

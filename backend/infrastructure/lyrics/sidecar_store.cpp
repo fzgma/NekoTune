@@ -63,9 +63,20 @@ bool SidecarStore::current(const QString &hash, quint64 revision, quint64 genera
 // Lyric writes can succeed even if optional cover validation later fails.
 void SidecarStore::save(const QString &hash, quint64 revision, const QString &base,
                         const LyricsDocument &document) {
-    if (base.isEmpty() || hash != m_hash || revision != m_revision)
+    if ((!m_writer && base.isEmpty()) || hash != m_hash || revision != m_revision)
         return;
     shutdown();
+    m_document = document;
+    if (m_writer) {
+        if (!m_writer(hash, document, {}, {}))
+            emit failed(hash, "Cannot save song lyrics");
+        else
+            emit saved(hash);
+        const auto url = coverUrl(document.coverUrl);
+        if (!m_offline && !url.isEmpty())
+            fetchCover(hash, revision, m_generation, base, url);
+        return;
+    }
     if (!QDir().mkpath(QFileInfo(base).absolutePath())) {
         emit failed(hash, "Cannot create song asset directory");
         return;
@@ -148,7 +159,8 @@ void SidecarStore::fetchCover(const QString &hash, quint64 revision, quint64 gen
                     suffix = ".webp";
                 if (bytes->size() > 5 * 1024 * 1024 || suffix.isEmpty() || !size.isValid() ||
                     size.width() > 4096 || size.height() > 4096 || reader.read().isNull() ||
-                    !atomicWrite(base + suffix, *bytes)) {
+                    !(m_writer ? m_writer(hash, m_document, *bytes, suffix.mid(1))
+                               : atomicWrite(base + suffix, *bytes))) {
                     emit failed(hash, "Cannot save valid song artwork");
                     return;
                 }

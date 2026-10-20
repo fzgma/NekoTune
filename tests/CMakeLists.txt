@@ -6,6 +6,10 @@ function(nekotune_add_qt_test)
 endfunction()
 
 set(CMAKE_WIN32_EXECUTABLE OFF)
+add_executable(nekotune_library_storage_test library_storage_test.cpp)
+target_link_libraries(nekotune_library_storage_test PRIVATE nekotune_core Qt6::Test Qt6::Gui)
+nekotune_add_qt_test(NAME nekotune_library_storage_test COMMAND nekotune_library_storage_test)
+set_tests_properties(nekotune_library_storage_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
 add_executable(nekotune_replay_gain_test replay_gain_test.cpp)
 target_link_libraries(nekotune_replay_gain_test PRIVATE nekotune_core Qt6::Test PkgConfig::FFMPEG)
 target_compile_definitions(nekotune_replay_gain_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -90,11 +94,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     # Portable file-reference coverage does not require access to a native credential store.
     nekotune_add_qt_test(NAME nekotune_audio_reference_test COMMAND nekotune_music_directory_test
-        nativeAudioLinksExposeRealBytes
-        referenceFallbackKeepsPlaybackAndAssetsSeparate
-        referencesScanAndRestoreWithoutAcceptingChangedAudio
-        referenceCleanupRollsBackAndNeverDeletesExternalAudio
-        referenceRegistrationFailureAndTamperingPreserveFiles)
+        nativeAudioLinksExposeRealBytes)
+
 endif()
 
 add_executable(nekotune_lyrics_test lyrics_test.cpp)

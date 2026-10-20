@@ -17,7 +17,7 @@ Result<int> CollectionService::enqueue(const ImportedFile &file, bool play, int 
     if (!tx)
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     auto song = m_songs.getOrCreateSong(file.hash, file.path, {}, {}, file.sourceName, file.durationMs, file.importSource, file.metadata);
-    if (!song)
+    if (!song || !m_songs.saveImportedAssets(song->id, file))
         return failure(m_songs.errorString(), ErrorCode::Storage);
     auto next = m_queue.queue();
     auto id = playNext ? next.insertAfterCurrent(file.path, *song)
@@ -61,7 +61,7 @@ Result<int> CollectionService::enqueueRemote(const SongMetadata &metadata, bool 
     if (!song)
         return failure(m_songs.errorString(), ErrorCode::Storage);
     auto next = m_queue.queue();
-    const int id = next.add(QStringLiteral(""), *song);
+    const int id = next.add(m_library.availablePath(song->id), *song);
     if (play)
         next.setCurrentIndex(next.size() - 1);
     next.markCurrent();
@@ -97,7 +97,8 @@ Result<void> CollectionService::addFileToPlaylist(int id, const ImportedFile &fi
     if (!tx)
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     auto song = m_songs.getOrCreateSong(file.hash, file.path, {}, {}, file.sourceName, file.durationMs, file.importSource, file.metadata);
-    if (!song || !m_playlists.addPlaylistSong(id, {file.path, song->id}) || !tx.commit())
+    if (!song || !m_songs.saveImportedAssets(song->id, file) ||
+        !m_playlists.addPlaylistSong(id, {file.path, song->id}) || !tx.commit())
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     emit libraryChanged();
     emit playlistsChanged();
@@ -255,8 +256,7 @@ Result<CollectionDeleteResult> CollectionService::deleteSongs(const QVector<int>
         if (id <= 0 || selected.contains(id) || !song)
             return failure(QStringLiteral("Invalid or missing song id"));
         selected.insert(id);
-        if (!song->isRemote())
-            hashes.append(song->hash);
+        hashes.append(m_songs.cleanupKeys(id));
     }
     if (ids.isEmpty())
         return failure(QStringLiteral("No songs selected"));
@@ -285,6 +285,10 @@ Result<CollectionDeleteResult> CollectionService::deleteSongs(const QVector<int>
     if (!tx || !m_queueRepo.saveQueue({next.records(), next.currentIndex()}))
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     std::unique_ptr<IManagedFileRemoval> removal;
+    for (int id : ids)
+        if ((!cleanFiles && !m_songs.retainAssets(id)) || !m_playlists.removeSongEverywhere(id) ||
+            !m_songs.erase(id))
+            return failure(m_transaction.errorString(), ErrorCode::Storage);
     if (cleanFiles && !hashes.isEmpty()) {
         // Rename assets first; the handle restores them on any subsequent database failure.
         auto staged = m_managedFiles->stageRemoval(hashes);
@@ -292,9 +296,6 @@ Result<CollectionDeleteResult> CollectionService::deleteSongs(const QVector<int>
             return staged.error();
         removal = std::move(staged.value());
     }
-    for (int id : ids)
-        if (!m_playlists.removeSongEverywhere(id) || !m_songs.erase(id))
-            return failure(m_transaction.errorString(), ErrorCode::Storage);
     if (!tx.commit())
         return failure(m_transaction.errorString(), ErrorCode::Storage);
     m_player.applyCommittedQueue(next, removed, resume);

@@ -21,6 +21,7 @@ Item {
         anchors.fill: parent
         anchors.margins: 20
         controller: page.controllers.library
+        storage: page.controllers.storage || null
         connected: page.transport.connected
         currentSong: page.shell.song
         playing: page.shell.isPlaying

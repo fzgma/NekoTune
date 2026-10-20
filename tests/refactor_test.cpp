@@ -1,15 +1,16 @@
-#include "support/audio_backend.h"
+#include "app_paths.h"
 #include "application/lyrics/lyrics_service.h"
-#include "controllers/app_controllers.h"
 #include "application/playback/player_engine.h"
+#include "controllers/app_controllers.h"
 #include "i18n.h"
 #include "infrastructure/library/import_executor.h"
+#include "infrastructure/library/library_file_io.h"
 #include "infrastructure/lyrics/lyrics_storage.h"
 #include "ipc/ipc_router.h"
 #include "ipc/serialization/serialization.h"
 #include "runtime/backend_runtime.h"
+#include "support/audio_backend.h"
 #include "support/store_fixture.h"
-#include "app_paths.h"
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QDateTime>
@@ -468,8 +469,8 @@ class RefactorTest final : public QObject {
             })(),
             5000);
         for (int index = 0; index < paths.size(); ++index)
-            QCOMPARE(QFileInfo(queue[index].toObject().value("path").toString()).canonicalFilePath(),
-                     QFileInfo(paths[index]).canonicalFilePath());
+            QCOMPARE(LibraryFileIO::hashFile(queue[index].toObject().value("path").toString()).value(),
+                     LibraryFileIO::hashFile(paths[index]).value());
         QCOMPARE(queue[0].toObject().value("song_id"), queue[2].toObject().value("song_id"));
         QVERIFY(queue[0].toObject().value("queue_id") != queue[2].toObject().value("queue_id"));
         const auto large = m_directory.filePath("pending.bin");
@@ -576,7 +577,8 @@ class RefactorTest final : public QObject {
         writeAudio(importPath, char(120));
         QCOMPARE(peer.call("library.import", {{"path", importPath}}).value("status").toString(), QString("ok"));
         QCOMPARE(peer.call("player.status").value("data").toObject().value("queue"), beforeImport);
-        QVERIFY(QFile::remove(m_directory.filePath("visible-0.wav")));
+        QVERIFY(QFile::remove(
+            peer.call("song.metadata", {{"song_id", ids[0]}})["data"].toObject()["first_path"].toString()));
         QCOMPARE(peer.call("playlist.play", {{"id", playlist}, {"song_ids", visible}}).value("status").toString(), QString("error"));
         QCOMPARE(peer.call("player.status").value("data").toObject().value("queue"), beforeImport);
         result = peer.call("library.play", {{"tag_ids", QJsonArray{tagId}}, {"song_ids", visible}, {"song_id", ids[2]}});
@@ -691,22 +693,24 @@ class RefactorTest final : public QObject {
         image.fill(QColor("#E8A9C3"));
         const auto coverPath = m_directory.filePath("covers.png");
         QVERIFY(image.save(coverPath));
-        verifyCovers(QUrl::fromLocalFile(coverPath).toString());
+        // Reimport collects a new external sidecar into the self-contained
+        // library.
+        QCOMPARE(peer.call("library.import", {{"path", path}})["status"].toString(), QString("ok"));
+        const auto ownedCover = libraryCover();
+        QVERIFY(QUrl(ownedCover).toLocalFile().contains("/artwork/"));
+        verifyCovers(ownedCover);
         QVERIFY(QFile::remove(coverPath));
-        document.coverUrl = "https://imge.kugou.com/new-selection.jpg";
-        QVERIFY(LyricsCache().write(query, document));
+        verifyCovers(ownedCover);
         peer.call("lyrics.set_offline", {{"offline", false}});
-        QTRY_COMPARE(libraryCover(), document.coverUrl);
-        QTRY_COMPARE(modelCover(), document.coverUrl);
-        QTRY_COMPARE(controllers.playback->song().value("cover_url").toString(), document.coverUrl);
-        verifyCovers(document.coverUrl);
+        QTRY_COMPARE(modelCover(), ownedCover);
+        QTRY_COMPARE(controllers.playback->song().value("cover_url").toString(), ownedCover);
         runtime.stop();
 
         QVERIFY(runtime.start());
         RpcPeer restored;
         QVERIFY(restored.connect(m_socket));
         const auto status = restored.call("player.status").value("data").toObject();
-        QCOMPARE(status.value("song").toObject().value("cover_url").toString(), document.coverUrl);
+        QCOMPARE(status.value("song").toObject().value("cover_url").toString(), ownedCover);
         runtime.stop();
     }
     void embeddedImportAlbumAndBatchEditingOverIpc() {
@@ -983,7 +987,9 @@ class RefactorTest final : public QObject {
         library->playSongs({999999}, 0);
         QTRY_COMPARE(failures.count(), 2);
         QCOMPARE(queueIds(), ids);
-        QVERIFY(QFile::remove(paths[1]));
+        QVERIFY(QFile::remove(peer.call("song.metadata", {{"song_id", ids[1].toInt()}})["data"]
+                                  .toObject()["first_path"]
+                                  .toString()));
         library->playSongs(ids, ids.first().toInt());
         QTRY_COMPARE(skipped.count(), 2);
         QCOMPARE(skipped.last().first().toInt(), 1);
@@ -1475,8 +1481,11 @@ class RefactorTest final : public QObject {
         auto *playerCover = root->findChild<QQuickItem *>("nowPlayingCover");
         QVERIFY(rowCover && playerCover);
         const auto coverUrl = QUrl::fromLocalFile(coverPath);
-        QTRY_COMPARE(rowCover->property("source").toUrl(), coverUrl);
-        QTRY_COMPARE(playerCover->property("source").toUrl(), coverUrl);
+        QTRY_VERIFY(rowCover->property("source").toUrl().toLocalFile().contains("/artwork/"));
+        const auto ownedCoverUrl = rowCover->property("source").toUrl();
+        QCOMPARE(LibraryFileIO::hashFile(ownedCoverUrl.toLocalFile()).value(),
+                 LibraryFileIO::hashFile(coverUrl.toLocalFile()).value());
+        QTRY_COMPARE(playerCover->property("source").toUrl(), ownedCoverUrl);
         QTRY_COMPARE(rowCover->property("status").toInt(), 1); // Image.Ready
         QTRY_COMPARE(playerCover->property("status").toInt(), 1);
         const auto coverScreenshot = qEnvironmentVariable("NEKOTUNE_COVER_SCREENSHOT");

@@ -20,6 +20,7 @@ Item {
     property var desktop: null
     property var windowModes: null
     property var wallpaper: null
+    property var storage: null
     property bool saving: false
     property string message: ""
     property bool failed: false
@@ -92,6 +93,13 @@ Item {
             controller: root.playback
             translator: root.translator
             enabled: root.connected
+        }
+        LibraryStorageSettings {
+            Layout.fillWidth: true
+            visible: root.storage !== null
+            controller: root.storage
+            translator: root.translator
+            connected: root.connected
         }
 
         PlaybackWindowSettings {
