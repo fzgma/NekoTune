@@ -32,7 +32,6 @@ ReplayGain 默认关闭，可选择单曲／专辑模式及 ±12 dB 预增益。
 cmake --build build --parallel
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
   ctest --test-dir build --output-on-failure
-pnpm --dir extensions check
 uv run --no-project --python 3.12 -m unittest discover -s scripts/ci/tests
 ```
 

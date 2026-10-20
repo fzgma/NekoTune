@@ -250,15 +250,15 @@
 
 ## 七、扩展与生态
 
-相关代码：`extensions/sdk/index.d.ts`、`extensions/runtime/*`、`backend/infrastructure/extensions/*`、`docs/extensions.md`。
+相关代码：`sdk/include/nekotune/sdk/*`、`backend/infrastructure/extensions/*`、`docs/extensions.md`。
 
 ### 7.1 扩展 SDK：播放事件订阅 — P2 · M
 
 - 现状：扩展可提供歌词、音源、主题、命令、界面，但**没有播放事件**。
 - 目标：新增只读事件，例如 `player.trackStarted`、`player.trackEnded`（含播放时长与是否播满）、`player.stateChanged`、`library.songAdded`。
-- 方案：沿用现有 `wire.mjs` 事件通道；新增权限声明（读取播放信息），首次启用时在"完整系统权限"提示里已覆盖，但仍建议在 manifest 中显式声明，便于将来细化权限。
+- 方案：沿用 `PluginManager::publish` 的事件广播（扩展经 `IExtensionContext::on` 订阅）；新增权限声明（读取播放信息），首次启用时在"完整系统权限"提示里已覆盖，但仍建议在 manifest 中显式声明，便于将来细化权限。
 - 价值：这是 Scrobble、状态同步（Discord Rich Presence 类）、自动化的共同前置。
-- 文档与示例：`extensions/examples/automation` 补充事件用法。
+- 文档与示例：`examples/extensions/automation` 补充事件用法。
 
 ### 7.2 Scrobble 扩展（ListenBrainz / Last.fm） — P3 · M
 

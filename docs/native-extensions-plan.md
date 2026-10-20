@@ -1,6 +1,6 @@
 # C++ 原生扩展迁移方案
 
-> 状态：草案。目标是移除捆绑的 Node.js 运行时，扩展后台改为 Qt 插件（共享库），由后端进程直接加载。QML 界面、清单贡献、主题和信任模型保持不变。
+> 状态：已实施（2026-10-20），使用文档见 [扩展开发与使用](extensions.md)。本文保留设计取舍与迁移记录。目标是移除捆绑的 Node.js 运行时，扩展后台改为 Qt 插件（共享库），由后端进程直接加载。QML 界面、清单贡献、主题和信任模型保持不变。
 
 ## 1. 背景与范围
 
@@ -187,11 +187,12 @@ nekotune.netease.zip
 
 ## 9. 实施阶段
 
-进度（2026-10-20）：阶段 1 已完成，默认构建仍使用 Node；配置 `-DNEKOTUNE_NATIVE_EXTENSIONS=ON` 切换为原生运行时，且该配置下不会下载 Node。
+进度（2026-10-20）：全部阶段完成，Node 运行时、`extensions/` 目录与 `NEKOTUNE_NATIVE_EXTENSIONS` 开关均已删除。
 
-- 已完成：SDK 头文件与 `nekotune_add_extension`；`PluginManager` 的清单校验、semver、注册表兼容读写、信任、加载、依赖排序与阻塞、重载、开发目录监视、配置、存储、凭据（与 Node 后端共用 `extension_secrets`）、事件、服务、命令、音乐与歌词来源调用、`file://` 音频、崩溃哨兵、安全模式；lyrics、automation、custom-ui 三个示例（`examples/extensions/`）；`nekotune_native_extensions_test`（ASan/UBSan 下通过）。
-- 原生模式下尚未支持（调用时返回明确错误）：ZIP 安装、主题校验与导出、HTTP 音频代理和下载，分别属于阶段 2、3；卡死检测。
-- 原生模式下 `nekotune_extensions_test` 和 `nekotune_refactor_test` 中有 5 个用例仍依赖 Node 示例或 `main.mjs` fixture，阶段 4 改写。
+- 宿主：SDK 与安装包；`PluginManager`（清单、semver、信任、加载、依赖、重载、配置、存储、凭据、事件、服务、命令、来源）；ZIP 安装／更新／回滚／清理；主题校验与导出；`AudioProxy` 与下载；崩溃哨兵（POSIX 信号与 Windows 未处理异常）；示例与测试夹具改为 C++；发布冒烟测试改为 Python。
+- 外部插件：网易云（weapi 的 AES 与模幂在插件内实现，不依赖 OpenSSL）、酷狗、世界计划（移植 `sekai-music` 的目录与探测部分，ffmpeg 裁切改为准备 `file://`）、Starcape 打包，全部改为 CMake 构建与 QtTest。
+- 未实现：后端卡死检测（同线程无法中断扩展，只能记录）。
+- Windows 相关代码（`SetDllDirectoryW`、未处理异常过滤器、MinGW 构建）未在本机编译验证，依赖 CI 的 Windows 作业。
 
 1. **SDK 与加载**：SDK 头文件、`PluginManager` 的扫描、信任、加载、停用、依赖排序、崩溃哨兵、安全模式；迁移 lyrics、automation、custom-ui 示例。
 2. **包管理与主题**：C++ 版安装、更新、回滚、清理、主题校验与导出、开发目录监视与重载。开发目录重载已实现（整个库目录按内容哈希复制到 `runtime/` 后加载）。Windows 上已加载的 DLL 被锁定，清理旧包时须跳过当前会话加载过的目录，下次启动再删。
@@ -199,7 +200,7 @@ nekotune.netease.zip
 4. **外部插件**：网易云（加密向量测试先行）→ 酷狗 → 世界计划（先移植 `sekai-music`）。
 5. **清理**：删除 Node 运行时与 JS 工具链，更新文档与 CI。
 
-阶段 1–3 完成前保留 Node 运行时，两套后端用构建选项 `NEKOTUNE_NATIVE_EXTENSIONS` 切换；阶段 5 删除旧实现和该选项。
+迁移期间两套后端曾用构建选项 `NEKOTUNE_NATIVE_EXTENSIONS` 切换，现已删除。
 
 ## 10. 风险
 
@@ -209,12 +210,12 @@ nekotune.netease.zip
 | ABI 与 Qt 版本绑定 | 清单声明 `qt`，宿主拒绝不匹配版本；官方构建镜像；宿主升级 Qt 小版本时需要重新构建所有插件 |
 | 第三方开发门槛上升 | 从“写 JS”变为“配置 C++ 工具链”；提供模板和镜像。若以后需要轻量脚本扩展，可另行评估 `QJSEngine` 方案 |
 | 卸载时悬空回调 | 每插件注册表与代次令牌；无法确认安全时延迟到重启再释放 |
-| 网易云加密依赖 OpenSSL | 插件私有链接系统 `libcrypto`，与 Qt Network 使用的是同一系统库 |
+| 网易云加密依赖 OpenSSL | 已改为插件内实现 AES-128-CBC 与 1024 位模幂，用上游测试向量校验，Windows 无需额外 DLL |
 | 世界计划移植量大 | `sekai-music` 先移植并补齐测试，再接入插件 |
 
-## 11. 待定事项
+## 11. 决定记录
 
-1. 是否接受只支持 `apiVersion: 2` 后台代码，不保留 Node 兼容期（建议一次性切换，迁移期间用构建选项并存）。
-2. 世界计划下载裁剪继续依赖系统 ffmpeg/ffprobe，还是改用宿主已有的解码能力。
-3. 开发重载复制库目录后，旧映射累积到重启才释放，是否可接受。
-4. 官方构建镜像与 CI 的 GCC、Qt 版本基线。
+1. 一次性切换到 `apiVersion: 2`，不保留 Node 兼容期。带 `main` 的旧包被拒绝；无代码的主题和纯界面包继续接受 `apiVersion: 1`。
+2. 世界计划下载裁切继续使用系统 `PATH` 中的 ffmpeg/ffprobe，缺失时提示 `sekai_ffmpeg_missing`。
+3. 开发重载复制库目录，旧映射保留到重启，接受。
+4. 平台为 Linux 与 Windows x86_64，不支持 macOS；扩展与宿主使用同一工具链（Linux GCC、Windows MSYS2 UCRT64 MinGW）和 Qt 小版本，基线以 CI 为准（当前 Qt 6.11）。
