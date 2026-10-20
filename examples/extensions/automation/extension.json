@@ -1,0 +1,9 @@
+{
+  "id": "example.automation",
+  "name": "Playback automation",
+  "version": "2.0.0",
+  "apiVersion": 2,
+  "config": {
+    "sleepSeconds": 30
+  }
+}

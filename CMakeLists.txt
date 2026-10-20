@@ -11,6 +11,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTORCC ON)
 option(NEKOTUNE_ENABLE_WALLPAPER "Enable desktop music wallpaper platform backends" ON)
+# Migration switch: load apiVersion 2 native extensions in-process instead of the bundled Node runtime.
+option(NEKOTUNE_NATIVE_EXTENSIONS "Use the native C++ extension runtime instead of Node.js" OFF)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS
     Core
@@ -38,13 +40,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 qt_standard_project_setup(REQUIRES 6.6)
-include(cmake/ExtensionRuntime.cmake)
+if(NOT NEKOTUNE_NATIVE_EXTENSIONS)
+    include(cmake/ExtensionRuntime.cmake)
+endif()
 
 add_library(nekotune_paths STATIC shared/app_paths.cpp)
 target_include_directories(nekotune_paths PUBLIC ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(nekotune_paths PUBLIC Qt6::Core)
 
+add_subdirectory(sdk)
 add_subdirectory(backend)
+add_subdirectory(examples/extensions)
 add_subdirectory(frontend/qt-qml)
 
 enable_testing()

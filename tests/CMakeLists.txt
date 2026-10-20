@@ -171,8 +171,24 @@ target_link_libraries(nekotune_extensions_test PRIVATE nekotune_core nekotune_fr
 target_compile_definitions(nekotune_extensions_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 nekotune_add_qt_test(NAME nekotune_extensions_test COMMAND nekotune_extensions_test)
 set_tests_properties(nekotune_extensions_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=${NEKOTUNE_TEST_QPA};QT_QUICK_BACKEND=software")
-add_test(NAME nekotune_extension_sdk_test COMMAND "${NEKOTUNE_NODE_BINARY}" --test tests/packages.test.mjs tests/audio.test.mjs tests/runtime.test.mjs tests/themes.test.mjs)
-set_tests_properties(nekotune_extension_sdk_test PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" TIMEOUT 120)
+if(NOT NEKOTUNE_NATIVE_EXTENSIONS)
+    add_test(NAME nekotune_extension_sdk_test COMMAND "${NEKOTUNE_NODE_BINARY}" --test tests/packages.test.mjs tests/audio.test.mjs tests/runtime.test.mjs tests/themes.test.mjs)
+    set_tests_properties(nekotune_extension_sdk_test PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" TIMEOUT 120)
+endif()
+nekotune_add_extension(nekotune_test_faulty_extension
+    MANIFEST native_extensions/faulty/extension.json
+    SOURCES native_extensions/faulty/plugin.cpp
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-extensions/test.faulty")
+add_executable(nekotune_native_extensions_test native_extensions_test.cpp)
+target_link_libraries(nekotune_native_extensions_test PRIVATE nekotune_core Qt6::Test)
+target_compile_definitions(nekotune_native_extensions_test PRIVATE
+    NEKOTUNE_EXAMPLE_EXTENSIONS="${CMAKE_BINARY_DIR}/extensions"
+    NEKOTUNE_TEST_EXTENSIONS="${CMAKE_CURRENT_BINARY_DIR}/native-extensions"
+    NEKOTUNE_TEST_SOURCES="${CMAKE_CURRENT_SOURCE_DIR}/native_extensions")
+add_dependencies(nekotune_native_extensions_test nekotune_example_lyrics nekotune_example_automation
+    nekotune_example_custom_ui nekotune_test_faulty_extension)
+nekotune_add_qt_test(NAME nekotune_native_extensions_test COMMAND nekotune_native_extensions_test)
+set_tests_properties(nekotune_native_extensions_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_DISABLE_STACK_DUMP=1")
 
 add_executable(nekotune_audio_pipeline_test audio_pipeline_test.cpp)
 target_link_libraries(nekotune_audio_pipeline_test PRIVATE nekotune_core Qt6::Test PkgConfig::FFMPEG)

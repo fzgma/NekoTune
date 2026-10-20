@@ -1,0 +1,10 @@
+{
+  "id": "test.dependent",
+  "name": "Dependent test extension",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "dependencies": { "test.faulty": "^1.1.0" },
+  "contributes": {
+    "pages": [{ "id": "page", "title": "Dependent", "source": "Page.qml" }]
+  }
+}
