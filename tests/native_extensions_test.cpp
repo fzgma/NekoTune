@@ -11,6 +11,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -445,6 +446,43 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(downloaded.value().value("path").toString(), base + ".wav");
         QCOMPARE(QFileInfo(base + ".wav").size(), 352844);
         QVERIFY(QDir(m_home->path()).entryList({"download.partial-*"}).isEmpty());
+    }
+
+    void legacyNodeInstallUpgradesInPlace() {
+        // A profile from the Node runtime: an enabled, trusted apiVersion 1 extension with data.
+        QTemporaryDir legacy;
+        QFile manifest(legacy.filePath("extension.json"));
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(R"({"id":"test.faulty","name":"Old","version":"1.0.0","apiVersion":1,"main":"main.mjs"})");
+        manifest.close();
+        QVERIFY(QDir().mkpath(QDir(AppPaths::extensionsDirectory()).filePath("data/test.faulty")));
+        QFile config(QDir(AppPaths::extensionsDirectory()).filePath("data/test.faulty/config.json"));
+        QVERIFY(config.open(QIODevice::WriteOnly));
+        config.write(R"({"mode":"ok","kept":true})");
+        config.close();
+        QFile registry(QDir(AppPaths::extensionsDirectory()).filePath("registry.json"));
+        QVERIFY(registry.open(QIODevice::WriteOnly));
+        registry.write(QJsonDocument::fromVariant(QVariantMap{
+            {"bundledSeen", QVariantList{}},
+            {"entries", QVariantList{QVariantMap{{"id", "test.faulty"}, {"directory", legacy.path()}, {"development", true},
+                                                 {"enabled", true}, {"trusted", true}}}}}).toJson());
+        registry.close();
+
+        auto manager = startManager();
+        auto old = entry(*manager, "test.faulty");
+        QCOMPARE(old.value("state").toString(), "failed");
+        QVERIFY(old.value("error").toString().contains("apiVersion 2"));
+        // Replacing it with the native build keeps trust, enabled state and data.
+        const auto replaced = call(*manager, "extensions.install", {{"path", faultyDirectory}, {"development", true}, {"replace", true}});
+        QVERIFY2(replaced, qPrintable(errorOf(replaced)));
+        QCOMPARE(entry(*manager, "test.faulty").value("state").toString(), "running");
+        QVERIFY(entry(*manager, "test.faulty").value("trusted").toBool());
+        QVERIFY(call(*manager, "extensions.get_config", {{"id", "test.faulty"}}).value().value("config").toMap().value("kept").toBool());
+        // Unknown registry keys from the old runtime survive.
+        QVERIFY(QFile(registry.fileName()).open(QIODevice::ReadOnly));
+        QFile saved(registry.fileName());
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QVERIFY(QJsonDocument::fromJson(saved.readAll()).object().contains("bundledSeen"));
     }
 
     void uninstallClearsData() {
