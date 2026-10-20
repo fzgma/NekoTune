@@ -1,10 +1,12 @@
 #include "app_paths.h"
 #include "controllers/app_controllers.h"
+#include "extensions/extension_view.h"
 #include "i18n.h"
 #include "wallpaper/wallpaper_manager.h"
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocalServer>
@@ -89,6 +91,22 @@ class WallpaperTest final : public QObject {
                                                 QJsonObject{{"time_ms", 6000},
                                                             {"text", "Let the music stay with you"}}}}}}}}}}};
     }
+    void publishTheme(const QString &directory, const QString &source = "Wallpaper.qml",
+                      int generation = 1, const QString &state = "running",
+                      const QString &id = "test.wallpaper/default") {
+        send({{"event", "extensions.changed"},
+              {"selections", QJsonObject{{"theme", id}}},
+              {"extensions", QJsonArray{QJsonObject{
+                  {"id", "test.wallpaper"}, {"type", "theme"}, {"state", state},
+                  {"directory", directory}, {"generation", generation}, {"trusted", true},
+                  {"themes", QJsonArray{QJsonObject{
+                      {"id", id}, {"schemaVersion", 1},
+                      {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
+                      {"ui", QJsonObject{{"wallpaper", source}}}}}}}}}});
+    }
+    ExtensionView *themeView() {
+        return window() ? window()->findChild<ExtensionView *>("wallpaperThemeSlotTheme") : nullptr;
+    }
   private slots:
     void init() {
         m_directory = std::make_unique<QTemporaryDir>();
@@ -105,9 +123,12 @@ class WallpaperTest final : public QObject {
                 while (m_peer && m_peer->canReadLine()) {
                     auto message = QJsonDocument::fromJson(m_peer->readLine()).object();
                     m_requests.append(message.value("method").toString());
+                    const QJsonObject data = message.value("method") == "extensions.list"
+                        ? QJsonObject{{"catalogueReady", true}, {"startupComplete", true}}
+                        : QJsonObject{};
                     m_peer->write(QJsonDocument(QJsonObject{{"id", message.value("id")},
                                                             {"status", "ok"},
-                                                            {"data", QJsonObject{}}})
+                                                            {"data", data}})
                                       .toJson(QJsonDocument::Compact) +
                                   '\n');
                 }
@@ -420,6 +441,220 @@ class WallpaperTest final : public QObject {
         }
         QCOMPARE(m_requests, requests);
     }
+    void themeWallpaperIsOptInAndReloadsWithoutRecreatingWindow() {
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        setup();
+        send(snapshot());
+        QTRY_VERIFY(m_manager->dataReady());
+        QTRY_VERIFY(m_controllers->extensions->appearanceReady());
+        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        QVERIFY(!example.isEmpty());
+        const auto folder = QFileInfo(example).absolutePath();
+        publishTheme(folder);
+        QTRY_VERIFY(m_controllers->theme->uiSlots().contains("wallpaper"));
+        QVERIFY(!window());
+        QVERIFY(!m_manager->requestedEnabled());
+        QVERIFY(m_manager->setOption("enabled", true));
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        QVERIFY(themeView());
+        QVERIFY(!themeView()->ready());
+        QPointer<QQuickWindow> first = window();
+        const auto nativeId = first->winId();
+        QTest::qWait(100);
+        const auto requests = m_requests;
+        QVERIFY(m_manager->setOption("style", "theme"));
+        QTRY_COMPARE(first->property("themeStatus").toString(), QString("active"));
+        QVERIFY(themeView()->ready());
+        QPointer<QQuickItem> previous = themeView()->item();
+        const auto context = themeView()->wallpaperContext;
+        QVERIFY(context);
+        QCOMPARE(context->property("song").toMap().value("resource_key").toString(), QString("track-a"));
+        QCOMPARE(context->property("position").toDouble(), 1500.0);
+        QCOMPARE(context->property("duration").toDouble(), 20000.0);
+        QCOMPARE(context->property("playbackRate").toDouble(), 1.5);
+        QVERIFY(context->property("connected").toBool());
+        QVERIFY(context->property("screen").value<QObject *>());
+        QVERIFY(!context->setProperty("position", 12345));
+        QCOMPARE(context->property("position").toDouble(), 1500.0);
+        m_controllers->theme->setMode("light");
+        QTest::qWait(50);
+        QCOMPARE(themeView()->item(), previous.data());
+        for (int generation : {2, 3}) {
+            publishTheme(folder, "Wallpaper.qml", generation);
+            QTRY_VERIFY(previous.isNull());
+            QTRY_VERIFY(themeView()->ready());
+            previous = themeView()->item();
+            QCOMPARE(window(), first.data());
+            QCOMPARE(first->winId(), nativeId);
+        }
+        publishTheme(folder, "Wallpaper.qml", 4, "running", "test.wallpaper/other");
+        QTRY_VERIFY(previous.isNull());
+        QTRY_VERIFY(themeView()->ready());
+        previous = themeView()->item();
+        QVERIFY(m_manager->setOption("style", "vinyl"));
+        QTRY_VERIFY(previous.isNull());
+        QVERIFY(!themeView()->ready());
+        QCOMPARE(first->property("themeStatus").toString(), QString());
+        QCOMPARE(first->winId(), nativeId);
+        QCOMPARE(m_platform->prepares, 1);
+        QCOMPARE(m_requests, requests);
+        QVERIFY(m_manager->setOption("style", "theme"));
+        QTRY_VERIFY(themeView()->ready());
+        previous = themeView()->item();
+        QVERIFY(m_manager->setOption("enabled", false));
+        QVERIFY(first.isNull());
+        QVERIFY(previous.isNull());
+    }
+    void themeWallpaperFallbackReportsErrorsAndRecovers() {
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        setup();
+        send(snapshot());
+        QTRY_VERIFY(m_manager->dataReady());
+        QVERIFY(m_manager->setOption("style", "theme"));
+        QVERIFY(m_manager->setOption("enabled", true));
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        QPointer<QQuickWindow> first = window();
+        const auto nativeId = first->winId();
+        QCOMPARE(first->property("themeStatus").toString(), QString("missing"));
+        QVERIFY(first->findChild<QObject *>("wallpaperLyrics"));
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        QFile broken(folder.filePath("Broken.qml"));
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        broken.write("import QtQuick\nQtObject {}\n");
+        broken.close();
+        QSignalSpy changes(m_manager.get(), &WallpaperManager::outputsChanged);
+        publishTheme(folder.path(), "Broken.qml");
+        QTRY_COMPARE(first->property("themeStatus").toString(), QString("error"));
+        QVERIFY(first->findChild<QObject *>("wallpaperLyrics"));
+        auto output = m_manager->outputs().first().toMap();
+        QCOMPARE(output.value("state").toString(), QString("running"));
+        QCOMPARE(output.value("themeStatus").toString(), QString("error"));
+        QVERIFY(!output.value("themeError").toString().isEmpty());
+        QVERIFY(changes.count() > 0);
+        QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
+        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        QVERIFY(!example.isEmpty());
+        const auto directory = QFileInfo(example).absolutePath();
+        publishTheme(directory, "Wallpaper.qml", 2);
+        QTRY_COMPARE(first->property("themeStatus").toString(), QString("active"));
+        QPointer<QQuickItem> previous = themeView()->item();
+        publishTheme(directory, "Wallpaper.qml", 3, "disabled");
+        QTRY_VERIFY(previous.isNull());
+        QTRY_COMPARE(first->property("themeStatus").toString(), QString("missing"));
+        QTRY_VERIFY(first->findChild<QObject *>("wallpaperLyrics"));
+        publishTheme(directory, "Wallpaper.qml", 4);
+        QTRY_COMPARE(first->property("themeStatus").toString(), QString("active"));
+        previous = themeView()->item();
+        send({{"event", "extensions.changed"}});
+        QTRY_VERIFY(previous.isNull());
+        QTRY_COMPARE(first->property("themeStatus").toString(), QString("missing"));
+        QCOMPARE(first->winId(), nativeId);
+        QCOMPARE(m_platform->prepares, 1);
+        QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
+    }
+    void themeWallpaperPreferenceRestoresAndSafeModeNeverLoadsCode() {
+        QVERIFY(nekotune::AppPaths::saveSetting("wallpaper", QJsonObject{
+            {"style", "theme"}, {"enabled", true}, {"autoRestore", true}}));
+        setup();
+        QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
+        QVERIFY(!m_manager->requestedEnabled());
+        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        QVERIFY(!example.isEmpty());
+        publishTheme(QFileInfo(example).absolutePath());
+        send(snapshot());
+        QTRY_VERIFY(m_manager->dataReady());
+        QVERIFY(m_manager->setOption("enabled", true));
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        QCOMPARE(window()->property("themeStatus").toString(), QString("safe-mode"));
+        QVERIFY(!themeView()->ready());
+        QVERIFY(window()->findChild<QObject *>("wallpaperLyrics"));
+        m_manager.reset();
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        setup();
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        publishTheme(QFileInfo(example).absolutePath(), "Wallpaper.qml", 2);
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("active"));
+        QFile settings(nekotune::AppPaths::configFile("settings.json"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write("broken json");
+        settings.close();
+        QVERIFY(!m_manager->setOption("style", "classic"));
+        QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
+        QCOMPARE(window()->property("themeStatus").toString(), QString("active"));
+    }
+    void themeWallpaperContextTracksPlaybackLyricsAndConnection() {
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        setup();
+        send(snapshot());
+        QTRY_VERIFY(m_manager->dataReady());
+        QTRY_VERIFY(m_controllers->extensions->appearanceReady());
+        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        QVERIFY(!example.isEmpty());
+        const auto directory = QFileInfo(example).absolutePath();
+        publishTheme(directory);
+        QVERIFY(m_manager->setOption("style", "theme"));
+        QVERIFY(m_manager->setOption("enabled", true));
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("active"));
+        const auto context = themeView()->wallpaperContext;
+        auto *item = themeView()->item();
+        auto *lyrics = item->findChild<QObject *>("themeWallpaperLyrics");
+        QVERIFY(lyrics);
+        QTRY_COMPARE(lyrics->property("activeIndex").toInt(), 0);
+        QVERIFY(item->property("motionAllowed").toBool());
+        send({{"event", "player.seeked"}, {"position", 7000}, {"playback_rate", 2.0}});
+        QTRY_COMPARE(lyrics->property("activeIndex").toInt(), 1);
+        QCOMPARE(context->property("playbackRate").toDouble(), 2.0);
+        QCOMPARE(lyrics->property("playbackRate").toDouble(), 2.0);
+        send({{"event", "player.state_changed"}, {"state", "paused"}});
+        QTRY_VERIFY(!context->property("playing").toBool());
+        QVERIFY(!item->property("motionAllowed").toBool());
+        send({{"event", "player.state_changed"}, {"state", "playing"}});
+        QTRY_VERIFY(item->property("motionAllowed").toBool());
+        QVERIFY(m_manager->setOption("intensity", 0.0));
+        QVERIFY(!item->property("motionAllowed").toBool());
+        QVERIFY(m_manager->setOption("intensity", 0.5));
+        QVERIFY(m_manager->setOption("updateHz", 60));
+        QCOMPARE(lyrics->property("updateInterval").toInt(), 16);
+        QVERIFY(m_manager->setOption("nextLine", false));
+        QVERIFY(!lyrics->property("showNext").toBool());
+        QVERIFY(m_manager->setOption("lyrics", false));
+        QVERIFY(!lyrics->property("running").toBool());
+        QVERIFY(m_manager->setOption("lyrics", true));
+        window()->hide();
+        QVERIFY(!context->property("updating").toBool());
+        QVERIFY(!item->property("motionAllowed").toBool());
+        QVERIFY(!lyrics->property("running").toBool());
+        window()->show();
+        QTRY_VERIFY(context->property("updating").toBool());
+        send({{"event", "player.track_changed"},
+              {"song", QJsonObject{{"resource_key", "track-b"}, {"title", "B"}}}});
+        QTRY_COMPARE(lyrics->property("songIdentity").toString(), QString("track-b"));
+        QCOMPARE(lyrics->property("activeIndex").toInt(), -1);
+        send({{"event", "lyrics.changed"}, {"lyrics", snapshot().value("data").toObject().value("lyrics")}});
+        QTest::qWait(30);
+        QCOMPARE(lyrics->property("activeIndex").toInt(), -1);
+        QPointer<QQuickItem> previous = item;
+        const auto nativeId = window()->winId();
+        m_peer->disconnectFromServer();
+        QTRY_VERIFY(!m_manager->dataReady());
+        QVERIFY(!context->property("connected").toBool());
+        QVERIFY(!context->property("updating").toBool());
+        QTRY_VERIFY(previous.isNull());
+        QTRY_VERIFY(m_client->connected());
+        QVERIFY(!m_manager->dataReady());
+        send(snapshot("track-b"));
+        QTRY_VERIFY(m_manager->dataReady());
+        QTRY_VERIFY(m_controllers->extensions->appearanceReady());
+        publishTheme(directory, "Wallpaper.qml", 2);
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("active"));
+        lyrics = themeView()->item()->findChild<QObject *>("themeWallpaperLyrics");
+        QVERIFY(lyrics);
+        QCOMPARE(lyrics->property("activeIndex").toInt(), 0);
+        QCOMPARE(window()->winId(), nativeId);
+        QVERIFY(!m_requests.contains("player.status"));
+    }
     void vinylAnimationPausesAndStopsWhenInactive() {
         setup();
         send(snapshot());
@@ -546,6 +781,23 @@ class WallpaperTest final : public QObject {
             if (!directory.isEmpty())
                 QVERIFY(window()->grabWindow().save(directory + "/native-wallpaper-" + style + ".png"));
         }
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        const auto example = QFINDTESTDATA("../extensions/examples/theme-qml/Wallpaper.qml");
+        QVERIFY(!example.isEmpty());
+        const auto themeDirectory = QFileInfo(example).absolutePath();
+        publishTheme(themeDirectory);
+        QVERIFY(m_manager->setOption("style", "theme"));
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("active"));
+        QCOMPARE(window()->winId(), nativeId);
+        QPointer<QQuickItem> previous = themeView()->item();
+        publishTheme(themeDirectory, "Wallpaper.qml", 2);
+        QTRY_VERIFY(previous.isNull());
+        QTRY_VERIFY(themeView()->ready());
+        QCOMPARE(window()->winId(), nativeId);
+        QVERIFY(!window()->isActive());
+        QTest::qWait(350);
+        if (!directory.isEmpty())
+            QVERIFY(window()->grabWindow().save(directory + "/native-wallpaper-theme.png"));
         QPointer<QQuickWindow> first = window();
         QVERIFY(m_manager->setOption("enabled", false));
         QVERIFY(first.isNull());

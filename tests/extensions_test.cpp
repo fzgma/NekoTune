@@ -548,11 +548,13 @@ class ExtensionsTest final : public QObject {
         QTemporaryDir actionDirectory;
         QFile actionFile(actionDirectory.filePath("Search.qml"));
         QVERIFY(actionFile.open(QIODevice::WriteOnly));
-        actionFile.write("import QtQuick\nItem { property int calls: 0; "
+        actionFile.write("import QtQuick\nimport NekoTune 1.0\nItem { property int calls: 0; "
+                         "ExtensionApi { id: api } property bool noWallpaper: api.wallpaper === null; "
                          "function focusSearch(): void { calls++ } }");
         actionFile.close();
         item->setDescriptor({{"source", actionFile.fileName()}});
         QTRY_VERIFY(item->ready());
+        QVERIFY(item->item()->property("noWallpaper").toBool());
         QVERIFY(item->invokeAction("focusSearch"));
         QCOMPARE(item->item()->property("calls").toInt(), 1);
         QVERIFY(!item->invokeAction("destroy"));

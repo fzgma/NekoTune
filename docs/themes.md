@@ -63,6 +63,7 @@ pnpm run pack /tmp/my-theme /tmp/my-theme.nktheme.zip
       },
       "ui": {
         "background": "Background.qml",
+        "wallpaper": "Wallpaper.qml",
         "bottomPlayer": "Player.qml",
         "pages": {"home": "Home.qml"}
       }
@@ -81,7 +82,7 @@ pnpm run pack /tmp/my-theme /tmp/my-theme.nktheme.zip
 
 ## QML 界面
 
-`ui` 可包含 `background`、`shell`、`bottomPlayer` 与 `pages`。页面键为内置页面 ID：`home`、`library`、`queue`、`lyrics`、`settings`、`extensions`、`music_sources`、`lyrics_debug`。入口为包内相对路径，根对象必须继承 `Item`。
+`ui` 可包含 `background`、`shell`、`bottomPlayer`、`wallpaper` 与 `pages`。页面键为内置页面 ID：`home`、`library`、`queue`、`lyrics`、`settings`、`extensions`、`music_sources`、`lyrics_debug`。入口为包内相对路径，根对象必须继承 `Item`。
 
 ```qml
 import QtQuick
@@ -105,6 +106,26 @@ Rectangle {
 插槽优先级为当前主题、独立扩展选择、内置实现。切走主题恢复原独立选择；默认 Shell 才会自动放置背景和页面。完整 Shell 负责自己的布局、背景及导航。浏览主题卡片不实例化主题代码，页面入口只在显示时加载。
 
 含 QML/JavaScript 的主题首次启用需要信任，拥有与现有扩展相同的访问能力。纯数据主题不需要代码授权。两者都不创建 Node Worker。独立 QML 引擎不是安全沙箱，也没有独立 GUI 线程；不能依赖它隔离死循环或恶意代码。
+
+## 主题音乐壁纸
+
+每个主题可通过 `ui.wallpaper` 提供一个完整音乐壁纸布局，深浅色共用入口。用户需在「设置 → 动态音乐壁纸 → 壁纸样式」选择「跟随当前主题」并开启壁纸。选择主题不会自动开启壁纸，其他三种内置样式也不会实例化此入口。主题切换、更新和重新加载仅替换窗口内容，原生桌面窗口保持不变；每屏有独立视图实例。
+
+完整 Shell 可从 `api.window.wallpaper` 获取宿主壁纸管理器，并复用 `qrc:/qml/wallpaper/WallpaperSettings.qml`，传入 `manager`、`themeController: api.app.theme` 和窗口的 `translator`，在自定义设置页中提供相同的启用、样式及每屏状态控件。
+
+壁纸根对象继承 `Item`，通过 `ExtensionApi.wallpaper` 获取只读上下文；其他扩展视图中该属性为 `null`：
+
+| 属性 | 含义 |
+| --- | --- |
+| `song`、`lyrics` | 当前歌曲元数据和歌词状态，沿用宿主数据结构 |
+| `position`、`duration`、`playbackRate` | 毫秒位置、毫秒时长及播放倍速 |
+| `connected`、`hasSong`、`playing`、`updating` | 完整数据已连接、歌曲存在、正在播放和展示可更新 |
+| `preferences` | 公共壁纸设置，包括 `lyrics`、`nextLine`、`updateHz`、`intensity` 等 |
+| `screen` | 当前屏幕信息，包括 `devicePixelRatio` |
+
+使用 `api.theme` 读取配色与 `reducedMotion`，公共封面背景、模糊和透明叠加由宿主在主题内容后方绘制。自定义布局须遵守歌词开关、插值频率和装饰强度：动画仅在 `playing`／`updating` 允许时运行，并尊重减少动态效果；歌词建议复用 `qrc:/qml/components/CompactLyrics.qml`，传入上下文数据，以保留切歌身份校验和逐字同步。可运行示例见 `extensions/examples/theme-qml/Wallpaper.qml`。没有真实音频频谱接口。
+
+未提供入口、主题不可用或入口编译／创建／根类型失败时显示经典卡片，设置页提示原因和每屏加载错误；保存的 `wallpaper.style: "theme"` 保持不变，主题恢复可用后自动接回。安全模式不加载自定义壁纸且禁止自动恢复；手动开启壁纸时回退经典卡片。加载仍沿用 QML 主题信任要求，独立引擎不是安全沙箱；运行中的任意脚本异常或死循环不保证能自动回退。
 
 ## 导出与恢复
 

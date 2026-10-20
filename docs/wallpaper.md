@@ -6,7 +6,7 @@
 
 - `WallpaperManager` 管理设置、输出身份、每屏状态、QML 窗口及退出清理。声明在主 `QQmlApplicationEngine` 后，退出与析构均同步销毁所有壁纸；销毁早于引擎及控制器。
 - `WallpaperPlatform` 是 GUI 线程的平台边界，分别由 Wayland、Windows 和 unavailable 实现。`prepare` 成功后才能显示窗口；`starting` 只有得到 Qt expose 后才成为 `running`。这里的 expose 只确认已映射，不表示没有遮挡。
-- 每个输出共享主引擎、`AppControllers`、`IpcClient`、`I18n` 和封面网络缓存；没有新播放器、音频输出、独立后端或辅助进程。
+- 每个输出的宿主窗口共享主引擎、`AppControllers`、`IpcClient`、`I18n` 和封面网络缓存；主题内容沿用 `ExtensionView` 的独立 QML 引擎，没有新播放器、音频输出、独立后端或辅助进程。
 - `Wallpaper.qml` 读取已有播放状态及歌词。`CompactLyrics` 继续核对 `resource_key / song_hash == lyrics.track_id`，拒绝迟到歌词；LRC、KRC、seek、倍速及纯文本规则不变。
 - 新连接必须收到完整 `server.connected` 才重新开始动画。断线立即停止插值；不轮询 `player.status`，不发送任何壁纸专用 IPC，也不重放修改请求。
 - `AlbumArt` 按实际尺寸及 DPR 限制解码尺寸，保留后端 `cover_url` 与默认封面回退。背景只读同一 URL，不增加搜索或来源选择。
@@ -16,13 +16,21 @@
 
 设置页的「动态音乐壁纸」独立组件提供启用、样式、主屏／全部／指定屏、封面背景、模糊、当前／下一行歌词、透明叠加、歌词插值更新频率、装饰强度和启动恢复。
 
-样式保存在 `wallpaper.style`，默认 `classic`，可选 `vinyl`、`lyrics`。旧配置缺少该键或值非法时保留经典卡片；非法写入及保存失败不会切换样式。运行时由同一窗口内的 Loader 替换布局，旧布局及动画随之销毁，不重建原生 surface、不新增 IPC 请求。所有输出使用同一份样式设置。
+样式保存在 `wallpaper.style`，默认 `classic`，可选 `vinyl`、`lyrics`、`theme`（跟随当前主题）。旧配置缺少该键或值非法时保留经典卡片；非法写入及保存失败不会切换样式。运行时由同一窗口内的 Loader 或主题插槽替换布局，旧布局及动画随之销毁，不重建原生 surface、不新增壁纸专用 IPC 请求。所有输出使用同一份样式设置。
 
 - **经典卡片**：保留原有封面、歌曲信息、进度及紧凑歌词。
 - **黑胶唱片**：封面放在唱片中央，旁边显示歌曲及歌词。竖屏采用上下布局；原生旋转动画由播放状态驱动，强度控制转速，暂停保留当前角度，断线、隐藏、零强度和 reducedMotion 停止动画。它不是节拍检测或频谱。
 - **全屏歌词**：顶部显示封面、歌曲及进度，中央放大当前行与可选下一行。`CompactLyrics.wrap` 为此样式启用换行，原有桌面歌词等调用默认仍不换行；同步身份、KRC／LRC 时间轴、纯文本无法同步提示保持不变。关闭歌词时只保留歌曲信息。
 
 三种布局共用 `WallpaperTrackInfo`；新布局分别位于 `VinylWallpaper.qml` 和 `LyricsWallpaper.qml`。封面背景、模糊、透明叠加、歌词开关和 30／60 Hz 插值设置对所有样式一致生效。
+
+「跟随当前主题」使用当前活动主题的 `ui.wallpaper` QML `Item`，入口与只读 `ExtensionApi.wallpaper` 上下文见 [主题制作](themes.md#主题音乐壁纸)。公共背景仍由宿主绘制；主题负责遵守公共歌词及动画设置。选主题不会开启壁纸，内置样式不加载主题壁纸。切换、更新和重新加载主题会释放旧内容并载入新内容，每屏独立实例化，原生窗口保持不变。
+
+当前主题无入口、被停用／移除或入口加载失败时，保留 `theme` 偏好并回退经典卡片，恢复可用后自动接回。`outputs` 的 `themeStatus` 为 `loading`、`active`、`missing`、`error`、`safe-mode` 或空字符串（内置样式）；`themeError` 提供加载错误详情。设置显示提示；这些内容错误不改变原生输出的 `running` 状态，也不触发平台重试。安全模式不加载自定义壁纸。
+
+`WallpaperContext` 是窗口拥有的只读 C++ 对象，直接转发控制器的歌曲、歌词和播放通知，由各个消费引擎转换为自己的值；不跨引擎传递宿主 QML `var` 对象。播放位置、歌词、设置使用各自通知，避免位置更新反复替换歌词文档。每屏内容状态通过独立 `outputsChanged` 通知，避免重新触发壁纸设置绑定。
+
+2026-10-20 主题壁纸验收：SDK 类型检查与 33 项测试通过；壁纸、扩展、QML 组件及依赖边界四组 CTest 通过。Niri 原生单屏 Wayland 检查主题加载／重载、原生句柄保持及退出释放通过，使用临时 IPC 播放数据，没有实际音频输出。示例包及截图位于本地 `build/theme-wallpaper-evidence/`；未新增 Windows、多屏或性能验收结论。
 
 `CompactLyrics` 换句时对当前歌词与下一句一起淡入淡出，并附带 14px 位移；向后跳转时反向过渡。沿用主题 `durationSmooth` 时长，逐字高亮继续跟随播放时间。连续跳转只保留最近一组过渡，结束后释放旧歌词；切歌、替换歌词、断线、隐藏、暂停更新、零装饰强度或减少动态效果时立即结束过渡。
 

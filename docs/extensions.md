@@ -149,7 +149,7 @@ Item {
 }
 ```
 
-`ExtensionApi` 提供 `call(method, params)`、`invoke(service, params)`、宿主事件信号、`app` 业务控制器、`window` 窗口对象、`theme` 主题变量和本地化辅助函数 `t`。`ownerId` 是当前扩展 ID。后台不直接持有 QML 对象；多前端可各自加载视图，共享同一扩展后台。
+`ExtensionApi` 提供 `call(method, params)`、`invoke(service, params)`、宿主事件信号、`app` 业务控制器、`window` 窗口对象、`theme` 主题变量和本地化辅助函数 `t`。`wallpaper` 在主题音乐壁纸中提供只读播放、歌词、设置与屏幕上下文，在其他视图中为 `null`，详见 [主题音乐壁纸](themes.md#主题音乐壁纸)。`ownerId` 是当前扩展 ID。后台不直接持有 QML 对象；多前端可各自加载视图，共享同一扩展后台。
 
 每个扩展视图用独立 QML 引擎管理；重载销毁旧视图与引擎。耗时任务应放在后台，QML 代码仍共享 GUI 线程，不能保证任意 QML 代码的故障隔离。
 
@@ -164,7 +164,7 @@ Item {
 | `pages` | `id,title,source,group`；group 默认 `primary`，也可为 `utility` |
 | `settings` | `id,title,source`；显示在「设置 → 扩展设置」，点击进入子页面，不占用主侧栏；默认 Shell 可通过 `ExtensionApi.window.navigate("<extensionId>/<id>")` 打开 |
 | `slots` | `id,title,source,slot`；slot 为 `shell`、`bottomPlayer` 或 `page:<内置页面ID>` |
-| `themes` | `id,title,tokens`，可带 `schemaVersion:1`、`variants.light/dark`、`author` 与 `ui`；支持配色、背景和 QML 界面，详见 [主题制作](themes.md) |
+| `themes` | `id,title,tokens`，可带 `schemaVersion:1`、`variants.light/dark`、`author` 与 `ui`；支持配色、背景、QML 界面及可选 `ui.wallpaper` 音乐壁纸，详见 [主题制作](themes.md) |
 | `menus` | `id,title,context,command`；context 为 `song` 或 `playlist`，命令收到歌曲或歌单上下文 |
 | `toolbars` | `id,title,source,height`；插入默认 Shell 顶部工具栏 |
 

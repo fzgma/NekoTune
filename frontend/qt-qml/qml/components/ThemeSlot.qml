@@ -9,6 +9,8 @@ Item {
     required property var controllers
     required property var translator
     required property var hostWindow
+    property QtObject wallpaperContext: null
+    property bool showErrors: true
     property bool active: true
     property bool themeActive: active
     readonly property bool ready: primary.ready || fallback.ready
@@ -23,18 +25,20 @@ Item {
         id: primary; objectName: root.objectName + "Theme"; anchors.fill: parent
         descriptor: root.themeActive ? root.themeDescriptor : ({})
         controllers: root.controllers; translator: root.translator; hostWindow: root.hostWindow
+        wallpaperContext: root.wallpaperContext
         visible: ready
     }
     ExtensionView {
         id: fallback; objectName: root.objectName; anchors.fill: parent
         descriptor: root.active && (!root.themeDescriptor.source || primary.error !== "") ? root.fallbackDescriptor : ({})
         controllers: root.controllers; translator: root.translator; hostWindow: root.hostWindow
+        wallpaperContext: root.wallpaperContext
         visible: ready && !primary.ready
     }
     Rectangle {
         anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
         height: errorLabel.implicitHeight + Theme.spaceMd * 2
-        visible: root.error !== ""
+        visible: root.showErrors && root.error !== ""
         color: Theme.statusErrorBg; z: 100
         Label {
             id: errorLabel

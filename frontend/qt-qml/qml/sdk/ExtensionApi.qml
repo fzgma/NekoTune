@@ -6,6 +6,7 @@ QtObject {
     readonly property string ownerId: typeof extensionId !== "undefined" ? extensionId : ""
     readonly property var app: typeof controllers !== "undefined" ? controllers : null
     readonly property var window: typeof hostWindow !== "undefined" ? hostWindow : null
+    readonly property var wallpaper: typeof wallpaperContext !== "undefined" ? wallpaperContext : null
     readonly property var theme: Builtin.Theme
     property var pending: ({})
     signal event(var data)

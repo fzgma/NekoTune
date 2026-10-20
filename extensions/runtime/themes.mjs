@@ -134,13 +134,13 @@ export async function validateTheme(theme, directory, { strict = false } = {}) {
   if (theme.ui !== undefined) {
     if (!modern || !object(theme.ui)) throw new Error('QML themes require schemaVersion 1');
     for (const key of Object.keys(theme.ui))
-      if (!['background', 'shell', 'bottomPlayer', 'pages'].includes(key))
+      if (!['background', 'shell', 'bottomPlayer', 'wallpaper', 'pages'].includes(key))
         throw new Error(`Unknown theme UI slot: ${key}`);
     if (theme.ui.pages !== undefined && !object(theme.ui.pages)) throw new Error('Invalid theme pages');
     for (const id of Object.keys(theme.ui.pages ?? {}))
       if (!pageIds.has(id)) throw new Error(`Unknown theme page: ${id}`);
     for (const source of [
-      ...['background', 'shell', 'bottomPlayer'].flatMap((key) =>
+      ...['background', 'shell', 'bottomPlayer', 'wallpaper'].flatMap((key) =>
         theme.ui[key] === undefined ? [] : [theme.ui[key]],
       ),
       ...Object.values(theme.ui.pages ?? {}),

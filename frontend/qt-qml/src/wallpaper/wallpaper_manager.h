@@ -12,6 +12,53 @@
 class QQmlEngine;
 class QScreen;
 class IpcClient;
+class AppControllers;
+class WallpaperManager;
+
+// C++ values are converted in the consuming engine. Do not share JavaScript
+// objects or QML var bindings between the host and isolated theme engines.
+class WallpaperContext final : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(QVariantMap song READ song NOTIFY songChanged)
+    Q_PROPERTY(QVariantMap lyrics READ lyrics NOTIFY lyricsChanged)
+    Q_PROPERTY(double position READ position NOTIFY positionChanged)
+    Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
+    Q_PROPERTY(double playbackRate READ playbackRate NOTIFY playbackRateChanged)
+    Q_PROPERTY(bool connected READ connected NOTIFY playbackStateChanged)
+    Q_PROPERTY(bool hasSong READ hasSong NOTIFY playbackStateChanged)
+    Q_PROPERTY(bool playing READ playing NOTIFY playbackStateChanged)
+    Q_PROPERTY(bool updating READ updating NOTIFY playbackStateChanged)
+    Q_PROPERTY(QVariantMap preferences READ preferences NOTIFY preferencesChanged)
+    Q_PROPERTY(QObject *screen READ screen NOTIFY screenChanged)
+  public:
+    WallpaperContext(WallpaperManager *manager, AppControllers *app, IpcClient *client);
+    void setWindow(QWindow *window);
+    QVariantMap song() const;
+    QVariantMap lyrics() const;
+    double position() const;
+    double duration() const;
+    double playbackRate() const;
+    bool connected() const;
+    bool hasSong() const;
+    bool playing() const;
+    bool updating() const;
+    QVariantMap preferences() const;
+    QObject *screen() const;
+  signals:
+    void songChanged();
+    void lyricsChanged();
+    void positionChanged();
+    void durationChanged();
+    void playbackRateChanged();
+    void playbackStateChanged();
+    void preferencesChanged();
+    void screenChanged();
+  private:
+    WallpaperManager *m_manager;
+    AppControllers *m_app;
+    IpcClient *m_client;
+    QPointer<QWindow> m_window;
+};
 
 // Owns presentation only. Never sends player commands or owns playback state.
 // Construct after the QML engine; shutdown destroys all windows synchronously.
@@ -22,7 +69,7 @@ class WallpaperManager final : public QObject {
     Q_PROPERTY(QString unavailableReason READ unavailableReason NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(QVariantMap settings READ settings NOTIFY changed)
-    Q_PROPERTY(QVariantList outputs READ outputs NOTIFY changed)
+    Q_PROPERTY(QVariantList outputs READ outputs NOTIFY outputsChanged)
     Q_PROPERTY(int runningCount READ runningCount NOTIFY changed)
     Q_PROPERTY(bool dataReady READ dataReady NOTIFY dataReadyChanged)
     Q_PROPERTY(bool linuxOverlay READ linuxOverlay CONSTANT)
@@ -46,6 +93,7 @@ class WallpaperManager final : public QObject {
     void shutdown();
   signals:
     void changed();
+    void outputsChanged();
     void dataReadyChanged();
 
   protected:

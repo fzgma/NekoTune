@@ -22,6 +22,7 @@ Module {
         Property { name: "controllers"; type: "QObject"; isPointer: true }
         Property { name: "translator"; type: "QObject"; isPointer: true }
         Property { name: "hostWindow"; type: "QObject"; isPointer: true }
+        Property { name: "wallpaperContext"; type: "QObject"; isPointer: true }
         Property { name: "ready"; type: "bool"; isReadonly: true }
         Property { name: "error"; type: "QString"; isReadonly: true }
         Property { name: "item"; type: "QQuickItem"; isPointer: true; isReadonly: true }

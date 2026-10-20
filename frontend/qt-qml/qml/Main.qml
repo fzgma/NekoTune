@@ -46,6 +46,7 @@ ApplicationWindow {
     palette.highlightedText: Theme.textOnAccent
     property var desktop: typeof desktopIntegration !== "undefined" ? desktopIntegration : null
     property var windowModes: typeof playbackWindows !== "undefined" ? playbackWindows : null
+    property var wallpaper: typeof wallpaperManager !== "undefined" ? wallpaperManager : null
     Connections {
         target: root.windowModes
         function onErrorOccurred(key) {

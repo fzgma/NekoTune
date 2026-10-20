@@ -1,6 +1,7 @@
 #include "wallpaper/wallpaper_manager.h"
 #include "app_paths.h"
 #include "ipc_client.h"
+#include "controllers/app_controllers.h"
 
 #include <QCryptographicHash>
 #include <QGuiApplication>
@@ -28,7 +29,7 @@ bool valid(const QString &key, const QVariant &value) {
         return value == "primary" || value == "all" || value == "selected";
     if (key == "style")
         return value.metaType().id() == QMetaType::QString &&
-               (value == "classic" || value == "vinyl" || value == "lyrics");
+               (value == "classic" || value == "vinyl" || value == "lyrics" || value == "theme");
     if (key == "screenId")
         return value.metaType().id() == QMetaType::QString && value.toString().size() <= 128;
     if (value.metaType().id() != QMetaType::Int && value.metaType().id() != QMetaType::Double &&
@@ -41,9 +42,52 @@ bool valid(const QString &key, const QVariant &value) {
 }
 } // namespace
 
+WallpaperContext::WallpaperContext(WallpaperManager *manager, AppControllers *app, IpcClient *client)
+    : QObject(manager), m_manager(manager), m_app(app), m_client(client) {
+    connect(manager, &WallpaperManager::changed, this, &WallpaperContext::preferencesChanged);
+    connect(manager, &WallpaperManager::dataReadyChanged, this, &WallpaperContext::playbackStateChanged);
+    connect(client, &IpcClient::connectedChanged, this, &WallpaperContext::playbackStateChanged);
+    connect(app->playback, &PlaybackController::songChanged, this, &WallpaperContext::songChanged);
+    connect(app->playback, &PlaybackController::songChanged, this, &WallpaperContext::playbackStateChanged);
+    connect(app->playback, &PlaybackController::positionChanged, this, &WallpaperContext::positionChanged);
+    connect(app->playback, &PlaybackController::durationChanged, this, &WallpaperContext::durationChanged);
+    connect(app->playback, &PlaybackController::playbackRateChanged, this, &WallpaperContext::playbackRateChanged);
+    connect(app->playback, &PlaybackController::stateChanged, this, &WallpaperContext::playbackStateChanged);
+    connect(app->lyrics, &LyricsController::changed, this, &WallpaperContext::lyricsChanged);
+}
+
+void WallpaperContext::setWindow(QWindow *window) {
+    m_window = window;
+    connect(window, &QWindow::visibleChanged, this, &WallpaperContext::playbackStateChanged);
+    connect(window, &QWindow::screenChanged, this, &WallpaperContext::screenChanged);
+    connect(window, SIGNAL(outputRunningChanged()), this, SIGNAL(playbackStateChanged()));
+    emit playbackStateChanged();
+    emit screenChanged();
+}
+
+QVariantMap WallpaperContext::song() const { return m_app->playback->song(); }
+QVariantMap WallpaperContext::lyrics() const { return m_app->lyrics->current(); }
+double WallpaperContext::position() const { return m_app->playback->position(); }
+double WallpaperContext::duration() const { return m_app->playback->duration(); }
+double WallpaperContext::playbackRate() const { return m_app->playback->playbackRate(); }
+bool WallpaperContext::connected() const { return m_client->connected() && m_manager->dataReady(); }
+bool WallpaperContext::hasSong() const {
+    const auto current = song();
+    return !current.value("resource_key").toString().isEmpty() ||
+           !current.value("song_hash").toString().isEmpty();
+}
+bool WallpaperContext::playing() const { return updating() && m_app->playback->state() == "playing"; }
+bool WallpaperContext::updating() const {
+    return m_window && m_window->isVisible() && m_window->property("outputRunning").toBool() &&
+           connected() && hasSong();
+}
+QVariantMap WallpaperContext::preferences() const { return m_manager->settings(); }
+QObject *WallpaperContext::screen() const { return m_window ? m_window->screen() : QGuiApplication::primaryScreen(); }
+
 WallpaperManager::WallpaperManager(QObject *parent, std::unique_ptr<WallpaperPlatform> platform)
     : QObject(parent), m_platform(platform ? std::move(platform) : createWallpaperPlatform()),
       m_settings(defaults) {
+    connect(this, &WallpaperManager::changed, this, &WallpaperManager::outputsChanged);
     const auto saved = nekotune::AppPaths::setting("wallpaper").toObject().toVariantMap();
     for (auto it = saved.begin(); it != saved.end(); ++it)
         if (valid(it.key(), it.value()))
@@ -173,6 +217,8 @@ QVariantList WallpaperManager::outputs() const {
                                   {"selected", chosen},
                                   {"state", output.state},
                                   {"error", output.error},
+                                  {"themeStatus", output.window ? output.window->property("themeStatus").toString() : QString{}},
+                                  {"themeError", output.window ? output.window->property("themeError").toString() : QString{}},
                                   {"width", screen->size().width()},
                                   {"height", screen->size().height()},
                                   {"scale", screen->devicePixelRatio()}});
@@ -249,25 +295,41 @@ void WallpaperManager::start(Output &output) {
         return;
     QQmlComponent component(m_engine, QUrl("qrc:/qml/wallpaper/Wallpaper.qml"));
     auto *context = m_engine->rootContext();
+    auto *app = qobject_cast<AppControllers *>(context->contextProperty("controllers").value<QObject *>());
+    auto *client = qobject_cast<IpcClient *>(context->contextProperty("ipcClient").value<QObject *>());
+    if (!app || !client) {
+        output.state = "failed";
+        output.error = "wallpaper_qml_failed";
+        return;
+    }
+    auto *wallpaperContext = new WallpaperContext(this, app, client);
     auto *object =
         component.createWithInitialProperties({{"manager", QVariant::fromValue(this)},
                                                {"app", context->contextProperty("controllers")},
                                                {"translator", context->contextProperty("i18n")},
-                                               {"transport", context->contextProperty("ipcClient")}});
+                                               {"transport", context->contextProperty("ipcClient")},
+                                               {"wallpaperData", QVariant::fromValue(wallpaperContext)}});
     auto *window = qobject_cast<QWindow *>(object);
     if (!window) {
         qWarning() << "Wallpaper QML:" << component.errors();
         delete object;
+        delete wallpaperContext;
         output.state = "failed";
         output.error = "wallpaper_qml_failed";
         return;
     }
     QQmlEngine::setObjectOwnership(window, QQmlEngine::CppOwnership);
     window->QObject::setParent(this);
+    wallpaperContext->setParent(window);
+    wallpaperContext->setWindow(window);
     window->setTransientParent(nullptr);
     window->setFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus |
                      Qt::WindowTransparentForInput | Qt::Tool);
     output.window = window;
+    // QML presentation failures fall back within this window. They do not mean
+    // the native desktop surface failed or needs to be recreated.
+    connect(window, SIGNAL(themeStatusChanged()), this, SIGNAL(outputsChanged()));
+    connect(window, SIGNAL(themeErrorChanged()), this, SIGNAL(outputsChanged()));
     const auto error = m_platform->prepare(window, output.screen);
     if (!error.isEmpty()) {
         fail(output, error);

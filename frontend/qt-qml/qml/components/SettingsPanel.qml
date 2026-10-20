@@ -20,6 +20,7 @@ Item {
     property var desktop: null
     property var windowModes: null
     property var wallpaper: null
+    property var themeController: null
     property var storage: null
     property bool saving: false
     property string message: ""
@@ -113,6 +114,7 @@ Item {
             Layout.fillWidth: true
             visible: root.wallpaper !== null
             manager: root.wallpaper
+            themeController: root.themeController
             translator: root.translator
         }
 

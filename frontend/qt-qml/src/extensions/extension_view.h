@@ -8,6 +8,7 @@ class ExtensionView : public QQuickItem {
     Q_PROPERTY(QObject *controllers MEMBER controllers NOTIFY contextChanged)
     Q_PROPERTY(QObject *translator MEMBER translator NOTIFY contextChanged)
     Q_PROPERTY(QObject *hostWindow MEMBER hostWindow NOTIFY contextChanged)
+    Q_PROPERTY(QObject *wallpaperContext MEMBER wallpaperContext NOTIFY contextChanged)
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
     Q_PROPERTY(QString error READ error NOTIFY readyChanged)
     Q_PROPERTY(QQuickItem *item READ item NOTIFY readyChanged)
@@ -24,6 +25,7 @@ class ExtensionView : public QQuickItem {
     QObject *controllers = nullptr;
     QObject *translator = nullptr;
     QObject *hostWindow = nullptr;
+    QObject *wallpaperContext = nullptr;
   signals:
     void descriptorChanged();
     void contextChanged();

@@ -96,7 +96,8 @@ test('full QML packages and palette-only exports survive a portable round trip',
     source = path.join(root, 'source');
   await fs.mkdir(source);
   await fs.writeFile(path.join(source, 'Background.qml'), 'import QtQuick\nItem { objectName: "retained" }');
-  const theme = { ...descriptor(), ui: { background: 'Background.qml' } };
+  await fs.writeFile(path.join(source, 'Wallpaper.qml'), 'import QtQuick\nItem { objectName: "wallpaper" }');
+  const theme = { ...descriptor(), ui: { background: 'Background.qml', wallpaper: 'Wallpaper.qml' } };
   const manifest = await manifestAt(source, theme);
   assert.equal(manifest._themeHasCode, true);
   const zip = path.join(root, 'full.nktheme.zip');
@@ -105,6 +106,7 @@ test('full QML packages and palette-only exports survive a portable round trip',
   await unpack(zip, full, true);
   assert.deepEqual((await readManifest(full)).contributes.themes[0].ui, theme.ui);
   assert.match(await fs.readFile(path.join(full, 'Background.qml'), 'utf8'), /retained/);
+  assert.match(await fs.readFile(path.join(full, 'Wallpaper.qml'), 'utf8'), /wallpaper/);
   const paletteZip = path.join(root, 'palette.nktheme.zip');
   await exportTheme({
     theme,
@@ -117,6 +119,22 @@ test('full QML packages and palette-only exports survive a portable round trip',
   assert.equal(exported._themeHasCode, false);
   assert.equal(exported.contributes.themes[0].ui, undefined);
   assert.deepEqual(resolveTokens(exported.contributes.themes[0], 'light'), resolveTokens(theme, 'light'));
+});
+
+test('wallpaper entries validate as optional QML theme slots with contained resource paths', async (t) => {
+  const root = await directory(t);
+  await validateTheme(descriptor(), root, { strict: true });
+  await fs.writeFile(path.join(root, 'Wallpaper.qml'), 'import QtQuick\nItem {}');
+  const theme = { ...descriptor(), ui: { wallpaper: 'Wallpaper.qml' } };
+  const manifest = await manifestAt(root, theme);
+  assert.equal(manifest._themeHasCode, true);
+  assert.equal(manifest.contributes.themes[0].ui.wallpaper, 'Wallpaper.qml');
+  for (const source of [
+    '../Wallpaper.qml', '/Wallpaper.qml', 'file:///Wallpaper.qml', 'bad\\Wallpaper.qml',
+    'Missing.qml', 'Wallpaper.js', 42, null,
+  ])
+    await assert.rejects(validateTheme({ ...descriptor(), ui: { wallpaper: source } }, root));
+  await assert.rejects(validateTheme({ tokens: {}, ui: { wallpaper: 'Wallpaper.qml' } }, root), /schemaVersion/);
 });
 
 test('palette exports reuse a shared image without doubling its pixel budget', async (t) => {

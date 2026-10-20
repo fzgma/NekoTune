@@ -28,7 +28,8 @@
         },
         "ui": {
           "background": "Background.qml",
-          "bottomPlayer": "Player.qml"
+          "bottomPlayer": "Player.qml",
+          "wallpaper": "Wallpaper.qml"
         }
       }
     ]

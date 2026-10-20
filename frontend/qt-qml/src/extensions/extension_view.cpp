@@ -64,6 +64,7 @@ void ExtensionView::rebuild() {
         "extensionBridge", controllers ? controllers->property("extensions").value<QObject *>() : nullptr);
     context->setContextProperty("extensionId", m_descriptor.value("extensionId").toString());
     context->setContextProperty("hostWindow", hostWindow);
+    context->setContextProperty("wallpaperContext", wallpaperContext);
     QQmlComponent component(m_engine, QUrl::fromLocalFile(path));
     auto *created = component.isReady() ? component.create() : nullptr;
     m_item = qobject_cast<QQuickItem *>(created);

@@ -109,6 +109,8 @@ export interface ThemeDescriptor {
     background?: string;
     shell?: string;
     bottomPlayer?: string;
+    /** Optional music desktop wallpaper Item, used when wallpaper style follows the theme. */
+    wallpaper?: string;
     pages?: Partial<
       Record<
         | 'home'

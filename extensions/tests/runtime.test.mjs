@@ -492,8 +492,8 @@ test('theme packages have no workers, enforce QML trust and retain selections ac
   assert.equal((await call('extensions.list')).extensions[0].state, 'running');
   await call('extensions.disable', { id: 'test.theme' });
   assert.equal((await call('extensions.list')).selections.theme, 'test.theme/default');
-  await fs.writeFile(path.join(folder, 'Background.qml'), 'import QtQuick\nItem {}');
-  theme.ui = { background: 'Background.qml' };
+  await fs.writeFile(path.join(folder, 'Wallpaper.qml'), 'import QtQuick\nItem {}');
+  theme.ui = { wallpaper: 'Wallpaper.qml' };
   await fs.writeFile(path.join(folder, 'extension.json'), JSON.stringify(manifest));
   await assert.rejects(call('extensions.enable', { id: 'test.theme' }), /Trust/);
   await call('extensions.enable', { id: 'test.theme', trusted: true });

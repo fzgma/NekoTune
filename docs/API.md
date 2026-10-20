@@ -548,6 +548,8 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 前端 `controllers.theme` 暴露 `items`、`selectedId`、`activeId`、`mode`、`isDark`、`tokens`、`background`、`uiSlots`、`busy/error/notice` 等状态。`setMode` 保存本地 `theme_mode`，`selectTheme/importTheme/exportTheme/removeTheme/reset` 走既有扩展管理接口。QML 的 `Theme` 兼容原变量名并新增 `isDark`。格式与示例见 [主题制作](themes.md)。
 
+主题可声明 `ui.wallpaper` QML `Item`，前端解析为 `uiSlots.wallpaper`。用户选择 `wallpaper.style: "theme"` 后加载，使用 `ExtensionApi.wallpaper` 的只读播放、歌词、设置及屏幕上下文；无入口或加载失败回退经典卡片并保留选择。它不新增后端 IPC，详见 [主题音乐壁纸](themes.md#主题音乐壁纸) 与 [壁纸状态](wallpaper.md)。
+
 
 ## 听歌历史与统计
 

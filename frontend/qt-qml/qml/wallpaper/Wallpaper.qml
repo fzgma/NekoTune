@@ -15,6 +15,7 @@ Window {
     required property var app
     required property var translator
     required property var transport
+    required property QtObject wallpaperData
     property bool outputRunning: false
     readonly property var preferences: manager.settings
     readonly property string style: preferences.style || "classic"
@@ -25,6 +26,13 @@ Window {
     readonly property bool updating: visible && outputRunning && connected && hasSong
     readonly property bool playing: updating && playback.state === "playing"
     readonly property bool transparentOverlay: manager.linuxOverlay && preferences.transparent
+    readonly property var themeDescriptor: app.theme ? app.theme.uiSlots.wallpaper || ({}) : ({})
+    readonly property string themeStatus: style !== "theme" ? ""
+        : app.theme && app.theme.safeMode ? "safe-mode"
+        : !themeDescriptor.source ? "missing"
+        : themeContent.error !== "" ? "error"
+        : themeContent.ready ? "active" : "loading"
+    readonly property string themeError: style === "theme" ? themeContent.error : ""
     function t(key) { return translator.text(key, translator.language) }
     function timeLabel(milliseconds) {
         const seconds = Math.floor(Math.max(0, milliseconds) / 1000)
@@ -74,7 +82,21 @@ Window {
         Loader {
             objectName: "wallpaperStyleLoader"
             anchors.fill: parent
+            active: window.style !== "theme" || !themeContent.ready
             sourceComponent: window.style === "vinyl" ? vinylStyle : window.style === "lyrics" ? lyricsStyle : classicStyle
+        }
+        ThemeSlot {
+            id: themeContent
+            objectName: "wallpaperThemeSlot"
+            anchors.fill: parent
+            active: window.style === "theme"
+            themeDescriptor: window.themeDescriptor
+            controllers: window.app
+            translator: window.translator
+            hostWindow: window
+            wallpaperContext: window.wallpaperData
+            showErrors: false
+            visible: window.style === "theme" && ready
         }
         Component { id: vinylStyle; VinylWallpaper { wallpaper: window } }
         Component { id: lyricsStyle; LyricsWallpaper { wallpaper: window } }

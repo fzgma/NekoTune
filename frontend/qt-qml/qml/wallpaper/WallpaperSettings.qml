@@ -8,9 +8,19 @@ Rectangle {
     id: root
     required property var manager
     required property var translator
+    property var themeController: null
     readonly property var preferences: manager ? manager.settings : ({})
     readonly property var outputs: manager ? manager.outputs : []
+    readonly property var styles: ["classic", "vinyl", "lyrics", "theme"]
+    readonly property string themeHint: preferences.style !== "theme" || !themeController ? ""
+        : themeController.safeMode ? "safe-mode"
+        : !((themeController.uiSlots || {}).wallpaper || {}).source ? "missing" : ""
     function t(key) { return translator.text(key, translator.language) }
+    function themeMessage(status, detail) {
+        const keys = {missing: "wallpaper_theme_missing", error: "wallpaper_theme_error",
+                      "safe-mode": "wallpaper_theme_safe_mode", loading: "wallpaper_theme_loading"}
+        return keys[status] ? t(keys[status]) + (status === "error" && detail ? "\n" + detail : "") : ""
+    }
     component OptionCheck: CheckBox {
         id: option
         Layout.fillWidth: true
@@ -63,9 +73,17 @@ Rectangle {
         ChoiceField {
             objectName: "wallpaperStyle"
             Layout.fillWidth: true
-            model: [root.t("wallpaper_style_classic"), root.t("wallpaper_style_vinyl"), root.t("wallpaper_style_lyrics")]
-            currentIndex: ["classic", "vinyl", "lyrics"].indexOf(root.preferences.style || "classic")
-            onActivated: index => root.manager.setOption("style", ["classic", "vinyl", "lyrics"][index])
+            model: root.styles.map(style => root.t("wallpaper_style_" + style))
+            currentIndex: root.styles.indexOf(root.preferences.style || "classic")
+            onActivated: index => root.manager.setOption("style", root.styles[index])
+        }
+        Label {
+            objectName: "wallpaperThemeHint"
+            Layout.fillWidth: true
+            visible: root.themeHint !== ""
+            text: root.themeMessage(root.themeHint, "")
+            color: Theme.statusWarning
+            wrapMode: Text.Wrap; textFormat: Text.PlainText
         }
         Label { text: root.t("wallpaper_target"); color: Theme.textSecondary }
         ChoiceField {
@@ -86,13 +104,27 @@ Rectangle {
         }
         Repeater {
             model: root.outputs
-            delegate: Label {
+            delegate: ColumnLayout {
+                id: output
                 required property var modelData
                 Layout.fillWidth: true
-                text: (modelData.name || root.t("wallpaper_selected")) + " · " + root.t("wallpaper_output_" + modelData.state)
-                    + (modelData.error ? " — " + root.t(modelData.error) : "")
-                color: modelData.error ? Theme.statusWarning : Theme.textMuted
-                wrapMode: Text.Wrap; textFormat: Text.PlainText; font.pixelSize: Theme.fontCaption
+                spacing: Theme.spaceSm
+                Label {
+                    objectName: "wallpaperOutputStatus_" + output.modelData.id
+                    Layout.fillWidth: true
+                    text: (output.modelData.name || root.t("wallpaper_selected")) + " · " + root.t("wallpaper_output_" + output.modelData.state)
+                        + (output.modelData.error ? " — " + root.t(output.modelData.error) : "")
+                    color: output.modelData.error ? Theme.statusWarning : Theme.textMuted
+                    wrapMode: Text.Wrap; textFormat: Text.PlainText; font.pixelSize: Theme.fontCaption
+                }
+                Label {
+                    objectName: "wallpaperThemeStatus_" + output.modelData.id
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: root.themeMessage(output.modelData.themeStatus || "", output.modelData.themeError || "")
+                    color: output.modelData.themeStatus === "error" ? Theme.statusError : Theme.statusWarning
+                    wrapMode: Text.Wrap; textFormat: Text.PlainText; font.pixelSize: Theme.fontCaption
+                }
             }
         }
         TextButton {

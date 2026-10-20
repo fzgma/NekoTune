@@ -226,7 +226,7 @@ void ThemeController::rebuild() {
   };
   if (!safeMode()) {
     const auto ui = m_active.value("ui").toMap();
-    for (const auto &key : {"background", "shell", "bottomPlayer"})
+    for (const auto &key : {"background", "shell", "bottomPlayer", "wallpaper"})
       add(QLatin1String(key), ui.value(QLatin1String(key)));
     const auto pages = ui.value("pages").toMap();
     for (auto it = pages.cbegin(); it != pages.cend(); ++it)
