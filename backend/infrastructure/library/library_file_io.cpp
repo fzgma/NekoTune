@@ -56,8 +56,9 @@ Result<QString> copyFile(const QString &source, const QString &target, const std
     input.close();
     if (cancel && cancel->load())
         return failure("Cancelled", ErrorCode::Cancelled);
-    if (!QFile::rename(output.fileName(), target))
-        return failure("Cannot publish copied file", ErrorCode::Io);
+    // close() retains QTemporaryFile's native handle; its rename() releases it on Windows.
+    if (!output.rename(target))
+        return failure("Cannot publish copied file: " + output.errorString(), ErrorCode::Io);
     output.setAutoRemove(false);
     return QString::fromLatin1(hash.result().toHex());
 }

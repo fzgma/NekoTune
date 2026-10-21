@@ -204,6 +204,40 @@ class LibraryStorageTest : public QObject {
         QCOMPARE(duplicate.value().id, id);
         QCOMPARE(store.songById(id)->customTitle, QString("名字"));
     }
+    void copiedFilePersistsWithVerifiedBytes_data() {
+        QTest::addColumn<QByteArray>("bytes");
+        QTest::newRow("empty") << QByteArray("");
+        QTest::newRow("small") << QByteArray("audio\0bytes", 11);
+        QTest::newRow("multiple-chunks") << QByteArray(3 * 1024 * 1024 + 17, 'a');
+    }
+    void copiedFilePersistsWithVerifiedBytes() {
+        QFETCH(QByteArray, bytes);
+        write(source, bytes);
+        const auto target = root + "/copy.flac";
+        const auto copied = LibraryFileIO::copyFile(source, target);
+        QVERIFY2(copied, qPrintable(copied.error().message));
+        QCOMPARE(copied.value(), hash(bytes));
+        QVERIFY(QFileInfo::exists(target));
+        QCOMPARE(read(target), bytes);
+        QCOMPARE(read(source), bytes);
+        QVERIFY(QDir(root).entryList({"*.copy-*"}, QDir::Files).isEmpty());
+    }
+    void copyPreservesDestinationCreatedDuringStreaming() {
+        write(source, QByteArray(2 * 1024 * 1024, 'a'));
+        const auto target = root + "/copy.flac";
+        bool created = false;
+        const auto copied = LibraryFileIO::copyFile(source, target, nullptr, [&](qint64) {
+            if (created)
+                return;
+            created = true;
+            write(target, "do not overwrite");
+        });
+        QVERIFY(created);
+        QVERIFY(!copied);
+        QCOMPARE(copied.error().code, ErrorCode::Io);
+        QCOMPARE(read(target), QByteArray("do not overwrite"));
+        QVERIFY(QDir(root).entryList({"*.copy-*"}, QDir::Files).isEmpty());
+    }
     void cancelledCopyAndConflictingObjectNeverOverwrite() {
         write(source, QByteArray(1024 * 1024, 'a'));
         std::atomic_bool cancel{true};
