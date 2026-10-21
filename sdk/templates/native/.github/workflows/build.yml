@@ -1,0 +1,43 @@
+name: Build and release extension
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # After the first SDK release, pin this reference to that release's tag or SHA.
+    uses: yang208115/NekoTune/.github/workflows/build-extension.yml@main
+    with:
+      sdk-tag: ${{ vars.NEKOTUNE_SDK_TAG }}
+      package-target: extension_package
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Check release version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          test "$TAG" = "v$(jq -r .version extension.json)"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: extension-*
+          path: dist
+          merge-multiple: true
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -c ./*.sha256)
+          gh release create "$TAG" dist/* --verify-tag --generate-notes --draft

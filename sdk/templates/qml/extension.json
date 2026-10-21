@@ -1,0 +1,11 @@
+{
+  "id": "community.qml-hello",
+  "name": "Hello QML extension",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "contributes": {
+    "pages": [
+      { "id": "hello", "title": { "zh": "你好", "en": "Hello" }, "source": "Page.qml" }
+    ]
+  }
+}

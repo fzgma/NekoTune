@@ -241,6 +241,7 @@ Linux 密钥库相关集成测试通过 `dbus-run-session` 和 `gnome-keyring-da
 
 - [架构与扩展开发](docs/architecture.md)：分层、构建目标、线程、状态流和扩展入口。
 - [API 文档](docs/API.md)：本地协议、业务方法、事件与错误语义。
+- [社区扩展开发](docs/extensions.md#社区开发从模板到发布)：独立 SDK、插件模板、自动构建和发布流程。
 - [产品需求](docs/PRD.md)：产品目标与规划。
 - [UI 设计规范](docs/ui-design-guidelines.md)：界面风格和交互约定。
 

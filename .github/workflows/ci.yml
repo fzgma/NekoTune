@@ -214,6 +214,31 @@ jobs:
           key: ccache-${{ matrix.platform }}-${{ github.sha }}
 
       # ── Package ────────────────────────────────────────────────────
+      - name: Export and smoke test Linux community SDK
+        if: ${{ !cancelled() && runner.os == 'Linux' && steps.build_linux.outcome == 'success' && steps.version.outcome == 'success' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 scripts/ci/package_sdk.py \
+            --build build --platform "$PLATFORM" --version "$VERSION"
+          uv run --no-project --python 3.12 scripts/ci/smoke_sdk.py \
+            "dist/NekoTuneSDK-$VERSION-$PLATFORM-x64.zip"
+
+      - name: Export and smoke test Windows community SDK
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.build_windows.outcome == 'success' && steps.version.outcome == 'success' }}
+        shell: msys2 {0}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 scripts/ci/package_sdk.py \
+            --build build --platform "$PLATFORM" --version "$VERSION"
+          uv run --no-project --python 3.12 scripts/ci/smoke_sdk.py \
+            "dist/NekoTuneSDK-$VERSION-$PLATFORM-x64.zip"
+
       - name: Bundle and smoke test Linux distribution
         id: package_linux
         if: ${{ !cancelled() && runner.os == 'Linux' && steps.build_linux.outcome == 'success' && steps.version.outcome == 'success' }}

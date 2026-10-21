@@ -2,6 +2,39 @@
 
 NekoTune 的扩展由 C++ 原生库（Qt 插件）和可选 QML 界面组成。后端进程在用户信任后直接加载扩展库，不需要 Node.js 或其他运行时。扩展支持 Linux 和 Windows x86_64；同一份源码按平台分别编译，可合并为一个安装包。不支持 macOS。
 
+## 社区开发：从模板到发布
+
+社区扩展维护在作者自己的仓库，不需要下载或编译整个宿主。
+
+1. 从目标宿主的 Release 下载对应平台的 `NekoTuneSDK-<宿主版本>-<linux|windows>-x64.zip`
+   和 `.sha256`，核对校验值后解压。该附件由新的 CI 流程生成，旧 Release 可能没有。
+2. 根据 `share/NekoTuneSDK/build-info.json` 准备 Qt 和编译器。SDK 包只含头文件、
+   CMake 工具、模板和环境信息，不包含 Qt 或编译器；安装的 SDK 会在配置阶段拒绝
+   平台、Qt 小版本或编译器主版本不匹配的原生工程。
+3. 复制 `share/NekoTuneSDK/templates/native/` 的全部内容到自己的仓库，包括 `.github/`
+   和 `.gitignore`；修改清单 ID、名称、版本，编写插件和页面。纯 QML 使用
+   `templates/qml/`，无须 Qt 开发包和 C++ 编译器。
+4. 按模板 README 配置、构建和测试，在宿主挂载 `build/extensions/<id>/` 调试。
+   修改源码后重新构建，宿主自动重载；用独立 `NEKOTUNE_HOME` 和 `NEKOTUNE_SOCKET`
+   隔离测试。原生模板的加载测试不替代真实宿主的功能、界面及启停验收。
+5. 原生插件仓库设置 Actions 变量 `NEKOTUNE_SDK_TAG` 为**已经包含 SDK 附件**的宿主
+   Release 标签，并将模板引用的公共 workflow 固定到对应标签或提交 SHA。
+   提交后自动构建 Linux/Windows ZIP，供下载验收。
+6. 更新清单版本，推送一致的 `v<version>` 标签，模板工作流会创建带 ZIP 和 SHA-256
+   的草稿 Release；实际安装和更新验收后再公开。用户下载 ZIP 并从扩展管理页安装。
+
+公共原生构建流程位于 [build-extension.yml](../.github/workflows/build-extension.yml)，
+只 checkout 调用它的社区仓库，再从指定宿主 Release 下载 SDK。Linux 按 SDK 信息安装
+GCC 与 Qt；Windows 使用 MSYS2 UCRT64，并由 SDK 拒绝不兼容的滚动更新版本。
+本流程不提供完整工具链快照；MSYS2 更新到不兼容版本后，需要恢复匹配工具链或等待
+新的宿主 SDK，不能将这种失败当成已通过的构建。
+
+SDK 独立安装说明和模板分别见 [SDK README](../sdk/README.md)、
+[原生模板](../sdk/templates/native/README.md)和[纯 QML 模板](../sdk/templates/qml/README.md)。
+宿主 CI 会从实际宿主构建导出 SDK，再在临时目录移动、解压和构建模板，验证安装包
+可独立使用；宿主 Release 同时发布两平台 SDK。插件版本由作者独立管理，发布说明
+应列出目标宿主、平台、已验收功能和额外依赖。
+
 ## 安装、启用和恢复
 
 打开侧栏「扩展」，导入 ZIP 包，或选择「挂载开发目录」。安装完成后扩展处于停用状态，首次启用需要确认信任。扩展拥有当前用户的完整权限，可以读取文件、访问网络、启动外部程序及替换界面；这不是安全沙箱。

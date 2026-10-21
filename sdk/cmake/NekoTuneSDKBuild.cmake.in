@@ -1,0 +1,25 @@
+# A header-only SDK still describes a platform-specific native plugin ABI.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _nekotune_processor)
+if(_nekotune_processor MATCHES "^(amd64|x64)$")
+    set(_nekotune_processor x86_64)
+endif()
+string(TOLOWER "@CMAKE_SYSTEM_PROCESSOR@" _nekotune_sdk_processor)
+if(_nekotune_sdk_processor MATCHES "^(amd64|x64)$")
+    set(_nekotune_sdk_processor x86_64)
+endif()
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "@CMAKE_SYSTEM_NAME@"
+   OR NOT _nekotune_processor STREQUAL _nekotune_sdk_processor
+   OR NOT CMAKE_SIZEOF_VOID_P EQUAL @CMAKE_SIZEOF_VOID_P@)
+    message(FATAL_ERROR "NekoTune SDK is for @CMAKE_SYSTEM_NAME@ @CMAKE_SYSTEM_PROCESSOR@. Download the SDK for your target platform.")
+endif()
+unset(_nekotune_processor)
+unset(_nekotune_sdk_processor)
+if(NOT "${Qt6_VERSION_MAJOR}.${Qt6_VERSION_MINOR}" STREQUAL "@Qt6_VERSION_MAJOR@.@Qt6_VERSION_MINOR@")
+    message(FATAL_ERROR "NekoTune SDK requires Qt @Qt6_VERSION_MAJOR@.@Qt6_VERSION_MINOR@.x; found ${Qt6_VERSION}. Use the host's Qt minor version.")
+endif()
+string(REGEX MATCH "^[0-9]+" _nekotune_compiler_major "${CMAKE_CXX_COMPILER_VERSION}")
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "@CMAKE_CXX_COMPILER_ID@"
+   OR NOT _nekotune_compiler_major STREQUAL "@NEKOTUNE_SDK_COMPILER_MAJOR@")
+    message(FATAL_ERROR "NekoTune SDK requires @CMAKE_CXX_COMPILER_ID@ @NEKOTUNE_SDK_COMPILER_MAJOR@.x; found ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}.")
+endif()
+unset(_nekotune_compiler_major)

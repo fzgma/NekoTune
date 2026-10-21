@@ -68,9 +68,11 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 8
           test -s "dist/NekoTune-$VERSION-windows-x64.zip"
           test -s "dist/NekoTune-$VERSION-linux-x64.tar.gz"
+          test -s "dist/NekoTuneSDK-$VERSION-windows-x64.zip"
+          test -s "dist/NekoTuneSDK-$VERSION-linux-x64.zip"
           (cd dist && sha256sum -c ./*.sha256)
           if gh release view "$TAG" >/dev/null 2>&1; then
             test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
@@ -79,6 +81,6 @@ jobs:
             gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
               --title "NekoTune $TAG" --generate-notes --draft
           fi
-          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -eq 4
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -eq 8
           gh release edit "$TAG" --draft=false
           gh release view "$TAG" --json url,isDraft,assets
