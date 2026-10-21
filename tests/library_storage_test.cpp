@@ -206,20 +206,60 @@ class LibraryStorageTest : public QObject {
     }
     void copiedFilePersistsWithVerifiedBytes_data() {
         QTest::addColumn<QByteArray>("bytes");
-        QTest::newRow("empty") << QByteArray("");
-        QTest::newRow("small") << QByteArray("audio\0bytes", 11);
-        QTest::newRow("multiple-chunks") << QByteArray(3 * 1024 * 1024 + 17, 'a');
+        QTest::addColumn<bool>("symlink");
+        QTest::newRow("empty") << QByteArray("") << false;
+        QTest::newRow("small") << QByteArray("audio\0bytes", 11) << false;
+        QTest::newRow("multiple-chunks") << QByteArray(3 * 1024 * 1024 + 17, 'a') << false;
+        QTest::newRow("symlink-empty") << QByteArray("") << true;
+        QTest::newRow("symlink-small") << QByteArray("audio\0bytes", 11) << true;
+        QTest::newRow("symlink-multiple-chunks") << QByteArray(3 * 1024 * 1024 + 17, 'a') << true;
     }
     void copiedFilePersistsWithVerifiedBytes() {
         QFETCH(QByteArray, bytes);
+        QFETCH(bool, symlink);
         write(source, bytes);
+        auto input = source;
+        if (symlink) {
+            input = root + "/source.flac";
+            if (!createAudioSymlink(source, input))
+                QSKIP("Native symlinks unavailable");
+        }
         const auto target = root + "/copy.flac";
-        const auto copied = LibraryFileIO::copyFile(source, target);
+        const auto copied = LibraryFileIO::copyFile(input, target);
         QVERIFY2(copied, qPrintable(copied.error().message));
         QCOMPARE(copied.value(), hash(bytes));
         QVERIFY(QFileInfo::exists(target));
         QCOMPARE(read(target), bytes);
         QCOMPARE(read(source), bytes);
+        if (symlink)
+            QVERIFY(QFileInfo(input).isSymLink());
+        QVERIFY(QDir(root).entryList({"*.copy-*"}, QDir::Files).isEmpty());
+    }
+    void copyRejectsRetargetedSymlink() {
+        write(source, QByteArray(2 * 1024 * 1024, 'a'));
+        const auto replacement = root + "/replacement.flac";
+        write(replacement, read(source));
+        QFile replacementFile(replacement);
+        QVERIFY(replacementFile.open(QIODevice::ReadWrite));
+        QVERIFY(replacementFile.setFileTime(QFileInfo(source).lastModified(), QFileDevice::FileModificationTime));
+        replacementFile.close();
+        const auto link = root + "/source.flac";
+        if (!createAudioSymlink(source, link))
+            QSKIP("Native symlinks unavailable");
+        const auto target = root + "/copy.flac";
+        bool retargeted = false;
+        const auto copied = LibraryFileIO::copyFile(link, target, nullptr, [&](qint64) {
+            if (retargeted)
+                return;
+            retargeted = true;
+            QVERIFY(QFile::remove(link));
+            QVERIFY(createAudioSymlink(replacement, link));
+        });
+        QVERIFY(retargeted);
+        QVERIFY(!copied);
+        QVERIFY(copied.error().message.contains("changed"));
+        QVERIFY(!QFileInfo::exists(target));
+        QCOMPARE(read(source), read(replacement));
         QVERIFY(QDir(root).entryList({"*.copy-*"}, QDir::Files).isEmpty());
     }
     void copyPreservesDestinationCreatedDuringStreaming() {
@@ -664,8 +704,11 @@ class LibraryStorageTest : public QObject {
         QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
         Rpc rpc;
         QVERIFY(rpc.connect(runtime.serverName()));
-        QTRY_COMPARE_WITH_TIMEOUT(
-            rpc.call("library.storage_status")["data"].toObject()["pending_migration"].toInt(), 0, 10000);
+        QJsonObject storageStatus;
+        QTRY_VERIFY2_WITH_TIMEOUT(([&] {
+            storageStatus = rpc.call("library.storage_status")["data"].toObject();
+            return storageStatus["pending_migration"].toInt(-1) == 0;
+        })(), qPrintable(QString::fromUtf8(QJsonDocument(storageStatus).toJson(QJsonDocument::Compact))), 10000);
         QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(base + ".audio.json"), 10000);
         if (layout == "owned" || layout == "symlink")
             QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(oldPath), 10000);

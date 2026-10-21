@@ -104,6 +104,8 @@ cmake --build build -j2
 ./build/nekotune.exe
 ```
 
+开发构建使用 MSYS2 安装目录中的 Qt 插件和 QML 模块，不在构建目录生成 `qt.conf`。如果此前生成过该文件，删除旧的 `build/qt.conf` 后重新运行。可分发包由 `scripts/ci/package_release.py` 部署 Qt 运行库后写入对应的 `qt.conf`。
+
 运行时确认 shell PID、进程映像为系统目录的 Explorer、图标宿主含 `SHELLDLL_DefView / SysListView32`。普通桌面使用 `EnumWindows` 收集顶层窗口快照，并从图标宿主向下检查最近且覆盖目标显示器的顶层 WorkerW；同距离存在多个合格候选时安全失败。检测到 `Progman` 的 `WS_EX_NOREDIRECTIONBITMAP` 时，按 Windows 11 分层桌面布局查找 `Progman` 的直接 WorkerW 子窗口，并确认它位于图标视图下方；这个子 WorkerW 只作为 Explorer 的 Z 顺序锚点，壁纸作为 `Progman` 子窗口插在图标视图后方。普通顶层候选仍须可见、覆盖显示器且没有其他未知子窗口；分层子 WorkerW 仍须属于 Explorer、直接隶属于 Progman 且不包含图标视图。必要时对经过验证的 Progman 发送一次未公开的 `0x052c(0xD, 0x1)` 请求，最长等待 1000 ms，两次请求至少相隔 30 秒。
 
 嵌入前设置 WS_CHILD、去除 WS_POPUP、无边框、NoActivate、Layered 和 Transparent；检查 `SetParent`、样式及几何 API 的结果。零返回值按 `GetLastError` 的接口约定处理。显示器用 `MONITORINFOEX::szDevice` 对应 QScreen 名称，使用原生 monitor rect 并映射到父客户区，避免把负坐标或全局 Qt 坐标统一乘单一 DPR。设置一次 Z-order 后，几何未变化时不重复移动重绘。

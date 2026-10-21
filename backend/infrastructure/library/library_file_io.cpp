@@ -25,12 +25,13 @@ Result<QString> hashFile(const QString &path, const std::atomic_bool *cancel) {
 }
 Result<QString> copyFile(const QString &source, const QString &target, const std::atomic_bool *cancel,
                          Progress progress) {
-    QFileInfo before(source);
+    // Windows may report the link's own size/timestamps. Check the target whose bytes we copy.
+    const QFileInfo before(QFileInfo(source).canonicalFilePath());
     if (!before.isFile() || QFileInfo::exists(target) || QFileInfo(target).isSymLink())
         return failure("Invalid source or destination already exists", ErrorCode::Io);
     if (!QDir().mkpath(QFileInfo(target).absolutePath()))
         return failure("Cannot create destination directory", ErrorCode::Io);
-    QFile input(source);
+    QFile input(before.absoluteFilePath());
     QTemporaryFile output(target + ".copy-XXXXXX");
     if (!input.open(QIODevice::ReadOnly) || !output.open())
         return failure("Cannot open source or destination", ErrorCode::Io);
@@ -46,8 +47,9 @@ Result<QString> copyFile(const QString &source, const QString &target, const std
         if (progress)
             progress(data.size());
     }
-    QFileInfo after(source);
-    if (before.size() != after.size() || before.lastModified() != after.lastModified() ||
+    const QFileInfo after(QFileInfo(source).canonicalFilePath());
+    if (before.absoluteFilePath() != after.absoluteFilePath() ||
+        before.size() != after.size() || before.lastModified() != after.lastModified() ||
         output.size() != before.size())
         return failure("Source changed during copy", ErrorCode::Io);
     if (!output.flush())
