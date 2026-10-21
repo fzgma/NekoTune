@@ -36,9 +36,9 @@ NekoTune 是一款本地优先的 Linux 音乐播放器，使用 C++20、Qt6 和
 - Zlib 和 FFmpeg 开发库：`libavformat`、`libavutil`、`libavcodec`、`libswresample`、`libavfilter`。
 - QtKeychain 0.17+ 的 Qt6 开发包，CMake 包名为 `Qt6Keychain`。
 - Linux 还需 `libsecret-1` 开发库，用于读取并迁移旧版系统密钥库条目。建议安装 `libpulse` 14+ 开发库（Debian/Ubuntu：`libpulse-dev`），以便直接选择同一声卡下的耳机／扬声器端口；兼容 PulseAudio 和 PipeWire 的 Pulse 服务，未编入此支持时仍可选择 Qt 音频设备。
-- JS 构建工具需要 pnpm；CMake 下载并校验固定的 Node.js 24.21.0，发行运行不依赖系统 Node.js。扩展运行时支持 Linux 和 Windows x86_64。
+- 扩展以 C++ 原生库在后端进程内加载，不需要 Node.js。扩展运行时支持 Linux 和 Windows x86_64，扩展必须与宿主使用同一工具链和 Qt 小版本构建，详见 [扩展文档](docs/extensions.md)。
 
-Linux 构建使用系统开发包或官方 Qt SDK；Windows 构建使用 MSYS2 UCRT64 的 GCC、CMake、Ninja、pkgconf、Qt6、QtKeychain、FFmpeg 和 Zlib。macOS 尚无完整构建工作流。
+Linux 构建使用系统开发包或官方 Qt SDK；Windows 构建使用 MSYS2 UCRT64 的 GCC、CMake、Ninja、pkgconf、Qt6、QtKeychain、FFmpeg 和 Zlib。不支持 macOS。
 
 在仓库根目录执行：
 
@@ -50,15 +50,15 @@ cmake --build build --parallel
 
 启动后默认打开「首页」。QML、图片与翻译文件嵌入可执行文件，Qt、QtKeychain 和其他动态库仍需安装；当前构建产物不是包含所有运行依赖的分发包。
 
-通过 `cmake --install build --prefix /absolute/install/path` 安装应用与捆绑 Node 运行时。离线构建可指定 `-DNEKOTUNE_NODE_ARCHIVE=/absolute/path/node-v24.21.0-linux-x64.tar.xz` 并预先准备 pnpm 缓存。
+通过 `cmake --install build --prefix /absolute/install/path` 安装应用和扩展 SDK（`include/nekotune`、`lib/cmake/NekoTuneSDK`）。构建过程不访问网络。
 
 ### 自动构建与 Release
 
-GitHub Actions 的 `Build and Release` 工作流在推送 `main`、提交 PR、推送 `v*` 标签或手动运行时构建并测试 Linux、Windows x64。每个平台运行 CTest、扩展 TypeScript 检查，以及隔离用户目录的分发包启动检查，分别验证独立后端与桌面程序的 SQLite、IPC 和捆绑 Node 扩展运行时，以及桌面的 QML 加载。成功的普通构建可在 Actions 页面下载 Artifact。
+GitHub Actions 的 `Build and Release` 工作流在推送 `main`、提交 PR、推送 `v*` 标签或手动运行时构建并测试 Linux、Windows x64。每个平台运行 CTest，以及隔离用户目录的分发包启动检查（`scripts/ci/smoke_release.py`），分别验证独立后端与桌面程序的 SQLite、IPC、原生扩展运行时与主题导入导出，以及桌面的 QML 加载。成功的普通构建可在 Actions 页面下载 Artifact。
 
 推送与 `CMakeLists.txt` 中版本一致的标签（例如 `v0.1.0`），或在 `main` 上手动运行并勾选 `release`，会在两个平台都通过后创建 GitHub Release。发布包含 Windows ZIP、Linux TAR.GZ 和各自的 SHA-256 校验文件；附件上传和校验完成后才公开 Release。更新版本时先修改 CMake 项目版本，再创建对应标签。已公开版本不可通过重跑覆盖，应使用新版本发布。
 
-解压 Windows 包后运行 `bin/nekotune.exe`；解压 Linux 包后运行根目录的 `./NekoTune`。包中包含 Qt、FFmpeg、QtKeychain、QML 模块和 Node，无需另装 Node 或 Qt。Linux 包在 Ubuntu 24.04 构建，面向 glibc 2.39+ 的 x64 桌面系统，仍需系统图形驱动、音频服务和 Secret Service 密钥库。Windows 包面向 Windows 10/11 x64。CI 使用软件渲染，Linux 使用离屏平台，Windows 使用原生窗口平台，并以 0.5 的 Qt 缩放因子在 runner 的小屏幕上覆盖 1360 像素逻辑宽度；该缩放只用于 CI。真实设备的图形驱动、音频设备和原生密钥库仍需设备验收。
+解压 Windows 包后运行 `bin/nekotune.exe`；解压 Linux 包后运行根目录的 `./NekoTune`。包中包含 Qt、FFmpeg、QtKeychain 和 QML 模块，无需另装 Qt。Linux 包在 Ubuntu 24.04 构建，面向 glibc 2.39+ 的 x64 桌面系统，仍需系统图形驱动、音频服务和 Secret Service 密钥库。Windows 包面向 Windows 10/11 x64。CI 使用软件渲染，Linux 使用离屏平台，Windows 使用原生窗口平台，并以 0.5 的 Qt 缩放因子在 runner 的小屏幕上覆盖 1360 像素逻辑宽度；该缩放只用于 CI。真实设备的图形驱动、音频设备和原生密钥库仍需设备验收。
 
 Linux 包同时包含 IBus 和 Fcitx 输入上下文插件；Fcitx5-Qt 5.1.9 使用与发行包相同的 Qt 编译，不能用系统新版 Qt 的插件替换。系统仍需运行对应输入法服务，并配置 `QT_IM_MODULE=fcitx` 或 `ibus`。CI 会检查两个插件实际加载成功，候选框与中文上屏另需通过输入法交互验证。
 

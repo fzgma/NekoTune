@@ -5,6 +5,7 @@
 #include "controllers/app_controllers.h"
 #include "extensions/extension_view.h"
 #include "i18n.h"
+#include "infrastructure/extensions/extension_manifest.h"
 #include "runtime/backend_runtime.h"
 #include "support/store_fixture.h"
 #include <QElapsedTimer>
@@ -380,7 +381,7 @@ class ExtensionsTest final : public QObject {
             peer.call("extensions.list").value("data").toObject().value("runtimeReady").toBool(), 15'000);
         auto install =
             peer.call("extensions.install",
-                      {{"path", QStringLiteral(NEKOTUNE_SOURCE_DIR "/extensions/examples/test-source")},
+                      {{"path", QStringLiteral(NEKOTUNE_EXAMPLE_EXTENSIONS "/example.test-source")},
                        {"development", true}});
         QCOMPARE(install.value("status").toString(), "ok");
         auto enabled = peer.call("extensions.enable", {{"id", "example.test-source"}, {"trusted", true}});
@@ -522,14 +523,14 @@ class ExtensionsTest final : public QObject {
         QVERIFY(item);
         item->setParentItem(window.contentItem());
         item->setDescriptor(
-            {{"source", QStringLiteral(NEKOTUNE_SOURCE_DIR "/extensions/examples/custom-ui/Shell.qml")},
+            {{"source", QStringLiteral(NEKOTUNE_SOURCE_DIR "/examples/extensions/custom-ui/Shell.qml")},
              {"extensionId", "example.custom-ui"},
              {"generation", 1}});
         QTRY_VERIFY_WITH_TIMEOUT(item->ready(), 5000);
         auto *first = item->item();
         QPointer<QQuickItem> old(first);
         item->setDescriptor(
-            {{"source", QStringLiteral(NEKOTUNE_SOURCE_DIR "/extensions/examples/custom-ui/Shell.qml")},
+            {{"source", QStringLiteral(NEKOTUNE_SOURCE_DIR "/examples/extensions/custom-ui/Shell.qml")},
              {"extensionId", "example.custom-ui"},
              {"generation", 2}});
         QTRY_VERIFY(old.isNull());
@@ -666,9 +667,20 @@ class ExtensionsTest final : public QObject {
           {"id", "test.startup"}, {"name", "Startup"}, {"version", "1.0.0"},
           {"apiVersion", 1}, {"type", "theme"}, {"contributes", QJsonObject{{"themes", QJsonArray{theme}}}}};
       if (kind == "worker") {
+        // A code extension whose activation completes asynchronously after 250 ms.
+        const QDir slow(QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.slow"));
+        const auto slowManifest = QJsonDocument::fromJson([&] {
+          QFile file(slow.filePath("extension.json"));
+          return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        }()).object();
+        const auto library = slowManifest.value("library").toObject().value(extensionPlatform()).toString();
+        QVERIFY(!library.isEmpty());
+        QVERIFY(QDir().mkpath(QFileInfo(folder + "/" + library).absolutePath()));
+        QVERIFY(QFile::copy(slow.filePath(library), folder + "/" + library));
         manifest.remove("type");
-        manifest.insert("main", "main.mjs");
-        QVERIFY(write(folder + "/main.mjs", "export async function activate() { await new Promise(r => setTimeout(r, 250)); }"));
+        manifest.insert("apiVersion", 2);
+        manifest.insert("library", slowManifest.value("library"));
+        manifest.insert("qt", slowManifest.value("qt"));
       }
       QVERIFY(write(folder + "/extension.json", QJsonDocument(manifest).toJson()));
       const QString selected = kind == "builtin" ? "builtin/ocean" : "test.startup/default";
@@ -1027,8 +1039,8 @@ class ExtensionsTest final : public QObject {
       QVERIFY(capture("theme-static-background-dark"));
       QCOMPARE(
           peer.call("extensions.install",
-                    {{"path", QStringLiteral(NEKOTUNE_SOURCE_DIR
-                                             "/extensions/examples/custom-ui")},
+                    {{"path", QStringLiteral(NEKOTUNE_EXAMPLE_EXTENSIONS
+                                             "/example.custom-ui")},
                      {"development", true}})
               .value("status")
               .toString(),
@@ -1095,7 +1107,7 @@ class ExtensionsTest final : public QObject {
             const QString id = "example." + name;
             auto result =
                 peer.call("extensions.install",
-                          {{"path", QStringLiteral(NEKOTUNE_SOURCE_DIR "/extensions/examples/") + name},
+                          {{"path", QStringLiteral(NEKOTUNE_EXAMPLE_EXTENSIONS "/example.") + name},
                            {"development", true},
                            {"replace", true}});
             QCOMPARE(result.value("status").toString(), "ok");
@@ -1144,7 +1156,7 @@ class ExtensionsTest final : public QObject {
             engine.newQObject(pageItem("music_sources")).property("tracks").property("length").toInt() > 0);
         QVERIFY(capture("music-sources"));
         const auto installed = peer.call("extensions.install",
-            {{"path", QStringLiteral(NEKOTUNE_SOURCE_DIR "/tests/fixtures/dedicated-source")},
+            {{"path", QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.dedicated-source")},
              {"development", true}, {"replace", true}});
         QCOMPARE(installed.value("status").toString(), QString("ok"));
         QCOMPARE(peer.call("extensions.enable", {{"id", "test.dedicated-source"}, {"trusted", true}})

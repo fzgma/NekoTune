@@ -2,7 +2,7 @@
 
 本文说明当前源码的职责、依赖和扩展约定。构建与使用见 [README](../README.md)，协议字段和方法见 [API 文档](API.md)。
 
-NekoTune 使用分层模块化架构：QML 展示界面，前端 C++ 控制器拥有功能状态，应用服务组织业务，领域类型与接口隔离存储、播放和网络实现。后端服务由构造函数显式注入，装配集中在 `BackendSession`；内置功能采用编译期模块注册，用户扩展通过独立 Node.js 进程和动态 QML 注册接入。
+NekoTune 使用分层模块化架构：QML 展示界面，前端 C++ 控制器拥有功能状态，应用服务组织业务，领域类型与接口隔离存储、播放和网络实现。后端服务由构造函数显式注入，装配集中在 `BackendSession`；内置功能采用编译期模块注册，用户扩展以 Qt 插件形式在后端进程内加载，并通过动态 QML 注册接入。
 
 ## 1. 运行方式与启动入口
 
@@ -64,6 +64,7 @@ flowchart TD
 
 ```text
 shared/                         # 音乐根目录、配置路径与 JSON 设置
+sdk/                            # 扩展 SDK 头文件与 CMake 构建/打包函数
 backend/
 ├── domain/
 │   ├── library/                # 曲库类型、文件检查与托管文件接口
@@ -78,6 +79,7 @@ backend/
 │   ├── library/                # 文件检查、时长读取与托管资源目录
 │   ├── playback/               # Qt Multimedia 播放实现
 │   ├── lyrics/                 # 网络来源、缓存、存储与配套文件
+│   ├── extensions/             # 扩展加载、清单、包管理、主题包、音频代理与崩溃记录
 │   ├── kugou/                  # 仅旧凭据迁移和兼容密钥存储
 │   ├── ai/                     # AI 设置、请求与工作线程
 │   └── credentials/            # 系统密钥库与旧凭据迁移
@@ -95,6 +97,7 @@ frontend/qt-qml/
 ├── qml/dialogs/                # 元数据和标签编辑器
 ├── i18n/                       # 中文、英文翻译
 └── resources.qrc               # 嵌入 QML、图片与翻译资源
+examples/extensions/            # 示例扩展与主题
 tests/                          # 服务、存储、协议、QML 和依赖边界验证
 ```
 
@@ -107,7 +110,8 @@ tests/                          # 服务、存储、协议、QML 和依赖边界
 | 目标 | 主要直接依赖 |
 | --- | --- |
 | `nekotune_paths` | Qt Core |
-| `nekotune_domain` | Qt Core、Zlib |
+| `nekotune_sdk` | Qt Core（仅头文件，扩展与宿主共用） |
+| `nekotune_domain` | sdk、Qt Core、Zlib |
 | `nekotune_storage` | domain、paths、Qt SQL |
 | `nekotune_providers` | domain、Qt Network |
 | `nekotune_infrastructure` | domain、storage、paths、Qt Network／Gui／Multimedia、QtKeychain、FFmpeg；Linux 增加 libsecret 和线程库 |
@@ -190,7 +194,7 @@ LRCLIB 在后端装配处注册，扩展歌词来源随运行时动态注册。�
 
 ### 外部音源与 AI
 
-音源插件在主仓库之外维护：独立 Node 进程处理账号和网络，QML 通过扩展贡献注册页面与设置。主项目构建不读取外部音源源码，也不生成或安装它们的 ZIP。音乐下载统一由 `MusicService` 完成受限代理传输、文件检查和入库，再在写队列外调用来源的 `downloaded` 钩子保存配套资源。宿主仅保留旧凭据迁移兼容代码。旧网络适配器和音源专属回归测试也在外部项目维护；主仓库使用无网络的通用扩展夹具测试导航和设置。
+音源插件在主仓库之外维护：原生扩展处理账号和网络，QML 通过扩展贡献注册页面与设置。主项目构建不读取外部音源源码，也不生成或安装它们的 ZIP。音乐下载统一由 `MusicService` 完成受限代理传输、文件检查和入库，再在写队列外调用来源的 `downloaded` 钩子保存配套资源。宿主仅保留旧凭据迁移兼容代码。旧网络适配器和音源专属回归测试也在外部项目维护；主仓库使用无网络的通用扩展夹具测试导航和设置。
 
 `AiService` 在数据库所属线程读取歌曲与标签快照，通过 `IAiBackend` 交给独立 AI 线程。`AiBackend`／`AiSettings` 处理歌词文本、配置、凭据和网络请求，工作线程不持有数据库连接。`song.suggest_metadata` 只返回建议，不进入结构性写队列；用户保存时复用元数据事务。
 
@@ -269,13 +273,13 @@ SQLite 连接只能在创建它的线程使用。导入线程返回 `ImportedFil
 
 ### 用户动态扩展
 
-完整使用与开发契约见 [扩展文档](extensions.md)。`IExtensionBackend` 是领域侧的异步调用与事件边界，`ExtensionService` 和 `MusicService` 在应用层编排注册来源和业务操作。基础设施中的 `ExtensionBackend` 启动捆绑 Node 管理进程；管理进程再为提供 `main` 入口的扩展启动独立 Worker。无入口的主题和纯界面扩展直接发布清单贡献，仍参与启停、更新与开发重载。两级通信都使用独立本地 Socket，日志与协议分离。普通扩展调用不会占住 `CommandScheduler`，只有短暂的数据库变更和已有文件导入流程进入串行队列。
+完整使用与开发契约见 [扩展文档](extensions.md)。`IExtensionBackend` 是领域侧的异步调用与事件边界，`ExtensionService` 和 `MusicService` 在应用层编排注册来源和业务操作。基础设施中的 `PluginManager` 实现该边界：读取清单与注册表，在用户信任后用 `QPluginLoader` 加载扩展库，并把服务、命令、来源和事件直接路由到扩展对象，不再经过进程间协议。扩展库只依赖 `sdk/` 的头文件，宿主实现隐藏在 `IExtensionContext` 之后。所有扩展调用都在后端线程执行；扩展从其他线程回调时由上下文转回后端线程，停用后迟到的回调被丢弃。库在本次运行中不卸载，再次启用复用同一插件对象；开发目录按内容哈希复制后加载。调用扩展代码期间 `crash_guard` 在内存中记录当前扩展，致命信号（Windows 为未处理异常）时写入哨兵文件，下次启动停用该扩展。无库的主题和纯界面扩展直接发布清单贡献，仍参与启停、更新与开发重载。普通扩展调用不会占住 `CommandScheduler`，只有短暂的数据库变更和已有文件导入流程进入串行队列。
 
-音乐来源以来源 ID 和来源曲目 ID 保存稳定身份，`songs.hash` 对在线记录为空。`ISourceResolver` 将在线引用异步解析成宿主管理的本地代理 URL，再交给现有 Qt Multimedia 适配器；网络地址、鉴权头和有效期只存在于运行时。解析代次与播放意图隔离迟到结果。下载复用托管资源分配、文件校验与曲库入库。远程资源的歌词、封面使用独立资源键，不进行本地配套文件探测或清理。
+音乐来源以来源 ID 和来源曲目 ID 保存稳定身份，`songs.hash` 对在线记录为空。`ISourceResolver` 将在线引用异步解析成 `AudioProxy` 提供的回环代理 URL（扩展返回 `file://` 时为其数据目录内的文件），再交给现有 Qt Multimedia 适配器；网络地址、鉴权头和有效期只存在于运行时。解析代次与播放意图隔离迟到结果。下载复用托管资源分配、文件校验与曲库入库。远程资源的歌词、封面使用独立资源键，不进行本地配套文件探测或清理。
 
 前端 `ExtensionsController` 消费后台注册快照。`PageHost` 保留原页面，并按用户选择加载替代项；`ExtensionView` 使用独立 QML 引擎管理视图和重载生命周期。默认 Shell 仍由 `Main.qml` 组织，完整 Shell 扩展接管窗口内容。恢复窗口由宿主独立加载，并强制使用内置主题。QML 故障不能实现进程级隔离，安全模式用于重启恢复。
 
-`ThemeController` 消费同一扩展快照，合并 `shared/themes/catalog.json` 的基础变量与所选主题，监听系统明暗并通过 `AppPaths` 保存显示模式。主题 ID 仍由扩展选择配置保存。`ThemeSlot` 按当前主题、独立扩展、内置界面的顺序回退，不改写独立插槽选择；主题页面按实际显示加载。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出在 Node 管理进程完成，卡片与导入流程不实例化主题 QML。格式、限制与恢复方法见 [主题文档](themes.md)。
+`ThemeController` 消费同一扩展快照，合并 `shared/themes/catalog.json` 的基础变量与所选主题，监听系统明暗并通过 `AppPaths` 保存显示模式。主题 ID 仍由扩展选择配置保存。`ThemeSlot` 按当前主题、独立扩展、内置界面的顺序回退，不改写独立插槽选择；主题页面按实际显示加载。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出由 `theme_package` 完成，卡片与导入流程不实例化主题 QML。格式、限制与恢复方法见 [主题文档](themes.md)。
 
 ### 内置功能扩展
 

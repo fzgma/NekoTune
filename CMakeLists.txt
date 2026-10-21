@@ -38,13 +38,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 qt_standard_project_setup(REQUIRES 6.6)
-include(cmake/ExtensionRuntime.cmake)
 
 add_library(nekotune_paths STATIC shared/app_paths.cpp)
 target_include_directories(nekotune_paths PUBLIC ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(nekotune_paths PUBLIC Qt6::Core)
 
+add_subdirectory(sdk)
 add_subdirectory(backend)
+add_subdirectory(examples/extensions)
 add_subdirectory(frontend/qt-qml)
 
 # Development binaries use the installed Qt plugins and QML imports.

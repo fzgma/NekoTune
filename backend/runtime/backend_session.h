@@ -5,7 +5,7 @@
 #include "application/playback/listening_history_service.h"
 #include "domain/playback/playback_backend.h"
 #include "infrastructure/ai/ai_backend.h"
-#include "infrastructure/extensions/extension_backend.h"
+#include "infrastructure/extensions/plugin_manager.h"
 #include "infrastructure/library/import_executor.h"
 #include "infrastructure/library/loudness_analysis.h"
 #include "infrastructure/library/music_directory.h"
@@ -71,7 +71,7 @@ class BackendSession final : public QObject {
     IpcRouter m_router;
     LibraryScanner m_scanner;
     IpcServer m_server;
-    ExtensionBackend m_extensionBackend;
+    PluginManager m_extensionBackend;
     ExtensionService m_extensions{m_extensionBackend};
     MusicService m_musicSources;
     LibraryMaintenance m_maintenance;

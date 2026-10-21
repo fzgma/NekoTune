@@ -544,7 +544,7 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 - `extensions.select` 的 `slot: "theme"` 接受主题贡献 ID、`builtin/yozakura`、`builtin/ocean`、`builtin/forest`；空字符串选择默认夜樱。持久化失败不改变当前选择。
 - `extensions.install` 增加可选 `themeOnly: true`，强制按主题包大小限制解包，并拒绝普通可执行扩展。重复 ID 默认拒绝，确认更新后传 `replace: true`。卡片定向更新可传 `expectedId`：目标必须已安装且与新包 ID 一致，在更改旧包前校验，不匹配返回 `theme_update_id_mismatch`。
 - `extensions.export_theme` 参数 `{contribution, path}`：将主题导出到本地 ZIP 文件，返回 `{path, includesQml}`。主题专用包完整导出；内置主题和普通扩展导出独立的配色与静态背景包。支持仍安装的静态主题贡献，以及当前运行时动态注册的主题。
-- 主题包沿用 `extensions.enable/disable/reload/uninstall`。无 Worker 的主题仍以 `running` 表示已启用，含代码时需要 `trusted: true` 完成首次授权。删除当前主题包先保存默认主题选择；禁用保留选择以便恢复。
+- 主题包沿用 `extensions.enable/disable/reload/uninstall`。没有扩展库的主题仍以 `running` 表示已启用，含代码时需要 `trusted: true` 完成首次授权。删除当前主题包先保存默认主题选择；禁用保留选择以便恢复。
 
 前端 `controllers.theme` 暴露 `items`、`selectedId`、`activeId`、`mode`、`isDark`、`tokens`、`background`、`uiSlots`、`busy/error/notice` 等状态。`setMode` 保存本地 `theme_mode`，`selectTheme/importTheme/exportTheme/removeTheme/reset` 走既有扩展管理接口。QML 的 `Theme` 兼容原变量名并新增 `isDark`。格式与示例见 [主题制作](themes.md)。
 

@@ -46,7 +46,6 @@
 cmake --build build -j 4
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 ctest --test-dir build --output-on-failure
-pnpm --dir extensions test
 ```
 
 测试使用临时根目录和独立数据库，覆盖副本独立性、资源共享、原文件保护、SQL 失败、中断恢复、备份篡改与越界路径、迁移失败保留资料、导出字节一致，以及真实 IPC 的备份／预览／恢复／重连流程。Windows 文件占用与不同文件系统行为仍需在对应平台运行这些测试，不能以 Linux 通过代替原生验收。

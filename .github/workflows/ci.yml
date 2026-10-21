@@ -36,12 +36,6 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: '24.21.0'
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          package_json_file: extensions/package.json
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: false
@@ -189,17 +183,16 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # ── Test ───────────────────────────────────────────────────────
-      - name: Run Linux CTest and check extension types
+      - name: Run Linux CTest and CI script tests
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           test_result=0
           ctest --test-dir build --output-on-failure --timeout 180 || test_result=$?
           if [[ "$test_result" != 0 ]]; then cat build/tests/nekotune_*.txt; fi
-          pnpm --dir extensions check
           uv run --no-project --python 3.12 -m unittest discover -s scripts/ci/tests
           exit "$test_result"
-      - name: Run Windows CTest and check extension types
+      - name: Run Windows CTest
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
@@ -208,10 +201,9 @@ jobs:
           ctest --test-dir build --output-on-failure --timeout 180 || test_result=$?
           if [[ "$test_result" == 0 ]]; then
             ctest --test-dir build --output-on-failure --timeout 180 \
-              --repeat until-fail:3 -R '^nekotune_(ai|extension_sdk|system_tray)_test$' || test_result=$?
+              --repeat until-fail:3 -R '^nekotune_(ai|native_extensions|system_tray)_test$' || test_result=$?
           fi
           if [[ "$test_result" != 0 ]]; then cat build/tests/nekotune_*.txt; fi
-          pnpm --dir extensions check
           exit "$test_result"
 
       - name: Save compiled objects even when tests expose a regression
@@ -237,7 +229,7 @@ jobs:
             --library-dir "$RUNNER_TEMP/wayland/lib" \
             --layershell-source .ci-layer-shell-qt \
             --platform linux --version "$VERSION"
-          node scripts/ci/smoke_release.mjs stage
+          uv run --no-project --python 3.12 scripts/ci/smoke_release.py stage
       - name: Bundle and smoke test Windows distribution
         id: package_windows
         if: ${{ !cancelled() && runner.os == 'Windows' && steps.build_windows.outcome == 'success' && steps.version.outcome == 'success' }}
@@ -249,7 +241,7 @@ jobs:
           cmake --install build --prefix "$(cygpath -m "$PWD/stage")"
           uv run --no-project --python 3.12 scripts/ci/package_release.py \
             --stage stage --qt-prefix "$(cygpath -m /ucrt64)" --platform windows --version "$VERSION"
-          node scripts/ci/smoke_release.mjs stage
+          uv run --no-project --python 3.12 scripts/ci/smoke_release.py stage
       - name: Upload executable distribution
         if: ${{ !cancelled() && (steps.package_linux.outcome == 'success' || steps.package_windows.outcome == 'success') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

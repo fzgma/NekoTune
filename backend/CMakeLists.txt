@@ -10,7 +10,7 @@ add_library(nekotune_domain STATIC
     domain/playback/shuffle_strategy.cpp
 )
 target_include_directories(nekotune_domain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nekotune_domain PUBLIC Qt6::Core ZLIB::ZLIB)
+target_link_libraries(nekotune_domain PUBLIC nekotune_sdk Qt6::Core ZLIB::ZLIB)
 
 add_library(nekotune_storage STATIC
     storage/resource_repository.cpp
@@ -30,8 +30,15 @@ add_library(nekotune_providers STATIC
 target_link_libraries(nekotune_providers PUBLIC nekotune_domain nekotune_paths Qt6::Network)
 
 add_library(nekotune_infrastructure STATIC
-    infrastructure/extensions/extension_backend.cpp
+    infrastructure/extensions/audio_proxy.cpp
+    infrastructure/extensions/crash_guard.cpp
     infrastructure/extensions/extension_lyrics_provider.cpp
+    infrastructure/extensions/extension_manifest.cpp
+    infrastructure/extensions/extension_secrets.cpp
+    infrastructure/extensions/plugin_manager.cpp
+    infrastructure/extensions/semver.cpp
+    infrastructure/extensions/theme_package.cpp
+    infrastructure/extensions/zip_archive.cpp
     infrastructure/ai/ai_backend.cpp
     infrastructure/ai/ai_settings.cpp
     infrastructure/credentials/credential_store.cpp
@@ -56,8 +63,10 @@ add_library(nekotune_infrastructure STATIC
 )
 target_link_libraries(nekotune_infrastructure PUBLIC nekotune_domain nekotune_storage nekotune_paths Qt6::Network Qt6::Gui Qt6::Multimedia)
 target_link_libraries(nekotune_infrastructure PRIVATE qt6keychain PkgConfig::FFMPEG Threads::Threads)
-target_compile_definitions(nekotune_infrastructure PRIVATE NEKOTUNE_NODE_BINARY="${NEKOTUNE_NODE_BINARY}" NEKOTUNE_EXTENSION_SUPERVISOR="${CMAKE_SOURCE_DIR}/extensions/dist/supervisor.cjs")
-add_dependencies(nekotune_infrastructure nekotune_extension_runtime)
+qt_add_resources(nekotune_infrastructure "nekotune_theme_catalog"
+    PREFIX "/nekotune"
+    BASE "${CMAKE_SOURCE_DIR}/shared"
+    FILES "${CMAKE_SOURCE_DIR}/shared/themes/catalog.json")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(TARGET PkgConfig::PULSE)
         target_sources(nekotune_infrastructure PRIVATE infrastructure/playback/pulse_audio_ports.cpp)

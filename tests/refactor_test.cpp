@@ -1330,7 +1330,7 @@ class RefactorTest final : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(
             peer.call("extensions.list").value("data").toObject().value("runtimeReady").toBool(), 15000);
         const auto installed = peer.call("extensions.install",
-            {{"path", QStringLiteral(NEKOTUNE_SOURCE_DIR "/tests/fixtures/dedicated-source")},
+            {{"path", QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.dedicated-source")},
              {"development", true}, {"replace", true}});
         QCOMPARE(installed.value("status").toString(), QString("ok"));
         IpcClient client;

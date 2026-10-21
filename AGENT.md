@@ -28,7 +28,7 @@
 
 理解模块归属、线程和扩展方式时先查 [架构文档](docs/architecture.md)；修改方法、字段或事件时查 [API 文档](docs/API.md)；界面调整遵循 [UI 设计规范](docs/ui-design-guidelines.md)。规划与已实现行为不一致时，以源码和验证结果说明当前状态。
 
-如需新增辅助工具，Python 默认使用 `uv`，Node.js／TypeScript 默认使用 `pnpm`；已有工具链和锁文件优先。
+如需新增辅助工具，Python 默认使用 `uv`；已有工具链和锁文件优先。扩展运行时与示例均为 C++，仓库不再包含 Node.js 工具链。
 
 ## 3. 架构与代码边界
 

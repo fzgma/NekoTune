@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtTest
 import "../../frontend/qt-qml/qml/wallpaper"
-import "../../extensions/examples/theme-qml" as Example
+import "../../examples/extensions/theme-qml" as Example
 
 Item {
     id: testCase

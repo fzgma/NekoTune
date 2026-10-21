@@ -293,8 +293,7 @@ def main() -> None:
     )
     (licenses / "THIRD-PARTY.md").write_text(
         "This distribution includes Qt (LGPL/GPL), QtKeychain (BSD), "
-        "FFmpeg (avformat, avcodec, avutil, swresample, avfilter), Node.js and their dependencies.\n"
-        "Node.js notices are in libexec/nekotune/NODE-LICENSE.\n"
+        "FFmpeg (avformat, avcodec, avutil, swresample, avfilter) and their dependencies.\n"
         "Qt source and licenses: https://code.qt.io/ and https://www.qt.io/licensing/\n"
         "QtKeychain source: https://github.com/frankosterfeld/qtkeychain/tree/0.17.0\n"
         "FFmpeg source and licenses: https://ffmpeg.org/legal.html\n"

@@ -67,7 +67,7 @@
 Arch 构建（沿用 README 的播放器依赖）：
 
 ```sh
-sudo pacman -S --needed base-devel cmake ninja pnpm qt6-base qt6-declarative \
+sudo pacman -S --needed base-devel cmake ninja qt6-base qt6-declarative \
   qt6-multimedia qtkeychain-qt6 ffmpeg zlib libsecret layer-shell-qt wayland
 # 当前 Arch Qt 6.11 的 Wayland 支持随 qt6-base 提供；较旧仓库可能另有 qt6-wayland。
 cmake -S . -B build -DNEKOTUNE_ENABLE_WALLPAPER=ON
@@ -93,7 +93,7 @@ QT_QPA_PLATFORM=wayland WAYLAND_DEBUG=1 NEKOTUNE_TEST_NATIVE_WALLPAPER=1 \
 沿用 MSYS2 UCRT64 的 CMake / Ninja / GCC / Qt6 工具链及现有 CI，不查找 LayerShellQt。新增链接仅有系统的 `user32` 和 `comctl32`。
 
 ```sh
-# 在 MSYS2 UCRT64 shell 中，其他 Node / pnpm 要求仍按 README 配置。
+# 在 MSYS2 UCRT64 shell 中，其他依赖仍按 README 配置。
 pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
   mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf \
   mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-declarative \
@@ -144,9 +144,9 @@ uv run --no-project python scripts/ci/package_release.py \
   --plugin-dir /path/to/fcitx/plugins --fcitx-source /path/to/fcitx-source \
   --layershell-source /path/to/layershell-source --platform linux --version local-check
 # 解压到独立目录，再运行；以下脚本均创建隔离数据和 socket。
-node scripts/ci/smoke_release.mjs /path/to/extracted-package
+uv run --no-project --python 3.12 scripts/ci/smoke_release.py /path/to/extracted-package
 # 需要真实支持 layer-shell 的桌面。不会改变 awww 配置。
-node scripts/ci/smoke_release.mjs /path/to/extracted-package --wayland
+uv run --no-project --python 3.12 scripts/ci/smoke_release.py /path/to/extracted-package --wayland
 ```
 
 默认 smoke 的 offscreen 测试不等于原生验收。`--wayland` 在隔离配置启用启动恢复，检查真实壁纸映射，同时检查独立后端和两种输入法插件。Windows 发布继续使用既有 windeployqt 和 UCRT64 DLL 收集；普通 CI 不自动修改 Explorer 桌面进行原生壁纸验收。
@@ -202,5 +202,5 @@ git diff --check
 | 展示／设置 | `frontend/qt-qml/qml/wallpaper/Wallpaper.qml`、`WallpaperSettings.qml`、`WallpaperTrackInfo.qml`、`VinylWallpaper.qml`、`LyricsWallpaper.qml`、`qmldir`（均在 wallpaper 目录）；`frontend/qt-qml/qml/components/SettingsPanel.qml`、`AlbumArt.qml`、`CompactLyrics.qml`、`LyricsClock.qml`（后四者同 components 目录）；`frontend/qt-qml/qml/pages/SettingsPage.qml` |
 | 翻译 | `frontend/qt-qml/i18n/en.json`、`frontend/qt-qml/i18n/zh.json` |
 | 测试 | `tests/wallpaper_test.cpp`、`tests/qml/tst_wallpaper_settings.qml`、`tests/qml/tst_compact_lyrics.qml`、`tests/CMakeLists.txt`、`tests/dependency_boundaries.cmake` |
-| 发布 | `.github/workflows/ci.yml`、`.gitignore`、`scripts/ci/package_release.py`、`scripts/ci/smoke_release.mjs`、`scripts/ci/tests/test_package_release.py` |
+| 发布 | `.github/workflows/ci.yml`、`.gitignore`、`scripts/ci/package_release.py`、`scripts/ci/smoke_release.py`、`scripts/ci/tests/test_package_release.py` |
 | 文档 | `README.md`、`docs/architecture.md`、`docs/API.md`、`docs/audio-engine.md`、`docs/wallpaper.md` |

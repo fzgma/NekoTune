@@ -18,17 +18,16 @@
 
 ## 创建、校验与打包
 
-在仓库的 `extensions` 目录运行：
+复制 `examples/extensions/theme-palette`（纯配色）或 `examples/extensions/theme-qml`（含 QML 背景、播放栏和壁纸）作为起点，修改 `extension.json` 的 `id`、`name` 和主题内容。主题作者编辑 JSON/QML 文件；应用没有内置主题编辑器或在线主题目录。
+
+开发时在扩展管理页挂载主题目录，宿主在挂载和每次重载时完成校验，错误显示在管理页。分发时把目录内容打成 ZIP（根目录直接是 `extension.json`），可以用宿主 SDK 的打包脚本：
 
 ```sh
-pnpm run create-theme /tmp/my-theme
-# 或创建包含 QML 背景入口的模板：
-pnpm run create-qml-theme /tmp/my-qml-theme
-pnpm run validate /tmp/my-theme
-pnpm run pack /tmp/my-theme /tmp/my-theme.nktheme.zip
+cd /tmp/my-theme
+cmake -DOUTPUT=/tmp/my-theme.nktheme.zip -P /path/to/NekoTune/sdk/cmake/NekoTunePackage.cmake
 ```
 
-参考 `extensions/examples/theme-palette` 和 `extensions/examples/theme-qml`。主题作者编辑 JSON/QML 文件；应用没有内置主题编辑器或在线主题目录。
+也可以在「设置 → 外观」导出已安装的主题，得到可再次导入的包。
 
 ## 文件格式
 
@@ -78,7 +77,7 @@ pnpm run pack /tmp/my-theme /tmp/my-theme.nktheme.zip
 
 背景参数 `opacity`、`overlayOpacity`、`blur` 均为 0–1。静态背景默认显示在主内容区和歌词页，图片按比例裁剪填充。未指定遮罩时使用主题底色、0.65 的遮罩透明度。软件渲染关闭模糊；图片读取失败时保留主题底色。
 
-包内允许 QML、JavaScript、JSON、`qmldir`、PNG/JPEG。禁止链接文件、越界资源路径、Node 入口、原生模块和扩展依赖。压缩包最多 20 MiB，解压文件最多 64 MiB、2048 个文件，图片总像素量最多 1600 万。
+包内允许 QML、JavaScript、JSON、`qmldir`、PNG/JPEG。禁止链接文件、越界资源路径、扩展库（`library`）、原生模块和扩展依赖。压缩包最多 20 MiB，解压文件最多 64 MiB、2048 个文件，图片总像素量最多 1600 万。
 
 ## QML 界面
 
@@ -101,11 +100,11 @@ Rectangle {
 }
 ```
 
-通过 `api.app` 调用宿主业务控制器，通过 `api.theme` 获取主题变量。深浅色共用同一入口，不因系统切换销毁视图。专用主题包没有后台服务；需要 Worker、外部依赖或服务注册时应作为普通扩展提供主题。
+通过 `api.app` 调用宿主业务控制器，通过 `api.theme` 获取主题变量。深浅色共用同一入口，不因系统切换销毁视图。专用主题包没有后台代码；需要后台逻辑、外部依赖或服务注册时应作为普通扩展提供主题。
 
 插槽优先级为当前主题、独立扩展选择、内置实现。切走主题恢复原独立选择；默认 Shell 才会自动放置背景和页面。完整 Shell 负责自己的布局、背景及导航。浏览主题卡片不实例化主题代码，页面入口只在显示时加载。
 
-含 QML/JavaScript 的主题首次启用需要信任，拥有与现有扩展相同的访问能力。纯数据主题不需要代码授权。两者都不创建 Node Worker。独立 QML 引擎不是安全沙箱，也没有独立 GUI 线程；不能依赖它隔离死循环或恶意代码。
+含 QML/JavaScript 的主题首次启用需要信任，拥有与现有扩展相同的访问能力。纯数据主题不需要代码授权。两者都不加载原生库。独立 QML 引擎不是安全沙箱，也没有独立 GUI 线程；不能依赖它隔离死循环或恶意代码。
 
 ## 主题音乐壁纸
 
@@ -123,7 +122,7 @@ Rectangle {
 | `preferences` | 公共壁纸设置，包括 `lyrics`、`nextLine`、`updateHz`、`intensity` 等 |
 | `screen` | 当前屏幕信息，包括 `devicePixelRatio` |
 
-使用 `api.theme` 读取配色与 `reducedMotion`，公共封面背景、模糊和透明叠加由宿主在主题内容后方绘制。自定义布局须遵守歌词开关、插值频率和装饰强度：动画仅在 `playing`／`updating` 允许时运行，并尊重减少动态效果；歌词建议复用 `qrc:/qml/components/CompactLyrics.qml`，传入上下文数据，以保留切歌身份校验和逐字同步。可运行示例见 `extensions/examples/theme-qml/Wallpaper.qml`。没有真实音频频谱接口。
+使用 `api.theme` 读取配色与 `reducedMotion`，公共封面背景、模糊和透明叠加由宿主在主题内容后方绘制。自定义布局须遵守歌词开关、插值频率和装饰强度：动画仅在 `playing`／`updating` 允许时运行，并尊重减少动态效果；歌词建议复用 `qrc:/qml/components/CompactLyrics.qml`，传入上下文数据，以保留切歌身份校验和逐字同步。可运行示例见 `examples/extensions/theme-qml/Wallpaper.qml`。没有真实音频频谱接口。
 
 未提供入口、主题不可用或入口编译／创建／根类型失败时显示经典卡片，设置页提示原因和每屏加载错误；保存的 `wallpaper.style: "theme"` 保持不变，主题恢复可用后自动接回。安全模式不加载自定义壁纸且禁止自动恢复；手动开启壁纸时回退经典卡片。加载仍沿用 QML 主题信任要求，独立引擎不是安全沙箱；运行中的任意脚本异常或死循环不保证能自动回退。
 

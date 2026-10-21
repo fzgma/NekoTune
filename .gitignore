@@ -40,8 +40,5 @@ Testing/
 # Local ASR credentials
 nekotune-settings.json
 
-# Extension tooling and generated runtime
-node_modules/
-/extensions/dist/
-/extensions/examples/*/dist/
+# Packaged extensions
 *.nekotune.zip

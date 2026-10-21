@@ -1,0 +1,6 @@
+{
+  "id": "test.faulty",
+  "name": "Faulty test extension",
+  "version": "1.2.0",
+  "config": { "mode": "ok" }
+}
