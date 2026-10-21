@@ -62,7 +62,7 @@ jobs:
         with:
           # Pitch-preserving playback speed requires Qt Multimedia 6.10+.
           version: '6.11.2'
-          modules: 'qtmultimedia qtshadertools'
+          modules: 'qtmultimedia qtshadertools qtimageformats'
           cache: true
       - name: Build Linux Wayland 1.24.0 for the release Qt
         if: runner.os == 'Linux'
@@ -147,6 +147,7 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-qt6-base
             mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-imageformats
             mingw-w64-ucrt-x86_64-qt6-multimedia
             mingw-w64-ucrt-x86_64-qtkeychain
             mingw-w64-ucrt-x86_64-ffmpeg

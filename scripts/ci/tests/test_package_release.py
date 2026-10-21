@@ -1,4 +1,4 @@
-"""Regression coverage for Linux input method deployment."""
+"""Regression coverage for release runtime deployment."""
 
 import importlib.util
 import json
@@ -50,6 +50,7 @@ class LinuxInputMethodPackagingTest(unittest.TestCase):
         self.plugin(self.qt, "platforms", "libqwayland.so")
         self.plugin(self.qt, "sqldrivers", "libqsqlite.so")
         self.plugin(self.qt, "sqldrivers", "libqsqlmysql.so")
+        self.plugin(self.qt, "imageformats", "libqwebp.so")
         package_release.copy_linux_plugins(self.stage, [self.qt, self.extra])
         deployed = self.stage / "plugins"
         self.assertEqual(
@@ -68,6 +69,7 @@ class LinuxInputMethodPackagingTest(unittest.TestCase):
         self.assertTrue((deployed / "platforms/libqwayland.so").exists())
         self.assertTrue((deployed / "sqldrivers/libqsqlite.so").exists())
         self.assertFalse((deployed / "sqldrivers/libqsqlmysql.so").exists())
+        self.assertTrue((deployed / "imageformats/libqwebp.so").exists())
 
     def test_missing_input_context_fails_packaging(self) -> None:
         for missing, present in (("fcitx5", "ibus"), ("ibus", "fcitx5")):
@@ -96,6 +98,62 @@ class LinuxInputMethodPackagingTest(unittest.TestCase):
             (self.stage / "licenses/Fcitx5-Qt/BSD-3-Clause.txt").read_text(),
             "Fcitx notice",
         )
+
+
+class ImageRuntimePackagingTest(unittest.TestCase):
+    def test_webp_plugin_is_required_in_the_deployed_plugin_directory(self) -> None:
+        for platform, relative_path in (
+            ("linux", "plugins/imageformats/libqwebp.so"),
+            ("windows", "bin/imageformats/qwebp.dll"),
+        ):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                stage = Path(directory)
+                plugin = stage / relative_path
+                with self.assertRaisesRegex(RuntimeError, "WebP image plugin missing"):
+                    package_release.validate_image_runtime(stage, platform)
+                plugin.parent.mkdir(parents=True)
+                # JPEG support alone must not satisfy the WebP requirement.
+                jpeg = plugin.with_name(plugin.name.replace("webp", "jpeg"))
+                jpeg.write_bytes(b"plugin")
+                with self.assertRaisesRegex(RuntimeError, "WebP image plugin missing"):
+                    package_release.validate_image_runtime(stage, platform)
+                plugin.mkdir()
+                with self.assertRaisesRegex(RuntimeError, "WebP image plugin missing"):
+                    package_release.validate_image_runtime(stage, platform)
+                plugin.rmdir()
+                plugin.write_bytes(b"plugin")
+                package_release.validate_image_runtime(stage, platform)
+
+    def test_windows_webp_dependencies_are_bundled_recursively(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage, qt = root / "stage", root / "qt"
+            binary_dir = stage / "bin"
+            controls = binary_dir / "qml/QtQuick/Controls"
+            controls.mkdir(parents=True)
+            (controls / "qtquickcontrols2plugin.dll").write_bytes(b"plugin")
+            (qt / "bin").mkdir(parents=True)
+            for name in ("libwebp-7.dll", "libsharpyuv-0.dll"):
+                (qt / "bin" / name).write_bytes(name.encode())
+
+            def run(*command: str) -> str:
+                if command[0].endswith("windeployqt.exe"):
+                    plugin = binary_dir / "imageformats/qwebp.dll"
+                    plugin.parent.mkdir(parents=True)
+                    plugin.write_bytes(b"plugin")
+                    return ""
+                self.assertEqual(command[:2], ("objdump", "-p"))
+                dependency = {
+                    "qwebp.dll": "libwebp-7.dll",
+                    "libwebp-7.dll": "libsharpyuv-0.dll",
+                }.get(Path(command[-1]).name)
+                return f"DLL Name: {dependency}\n" if dependency else ""
+
+            with patch.object(package_release, "run", side_effect=run):
+                package_release.bundle_windows(stage, qt)
+            package_release.validate_image_runtime(stage, "windows")
+            for name in ("libwebp-7.dll", "libsharpyuv-0.dll"):
+                self.assertEqual((binary_dir / name).read_bytes(), name.encode())
 
 
 class AudioRuntimePackagingTest(unittest.TestCase):

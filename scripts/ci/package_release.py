@@ -222,6 +222,14 @@ def bundle_windows(stage: Path, qt: Path) -> None:
                 raise RuntimeError(f"Unresolved dependency {name} in {binary}")
 
 
+def validate_image_runtime(stage: Path, platform: str) -> None:
+    """Reject archives missing the WebP decoder used by remote cover artwork."""
+    plugin = stage / ("plugins/imageformats/libqwebp.so" if platform == "linux"
+                      else "bin/imageformats/qwebp.dll")
+    if not plugin.is_file():
+        raise RuntimeError(f"Required WebP image plugin missing: {plugin}")
+
+
 def validate_audio_runtime(stage: Path, platform: str) -> None:
     """Reject archives missing a playback/DSP library or the Qt fallback plugin."""
     library_dir = stage / ("lib" if platform == "linux" else "bin")
@@ -264,6 +272,7 @@ def main() -> None:
             shutil.copytree(args.layershell_source / "LICENSES", stage / "licenses/LayerShellQt", dirs_exist_ok=True)
     else:
         bundle_windows(stage, qt)
+    validate_image_runtime(stage, args.platform)
     validate_audio_runtime(stage, args.platform)
     validate_wallpaper_runtime(stage)
     licenses = stage / "licenses"
