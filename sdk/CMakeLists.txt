@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(NekoTuneSDK VERSION 2.0.0 LANGUAGES CXX)
+    project(NekoTuneSDK VERSION 2.1.0 LANGUAGES CXX)
 endif()
 
 # Header-only extension SDK shared by the host and native extensions. External extension
@@ -35,9 +35,9 @@ if(PROJECT_NAME STREQUAL "NekoTune" OR PROJECT_NAME STREQUAL "NekoTuneSDK")
     configure_file(cmake/NekoTuneSDKBuild.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/NekoTuneSDKBuild.cmake" @ONLY)
     configure_package_config_file(cmake/NekoTuneSDKConfig.cmake.in
         "${CMAKE_CURRENT_BINARY_DIR}/NekoTuneSDKConfig.cmake" INSTALL_DESTINATION "${config_dir}")
-    # The plugin IID carries the ABI major version, so the SDK follows it rather than the app.
+    # Additive optional capabilities may increase the SDK minor without changing the plugin IID.
     write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/NekoTuneSDKConfigVersion.cmake"
-        VERSION 2.0.0 COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
+        VERSION 2.1.0 COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/NekoTuneSDKConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/NekoTuneSDKConfigVersion.cmake"

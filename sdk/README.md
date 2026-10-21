@@ -12,6 +12,20 @@ SDK 只包含头文件、CMake 工具、模板和构建信息，不包含 Qt 或
 纯 QML 扩展直接复制 `templates/qml/`，无需安装原生工具链。
 模板中的 `.github/` 和 `.gitignore` 也必须复制，另按自己的代码和资源选择许可证。
 
+## SDK 2.1：自定义随机算法
+
+原生扩展可包含 `<nekotune/sdk/shuffle_provider.h>`，实现 `IShuffleProvider`，通过
+`sdk::shuffleContext(context)` 获取可选能力后调用 `registerShuffleStrategy()`。
+旧宿主返回空指针，扩展应明确提示需要支持 SDK 2.1 随机算法的宿主。
+现有 `IExtensionContext` 虚表、`apiVersion: 2` 和插件 IID 保持兼容，旧扩展无需修改。
+
+选曲在后端线程同步执行，必须快速返回，不可等待网络、宿主回调或自行消费随机状态。
+使用请求中的种子和上次已提交的状态计算结果，把下一份 JSON 兼容状态随结果返回。
+状态只在队列选择保存成功后提交，仅在本次会话保留；试算、预加载和保存失败均不推进状态。
+provider 由扩展持有，必须存活到注册释放；停用时先释放注册再销毁 provider。
+
+完整约定及示例见宿主仓库的 `docs/extensions.md` 和 `examples/extensions/shuffle/`。
+
 ## SDK 维护者：独立安装
 
 不需要配置或构建整个宿主：

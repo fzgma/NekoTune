@@ -26,6 +26,8 @@ Item {
         storage: page.controllers.storage || null
         queueController: page.controllers.queue
         playbackController: page.controllers.playback
+        appControllers: page.controllers
+        hostWindow: page.shell
         playbackMode: page.controllers.playback.playbackMode
         connected: page.transport.connected
         onQueueAddRequested: path => page.controllers.queue.addPath(path)

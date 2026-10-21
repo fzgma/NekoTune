@@ -18,6 +18,8 @@ PlayerEngine::PlayerEngine(IPlaybackBackend &backend, QueueService &queue,
     connect(&queue, &QueueService::changed, this, [this] {
         if (!m_navigating) {
             m_order.syncQueue(m_queue.queue());
+            invalidatePreload();
+            m_failedPreloadKey.clear();
             refreshPreload();
         }
         refreshCapabilities();
@@ -218,8 +220,9 @@ void PlayerEngine::refreshCapabilities() {
     // Capability observation must not consume shuffle proposals or playback history.
     const int forward = m_order.propose(queue, PlaybackAdvance::Next).queueId;
     const int backward = m_order.propose(queue, PlaybackAdvance::Previous).queueId;
-    next.canGoNext = forward != 0 && forward != current;
-    next.canGoPrevious = backward != 0 && backward != current;
+    next.canGoNext = forward != 0 && (forward != current || m_order.allowsRepeatedAdvance());
+    next.canGoPrevious = backward != 0 &&
+        (backward != current || (m_order.allowsRepeatedAdvance() && m_order.hasPreviousHistory()));
     if (next == m_capabilities)
         return;
     m_capabilities = next;
@@ -427,11 +430,21 @@ Result<void> PlayerEngine::setPlaybackMode(PlaybackMode mode) {
     const auto previous = m_order.mode();
     auto result = m_order.setMode(mode, m_queue.queue());
     if (result && previous != mode) {
+        invalidatePreload();
+        m_failedPreloadKey.clear();
         refreshCapabilities();
         emit playbackModeChanged(mode);
         refreshPreload();
     }
     return result;
+}
+void PlayerEngine::setShuffleStrategy(std::unique_ptr<IShuffleStrategy> strategy) {
+    if (m_shuttingDown) return;
+    invalidatePreload();
+    m_failedPreloadKey.clear();
+    m_order.setShuffleStrategy(std::move(strategy), m_queue.queue());
+    refreshCapabilities();
+    refreshPreload();
 }
 void PlayerEngine::sourceUnavailable(const QString &provider) {
     if (m_preloadSelection) {
@@ -477,7 +490,8 @@ Result<void> PlayerEngine::advance(PlaybackAdvance reason, bool preserveState) {
     auto queue = m_queue.queue();
     if (queue.isEmpty())
         return reason == PlaybackAdvance::Ended ? Result<void>{} : failure(QStringLiteral("Queue is empty"));
-    auto selection = m_order.propose(queue, reason);
+    auto selection = reason != PlaybackAdvance::Previous && m_order.mode() == PlaybackMode::Shuffle && m_preloadSelection
+                         ? m_preloadSelection->clone() : m_order.propose(queue, reason);
     if (!selection.queueId)
         return stop();
     const int index = queue.indexById(selection.queueId);

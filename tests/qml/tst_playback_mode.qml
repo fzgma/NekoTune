@@ -9,17 +9,31 @@ Rectangle {
     height: 600
     color: "#0E0D14"
     QtObject {
+        id: fakeExtensions
+        property var settingsPages: []
+    }
+    QtObject {
+        id: app
+        property var extensions: fakeExtensions
+    }
+    QtObject {
         id: controller
         property string playbackMode: "sequential"
         property string requestedMode: ""
+        property var shuffleStrategies: [{id: "shuffle_bag", name: "Shuffle bag"}]
+        property string shuffleStrategy: "shuffle_bag"
+        property string effectiveShuffleStrategy: "shuffle_bag"
+        property string requestedStrategy: ""
         signal requestSucceeded(string method)
         signal requestFailed(string method, string message)
         function setPlaybackMode(mode) { requestedMode = mode }
+        function setShuffleStrategy(id) { requestedStrategy = id }
     }
     Components.QueuePanel {
         id: fullPanel
         x: 20; y: 20; width: 360; height: 560
         playbackController: controller
+        appControllers: app
         playbackMode: controller.playbackMode
     }
     Components.QueuePanel {
@@ -27,6 +41,7 @@ Rectangle {
         x: 410; y: 20; width: 360; height: 560
         compact: true
         playbackController: controller
+        appControllers: app
         playbackMode: controller.playbackMode
     }
     TestCase {
@@ -37,6 +52,11 @@ Rectangle {
         function init() {
             controller.playbackMode = "sequential"
             controller.requestedMode = ""
+            controller.shuffleStrategies = [{id: "shuffle_bag", name: "Shuffle bag"}]
+            controller.shuffleStrategy = "shuffle_bag"
+            controller.effectiveShuffleStrategy = "shuffle_bag"
+            controller.requestedStrategy = ""
+            fakeExtensions.settingsPages = []
             fullPanel.connected = true
             drawer.connected = true
             waitForRendering(scene)
@@ -46,6 +66,8 @@ Rectangle {
             menu(drawer).close()
             tryCompare(menu(fullPanel), "visible", false)
             tryCompare(menu(drawer), "visible", false)
+            findChild(button(fullPanel), "shuffleSettingsPopup").close()
+            findChild(button(drawer), "shuffleSettingsPopup").close()
         }
         // An empty queue can still choose the mode for future playback.
         // Selecting a menu item submits a request without optimistically changing the icon.
@@ -137,6 +159,95 @@ Rectangle {
                 popup.close()
                 tryCompare(popup, "visible", false)
             }
+        }
+        function test_shuffleSelectionAndFailure() {
+            controller.playbackMode = "shuffle"
+            controller.shuffleStrategies = [{id: "shuffle_bag", name: "Shuffle bag"}, {id: "test/artist", name: "Artist-aware"}]
+            const popup = menu(fullPanel)
+            mouseClick(button(fullPanel))
+            tryCompare(popup, "opened", true)
+            const algorithm = findChild(popup.contentItem, "shuffleStrategy_test/artist")
+            verify(algorithm)
+            verify(!algorithm.selected)
+            waitForRendering(popup.contentItem)
+            mouseClick(algorithm)
+            compare(controller.requestedStrategy, "test/artist")
+            compare(controller.requestedMode, "")
+            compare(controller.shuffleStrategy, "shuffle_bag")
+            controller.requestFailed("player.set_shuffle_strategy", "Unable to save shuffle strategy")
+            compare(fullPanel.operationError, "Unable to save shuffle strategy")
+            controller.shuffleStrategy = "test/artist"
+            controller.effectiveShuffleStrategy = "test/artist"
+            controller.requestSucceeded("player.set_shuffle_strategy")
+            compare(fullPanel.operationError, "")
+            mouseClick(button(drawer))
+            tryCompare(menu(drawer), "opened", true)
+            verify(findChild(menu(drawer).contentItem, "shuffleStrategy_test/artist").selected)
+        }
+        function test_shuffleFallbackAndDynamicRemoval() {
+            controller.playbackMode = "shuffle"
+            controller.shuffleStrategy = "test/artist"
+            controller.effectiveShuffleStrategy = "test/artist"
+            controller.shuffleStrategies = [{id: "shuffle_bag", name: "Shuffle bag"}, {id: "test/artist", name: "Artist-aware"}]
+            mouseClick(button(drawer))
+            const popup = menu(drawer)
+            tryCompare(popup, "opened", true)
+            popup.currentIndex = 5
+            controller.shuffleStrategies = [{id: "shuffle_bag", name: "Shuffle bag"}]
+            controller.effectiveShuffleStrategy = "shuffle_bag"
+            tryCompare(popup, "currentIndex", 4)
+            verify(findChild(popup.contentItem, "shuffleFallbackHint").visible)
+            verify(findChild(popup.contentItem, "shuffleStrategy_shuffle_bag").selected)
+            keyClick(Qt.Key_Return)
+            compare(controller.requestedStrategy, "shuffle_bag")
+        }
+        function test_shuffleKeyboardAndScrolling() {
+            controller.playbackMode = "shuffle"
+            const strategies = [{id: "shuffle_bag", name: "Shuffle bag"}]
+            for (let i = 0; i < 20; ++i) strategies.push({id: "test/" + i, name: "Algorithm " + i})
+            controller.shuffleStrategies = strategies
+            button(fullPanel).forceActiveFocus()
+            keyClick(Qt.Key_Space)
+            const popup = menu(fullPanel)
+            tryCompare(popup, "opened", true)
+            verify(popup.y + popup.height <= popup.parent.height - 8)
+            keyClick(Qt.Key_Up) // shuffle -> repeat_one
+            keyClick(Qt.Key_Up) // sequential
+            keyClick(Qt.Key_Up) // wrap to final algorithm
+            compare(popup.currentIndex, 24)
+            tryVerify(() => popup.contentItem.contentY > 0)
+            keyClick(Qt.Key_Return)
+            compare(controller.requestedStrategy, "test/19")
+            compare(controller.requestedMode, "")
+        }
+        function test_settingsEntryAndKeyboardPopup() {
+            controller.playbackMode = "shuffle"
+            controller.shuffleStrategies = [{id: "test/artist", name: "Artist-aware"}]
+            controller.effectiveShuffleStrategy = "test/artist"
+            fakeExtensions.settingsPages = [{id: "test/preferences", extensionId: "test", shuffleStrategy: "artist", source: "", generation: 1}]
+            const anchor = button(drawer), popup = menu(drawer)
+            mouseClick(anchor)
+            tryCompare(popup, "opened", true)
+            verify(findChild(popup.contentItem, "configureShuffleStrategy").visible)
+            popup.currentIndex = anchor.entryCount - 1
+            keyClick(Qt.Key_Return)
+            const settings = findChild(anchor, "shuffleSettingsPopup")
+            tryCompare(settings, "opened", true)
+            verify(settings.x >= 8 && settings.y >= 8)
+            verify(settings.x + settings.width <= settings.parent.width - 8)
+            verify(settings.y + settings.height <= settings.parent.height - 8)
+            keyClick(Qt.Key_Escape)
+            tryCompare(settings, "visible", false)
+            verify(anchor.activeFocus)
+            anchor.openSettings()
+            tryCompare(settings, "opened", true)
+            fakeExtensions.settingsPages = [{id: "test/preferences", extensionId: "test", shuffleStrategy: "artist", source: "", generation: 2}]
+            tryCompare(settings, "visible", false)
+            anchor.openSettings()
+            tryCompare(settings, "opened", true)
+            fakeExtensions.settingsPages = []
+            tryCompare(settings, "visible", false)
+            compare(anchor.entryCount, 5)
         }
     }
 }

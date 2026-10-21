@@ -11,6 +11,22 @@ namespace nekotune {
 // Responses include authoritative state after the accepted operation.
 // The client should reconcile that state instead of predicting selection.
 void registerPlayerApi(IpcRouter &router, ApiContext &api) {
+    router.registerMethod("player.shuffle_strategies", [&api](const auto &, auto done) {
+        done(api.shuffleStrategies ? success(QJsonObject::fromVariantMap(api.shuffleStrategies->status()))
+                                   : error(failure("Shuffle strategies unavailable", ErrorCode::Unavailable)));
+    });
+    router.registerMethod("player.set_shuffle_strategy", [&api](const QJsonObject &params, auto done) {
+        if (!api.shuffleStrategies) {
+            done(error(failure("Shuffle strategies unavailable", ErrorCode::Unavailable)));
+            return;
+        }
+        if (!params.value("id").isString() || params.value("id").toString().isEmpty()) {
+            done(error(failure("id must be a nonempty shuffle strategy ID")));
+            return;
+        }
+        const auto result = api.shuffleStrategies->select(params.value("id").toString());
+        done(response(result, api.status()));
+    }, true);
     router.registerMethod("player.audio_settings", [&api](const auto &, auto done) {
         done(api.audioSettings ? success(api.audioSettingsStatus()) : error(failure("Audio settings unavailable", ErrorCode::Unavailable)));
     });

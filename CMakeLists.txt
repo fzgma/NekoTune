@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(NekoTune
-    VERSION 1.2.0
+    VERSION 1.3.0
     DESCRIPTION "Local-first Linux music player with a decoupled C++ backend"
     LANGUAGES CXX
 )

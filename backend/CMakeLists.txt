@@ -93,6 +93,7 @@ add_library(nekotune_application STATIC
     application/lyrics/lyrics_controller.cpp
     application/lyrics/lyrics_service.cpp
     application/playback/playback_order_service.cpp
+    application/playback/shuffle_strategy_service.cpp
     application/playback/audio_output_service.cpp
     application/playback/audio_settings_service.cpp
     application/playback/player_engine.cpp

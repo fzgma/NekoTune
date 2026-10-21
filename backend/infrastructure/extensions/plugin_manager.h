@@ -1,5 +1,7 @@
 #pragma once
 #include "domain/extensions/extension_backend.h"
+#include "domain/playback/shuffle_strategy_descriptor.h"
+#include <nekotune/sdk/shuffle_provider.h>
 #include "infrastructure/extensions/extension_manifest.h"
 #include <QHash>
 #include <QSet>
@@ -31,6 +33,11 @@ class PluginManager final : public IExtensionBackend {
     void request(const QString &method, const QVariantMap &params, Completion done) override;
     QVariantMap snapshot() const override;
     void publish(const QVariantMap &event) override;
+    QList<ShuffleStrategyDescriptor> shuffleStrategies() const;
+    Result<sdk::ShuffleSelection> selectShuffle(const QString &id, quint64 generation,
+                                                const sdk::ShuffleRequest &request);
+  signals:
+    void shuffleCatalogueChanged();
 
   private:
     class Context;

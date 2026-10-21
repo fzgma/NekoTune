@@ -151,6 +151,24 @@ Linux MPRIS 位于桌面端的会话总线，对外进度／时长为微秒，�
 
 `player.status` 和首次连接事件均包含 `playback_mode`。模式变更广播 `{"event":"player.playback_mode_changed","playback_mode":"shuffle"}`，供所有客户端同步。
 
+### `player.shuffle_strategies` / `player.set_shuffle_strategy`
+
+查询返回可用算法目录、保存的偏好和当前有效算法：
+
+```json
+{"shuffle_strategies":[{"id":"shuffle_bag","name":"Shuffle bag"},{"id":"example.shuffle/artist","name":"Avoid consecutive artists"}],"shuffle_strategy":"example.shuffle/artist","effective_shuffle_strategy":"example.shuffle/artist"}
+```
+
+设置接收 `{"id":"example.shuffle/artist"}`，内置算法 ID 为 `shuffle_bag`，扩展算法为
+`扩展ID/算法ID`。未知、不可用 ID 或设置保存失败返回错误并保留原状态；成功返回完整播放状态。
+选择全局保存在 `config/settings.json` 的 `shuffle_strategy`，不改变播放模式、当前歌曲或进度。
+随机模式的手动下一首、自然播放结束和预加载统一使用所选算法；扩展可允许重复播放。
+
+`player.status` 和 `server.connected.data` 包含上述三个字段；目录、偏好或有效算法改变时广播
+`player.shuffle_strategy_changed`，携带同形字段。扩展不可用或计算失败时，保留 `shuffle_strategy`，
+将 `effective_shuffle_strategy` 回退至 `shuffle_bag`；扩展恢复或重新注册后自动切回。
+切换算法重新建立以当前条目为起点的播放历史，取消旧预加载。算法运行状态不跨重启保存。
+
 ### `player.set_playback_rate`
 
 设置全局播放速度，参数 `rate` 为 0.5–2.0 的有限数值，默认 1.0；非法类型、越界值或保存失败返回错误并保留原速度。成功返回完整状态，包含 `playback_rate` 和 `playback_rate_supported`。速度原子保存至 `config/settings.json` 的 `playback_rate`，不写入歌曲或队列，切歌、暂停和重新连接后沿用。

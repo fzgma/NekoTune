@@ -29,7 +29,7 @@ Result<void> PlaybackOrderService::setMode(PlaybackMode mode, const PlayerQueue 
 void PlaybackOrderService::reset(const PlayerQueue &queue) {
     m_currentId = currentId(queue);
     if (m_mode == PlaybackMode::Shuffle)
-        m_shuffle->reset(ids(queue), m_currentId);
+        m_shuffle->reset(queue);
     m_history.clear();
     if (m_currentId)
         m_history.append(m_currentId);
@@ -46,7 +46,7 @@ void PlaybackOrderService::syncQueue(const PlayerQueue &queue) {
     const int selected = currentId(queue);
     const QSet<int> available(queueIds.cbegin(), queueIds.cend());
     if (m_mode == PlaybackMode::Shuffle)
-        m_shuffle->syncQueue(queueIds, selected);
+        m_shuffle->syncQueue(queue);
     QList<int> history;
     int cursor = -1;
     for (int i = 0; i < m_history.size(); ++i) {
@@ -141,5 +141,10 @@ void PlaybackOrderService::confirm(Selection selection) {
         m_history = std::move(selection.history);
         m_cursor = selection.cursor;
     }
+}
+void PlaybackOrderService::setShuffleStrategy(std::unique_ptr<IShuffleStrategy> strategy,
+                                             const PlayerQueue &queue) {
+    m_shuffle = std::move(strategy);
+    reset(queue);
 }
 } // namespace nekotune

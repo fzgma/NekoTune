@@ -1,4 +1,5 @@
 #include "controllers/playback_controller.h"
+#include <QJsonArray>
 PlaybackController::PlaybackController(IpcClient &client) : FeatureController(client) {
     connect(&client, &IpcClient::eventReceived, this, [this](const QJsonObject &event) {
         auto name = event.value("event").toString();
@@ -15,6 +16,20 @@ PlaybackController::PlaybackController(IpcClient &client) : FeatureController(cl
     });
 }
 void PlaybackController::apply(const QJsonObject &data) {
+    bool shuffleChanged = false;
+    if (data.contains("shuffle_strategies")) {
+        const auto strategies = data.value("shuffle_strategies").toArray().toVariantList();
+        if (strategies != m_shuffleStrategies) { m_shuffleStrategies = strategies; shuffleChanged = true; }
+    }
+    if (data.contains("shuffle_strategy") && data.value("shuffle_strategy").toString() != m_shuffleStrategy) {
+        m_shuffleStrategy = data.value("shuffle_strategy").toString();
+        shuffleChanged = true;
+    }
+    if (data.contains("effective_shuffle_strategy") && data.value("effective_shuffle_strategy").toString() != m_effectiveShuffleStrategy) {
+        m_effectiveShuffleStrategy = data.value("effective_shuffle_strategy").toString();
+        shuffleChanged = true;
+    }
+    if (shuffleChanged) emit shuffleStrategiesChanged();
     if (data.contains("audio_settings") && m_audioSettings != data.value("audio_settings").toObject().toVariantMap()) {
         m_audioSettings = data.value("audio_settings").toObject().toVariantMap();
         emit audioSettingsChanged();

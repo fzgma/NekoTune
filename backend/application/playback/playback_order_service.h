@@ -18,17 +18,23 @@ class PlaybackOrderService final {
         std::unique_ptr<IShuffleStrategy> shuffle;
         QList<int> history;
         int cursor = -1;
+        Selection clone() const {
+            return {queueId, shuffle ? shuffle->clone() : nullptr, history, cursor};
+        }
     };
     explicit PlaybackOrderService(
         std::unique_ptr<IShuffleStrategy> strategy = std::make_unique<ShuffleBagStrategy>(),
         PlaybackMode mode = PlaybackMode::Sequential, ModeSaver save = {});
     PlaybackMode mode() const { return m_mode; }
+    bool allowsRepeatedAdvance() const { return m_mode == PlaybackMode::Shuffle && m_shuffle->allowsImmediateRepeat(); }
+    bool hasPreviousHistory() const { return m_mode == PlaybackMode::Shuffle && m_cursor > 0; }
     Result<void> setMode(PlaybackMode mode, const PlayerQueue &queue);
     void reset(const PlayerQueue &queue);
     void syncQueue(const PlayerQueue &queue);
     /// Does not mutate live history or random-generator state; confirm only after a successful save.
     Selection propose(const PlayerQueue &queue, PlaybackAdvance advance) const;
     void confirm(Selection selection);
+    void setShuffleStrategy(std::unique_ptr<IShuffleStrategy> strategy, const PlayerQueue &queue);
 
   private:
     PlaybackMode m_mode;

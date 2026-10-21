@@ -17,6 +17,8 @@ Item {
     property var playlistController: null
     property var queueController: null
     property var playbackController: null
+    property var appControllers: null
+    property var hostWindow: null
     property var storage: null
     property int exportingPlaylist: 0
     FolderDialog {
@@ -149,8 +151,8 @@ Item {
     Connections { target: root.playlistController; function onRequestSucceeded(method) { root.requestSucceeded(method) } function onRequestFailed(method, message) { root.requestFailed(method, message) } }
     Connections {
         target: root.playbackController
-        function onRequestSucceeded(method) { if (method === "player.set_playback_mode") root.operationError = "" }
-        function onRequestFailed(method, message) { if (method === "player.set_playback_mode") root.operationError = message }
+        function onRequestSucceeded(method) { if (method === "player.set_playback_mode" || method === "player.set_shuffle_strategy") root.operationError = "" }
+        function onRequestFailed(method, message) { if (method === "player.set_playback_mode" || method === "player.set_shuffle_strategy") root.operationError = message }
     }
     Connections { target: root.queueController; function onRequestSucceeded(method) { root.requestSucceeded(method) } function onRequestFailed(method, message) { root.requestFailed(method, message) } }
 
@@ -193,9 +195,19 @@ Item {
             PlaybackModeButton {
                 visible: !root.currentPlaylist
                 translator: i18n
+                controllers: root.appControllers
+                hostWindow: root.hostWindow
+                shuffleSettings: root.appControllers && root.appControllers.extensions ? root.appControllers.extensions.settingsPages : []
                 playbackMode: root.playbackMode
+                shuffleStrategies: root.playbackController && root.playbackController.shuffleStrategies !== undefined
+                    ? root.playbackController.shuffleStrategies : [{ id: "shuffle_bag", name: "Shuffle bag" }]
+                shuffleStrategy: root.playbackController && root.playbackController.shuffleStrategy !== undefined
+                    ? root.playbackController.shuffleStrategy : "shuffle_bag"
+                effectiveShuffleStrategy: root.playbackController && root.playbackController.effectiveShuffleStrategy !== undefined
+                    ? root.playbackController.effectiveShuffleStrategy : "shuffle_bag"
                 enabled: root.connected
                 onModeRequested: mode => { if (root.playbackController) root.playbackController.setPlaybackMode(mode) }
+                onStrategyRequested: id => { if (root.playbackController) root.playbackController.setShuffleStrategy(id) }
             }
         }
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.borderSubtle }

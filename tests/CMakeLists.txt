@@ -8,6 +8,16 @@ endfunction()
 set(CMAKE_WIN32_EXECUTABLE OFF)
 # Native extension fixtures, laid out as mountable development directories.
 set(NEKOTUNE_TEST_EXTENSIONS_DIR "${CMAKE_CURRENT_BINARY_DIR}/native-extensions")
+nekotune_add_extension(nekotune_test_legacy_extension
+    MANIFEST native_extensions/legacy/extension.json
+    SOURCES native_extensions/legacy/plugin.cpp
+    OUTPUT_DIRECTORY "${NEKOTUNE_TEST_EXTENSIONS_DIR}/test.legacy")
+target_include_directories(nekotune_test_legacy_extension BEFORE PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/native_extensions/legacy/sdk")
+nekotune_add_extension(nekotune_test_shuffle_extension
+    MANIFEST native_extensions/shuffle/extension.json
+    SOURCES native_extensions/shuffle/plugin.cpp
+    OUTPUT_DIRECTORY "${NEKOTUNE_TEST_EXTENSIONS_DIR}/test.shuffle")
 nekotune_add_extension(nekotune_test_faulty_extension
     MANIFEST native_extensions/faulty/extension.json
     SOURCES native_extensions/faulty/plugin.cpp
@@ -22,6 +32,7 @@ nekotune_add_extension(nekotune_test_dedicated_source
     FILES fixtures/dedicated-source/Page.qml fixtures/dedicated-source/Settings.qml
     OUTPUT_DIRECTORY "${NEKOTUNE_TEST_EXTENSIONS_DIR}/test.dedicated-source")
 add_custom_target(nekotune_test_extension_fixtures DEPENDS
+    nekotune_test_shuffle_extension nekotune_example_shuffle nekotune_test_legacy_extension
     nekotune_test_faulty_extension nekotune_test_slow_extension nekotune_test_dedicated_source
     nekotune_example_lyrics nekotune_example_automation nekotune_example_custom_ui nekotune_example_test_source
     nekotune_example_custom_ui_package)
@@ -183,6 +194,11 @@ target_link_libraries(nekotune_audio_duration_test PRIVATE nekotune_core Qt6::Te
 nekotune_add_qt_test(NAME nekotune_audio_duration_test COMMAND nekotune_audio_duration_test)
 
 add_executable(nekotune_playback_order_test playback_order_test.cpp)
+add_executable(nekotune_shuffle_strategy_test shuffle_strategy_test.cpp)
+target_link_libraries(nekotune_shuffle_strategy_test PRIVATE nekotune_core nekotune_frontend Qt6::Test)
+target_compile_definitions(nekotune_shuffle_strategy_test PRIVATE ${NEKOTUNE_TEST_EXTENSION_DEFINITIONS})
+add_dependencies(nekotune_shuffle_strategy_test nekotune_test_extension_fixtures)
+nekotune_add_qt_test(NAME nekotune_shuffle_strategy_test COMMAND nekotune_shuffle_strategy_test)
 target_link_libraries(nekotune_playback_order_test PRIVATE nekotune_core nekotune_frontend Qt6::Test)
 nekotune_add_qt_test(NAME nekotune_playback_order_test COMMAND nekotune_playback_order_test)
 

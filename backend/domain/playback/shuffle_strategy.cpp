@@ -3,6 +3,19 @@
 #include <QSet>
 
 namespace nekotune {
+namespace {
+QList<int> queueIds(const PlayerQueue &queue) {
+    QList<int> ids;
+    for (int i = 0; i < queue.size(); ++i)
+        ids.append(queue.at(i).id);
+    return ids;
+}
+int selectedId(const PlayerQueue &queue) {
+    return queue.currentIndex() < 0 ? 0 : queue.at(queue.currentIndex()).id;
+}
+} // namespace
+void IShuffleStrategy::reset(const PlayerQueue &queue) { reset(queueIds(queue), selectedId(queue)); }
+void IShuffleStrategy::syncQueue(const PlayerQueue &queue) { syncQueue(queueIds(queue), selectedId(queue)); }
 ShuffleBagStrategy::ShuffleBagStrategy(quint32 seed) : m_random(seed) {}
 std::unique_ptr<IShuffleStrategy> ShuffleBagStrategy::clone() const {
     return std::make_unique<ShuffleBagStrategy>(*this);

@@ -1,4 +1,6 @@
 #include "app_paths.h"
+#include "application/playback/shuffle_strategy_service.h"
+#include "application/playback/playback_order_service.h"
 #include "infrastructure/extensions/crash_guard.h"
 #include "infrastructure/extensions/extension_manifest.h"
 #include "infrastructure/extensions/plugin_manager.h"
@@ -172,6 +174,112 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(call(*manager, "extensions.disable", {{"id", "example.custom-ui"}}));
         QCOMPARE(entry(*manager, "example.custom-ui").value("contributes").toMap(), QVariantMap{});
         QVERIFY(!call(*manager, "extensions.call", {{"id", "example.custom-ui"}, {"service", "hello"}}));
+    }
+
+    void shuffleRegistrationsAndGenerations() {
+        auto manager = startManager();
+        install(*manager, QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.shuffle"));
+        enable(*manager, "test.shuffle");
+        auto catalogue = manager->shuffleStrategies();
+        QCOMPARE(catalogue.size(), 1);
+        QCOMPARE(catalogue.first().id, "test.shuffle/test");
+        const auto generation = catalogue.first().generation;
+        const auto validation = call(*manager, "extensions.call", {{"id", "test.shuffle"}, {"service", "validate"}});
+        QVERIFY(validation);
+        for (const auto &value : validation.value()) QVERIFY(!value.toBool());
+        sdk::ShuffleRequest request{{{11, 7, "Title", "Artist"}, {12, 7, "Duplicate", "Artist"}}, 11, 42, {}};
+        const auto first = manager->selectShuffle("test.shuffle/test", generation, request);
+        QVERIFY(first);
+        QCOMPARE(first.value().queueId, 11);
+        QCOMPARE(first.value().state.value("step").toInt(), 1);
+        QCOMPARE(manager->selectShuffle("test.shuffle/test", generation, request).value().queueId, 11);
+        request.state = first.value().state;
+        QCOMPARE(manager->selectShuffle("test.shuffle/test", generation, request).value().queueId, 12);
+        QVERIFY(call(*manager, "extensions.call", {{"id", "test.shuffle"}, {"service", "release"}}));
+        QVERIFY(manager->shuffleStrategies().isEmpty());
+        QVERIFY(!manager->selectShuffle("test.shuffle/test", generation, request));
+        QVERIFY(call(*manager, "extensions.call", {{"id", "test.shuffle"}, {"service", "register"}}));
+        catalogue = manager->shuffleStrategies();
+        QCOMPARE(catalogue.size(), 1);
+        QVERIFY(catalogue.first().generation > generation);
+        QVERIFY(!manager->selectShuffle("test.shuffle/test", generation, request));
+        const auto beforeReload = catalogue.first().generation;
+        QVERIFY(call(*manager, "extensions.reload", {{"id", "test.shuffle"}}));
+        QCOMPARE(manager->shuffleStrategies().size(), 1);
+        QVERIFY(manager->shuffleStrategies().first().generation > beforeReload);
+        QVERIFY(!manager->selectShuffle("test.shuffle/test", beforeReload, request));
+        QVERIFY(call(*manager, "extensions.disable", {{"id", "test.shuffle"}}));
+        QVERIFY(manager->shuffleStrategies().isEmpty());
+    }
+    void sdk20BinaryContextRemainsCompatible() {
+        auto manager = startManager();
+        install(*manager, QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.legacy"));
+        enable(*manager, "test.legacy");
+        const auto result = call(*manager, "extensions.call", {{"id", "test.legacy"}, {"service", "ping"}});
+        QVERIFY(result);
+        QCOMPARE(result.value().value("value").toString(), "works");
+        QVERIFY(call(*manager, "extensions.disable", {{"id", "test.legacy"}}));
+        enable(*manager, "test.legacy");
+        QVERIFY(call(*manager, "extensions.call", {{"id", "test.legacy"}, {"service", "ping"}}));
+    }
+
+    void shuffleFailuresFallback_data() {
+        QTest::addColumn<QString>("mode");
+        for (const auto &mode : {"error", "throw", "invalid", "zero"}) QTest::newRow(mode) << QString(mode);
+    }
+    void shuffleFailuresFallback() {
+        QFETCH(QString, mode);
+        auto manager = startManager();
+        install(*manager, QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.shuffle"));
+        QVERIFY(call(*manager, "extensions.set_config", {{"id", "test.shuffle"}, {"config", QVariantMap{{"mode", mode}}}}));
+        enable(*manager, "test.shuffle");
+        ShuffleStrategyService service("test.shuffle/test");
+        auto sync = [&] {
+            service.setCatalogue(manager->shuffleStrategies(),
+                [&](const QString &id, quint64 generation, const sdk::ShuffleRequest &request) {
+                    return manager->selectShuffle(id, generation, request);
+                });
+        };
+        connect(manager.get(), &PluginManager::shuffleCatalogueChanged, &service, sync);
+        sync();
+        QCOMPARE(service.effective(), "test.shuffle/test");
+        const auto generation = manager->shuffleStrategies().first().generation;
+        PlaybackOrderService order(service.createStrategy(), PlaybackMode::Shuffle);
+        PlayerQueue queue;
+        queue.add("/first.wav", {1, "hash"}); queue.add("/second.wav", {1, "hash"});
+        queue.setCurrentIndex(0); order.reset(queue);
+        QCOMPARE(order.propose(queue, PlaybackAdvance::Next).queueId, 2); // Immediate safe fallback.
+        QVERIFY(manager->shuffleStrategies().isEmpty());
+        QTRY_COMPARE(service.effective(), "shuffle_bag");
+        QCOMPARE(service.preferred(), "test.shuffle/test");
+        QCOMPARE(entry(*manager, "test.shuffle").value("state").toString(), "running");
+        const auto logs = call(*manager, "extensions.logs", {{"id", "test.shuffle"}});
+        QVERIFY(logs);
+        bool logged = false;
+        for (const auto &value : logs.value().value("logs").toList())
+            logged = logged || value.toMap().value("message").toString().contains("Shuffle strategy");
+        QVERIFY(logged);
+        QVERIFY(call(*manager, "extensions.call", {{"id", "test.shuffle"}, {"service", "register"}}));
+        QCOMPARE(service.effective(), "test.shuffle/test");
+        QVERIFY(manager->shuffleStrategies().first().generation > generation);
+    }
+
+    void artistShuffleExample() {
+        auto manager = startManager();
+        install(*manager, examples + "/example.shuffle");
+        enable(*manager, "example.shuffle");
+        const auto generation = manager->shuffleStrategies().first().generation;
+        sdk::ShuffleRequest request{{{11, 1, "One", "Artist A"}, {12, 2, "Two", "artist a"},
+                                     {13, 3, "Three", "Artist B"}}, 11, 42, {}};
+        for (quint32 seed = 0; seed < 20; ++seed) {
+            request.seed = seed;
+            const auto chosen = manager->selectShuffle("example.shuffle/artist", generation, request);
+            QVERIFY(chosen); QCOMPARE(chosen.value().queueId, 13);
+        }
+        request.queue.removeLast();
+        QCOMPARE(manager->selectShuffle("example.shuffle/artist", generation, request).value().queueId, 12);
+        request.queue.removeLast();
+        QCOMPARE(manager->selectShuffle("example.shuffle/artist", generation, request).value().queueId, 11);
     }
 
     void lyricsAndAutomationExamples() {

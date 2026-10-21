@@ -1,0 +1,6 @@
+{
+  "id": "test.shuffle",
+  "name": "Shuffle test extension",
+  "version": "1.0.0",
+  "config": { "mode": "ok" }
+}

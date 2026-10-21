@@ -25,6 +25,7 @@
 #include <QTimer>
 #include <QUuid>
 #include <atomic>
+#include <algorithm>
 #include <map>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
@@ -33,7 +34,7 @@
 namespace nekotune {
 namespace {
 const QStringList uiKinds{"pages", "settings", "slots", "themes", "menus", "toolbars"};
-const QStringList registrationKinds = QStringList{"services", "commands", "music", "lyrics"} + uiKinds;
+const QStringList registrationKinds = QStringList{"services", "commands", "music", "lyrics", "shuffle"} + uiKinds;
 const QStringList sourceKinds{"pages", "settings", "slots", "toolbars"};
 constexpr int activationTimeout = 30'000;
 constexpr int callTimeout = 30'000;
@@ -101,6 +102,12 @@ struct PluginManager::Run {
     QHash<QString, sdk::Handler> services, commands;
     QHash<QString, sdk::IMusicProvider *> music;
     QHash<QString, sdk::ILyricsProvider *> lyrics;
+    struct Shuffle {
+        sdk::IShuffleProvider *provider = nullptr;
+        quint64 generation = 0;
+        bool failed = false;
+    };
+    QMap<QString, Shuffle> shuffle;
     std::map<quint64, std::pair<QString, sdk::EventHandler>> subscriptions;
     quint64 nextSubscription = 1;
     QVariantMap storage;
@@ -134,7 +141,7 @@ class PluginManager::Handle final : public sdk::Registration {
     std::atomic<bool> m_disposed{false};
 };
 
-class PluginManager::Context final : public sdk::IExtensionContext {
+class PluginManager::Context final : public sdk::IExtensionContext, public sdk::IShuffleExtensionContext {
   public:
     Context(PluginManager *manager, std::weak_ptr<Run> run, const Entry &entry, QString dataDirectory,
             QVariantMap config)
@@ -218,6 +225,18 @@ class PluginManager::Context final : public sdk::IExtensionContext {
                 run->subscriptions.emplace(key, std::pair{event, handler});
         });
         return std::make_unique<Handle>(m_manager, m_run, [key](Run &run) { run.subscriptions.erase(key); });
+    }
+    sdk::RegistrationPtr registerShuffleStrategy(const QString &id, sdk::IShuffleProvider *provider,
+                                                 const sdk::Params &descriptor) override {
+        if (!provider || descriptor.value("name").toString().trimmed().isEmpty()) {
+            log(QtWarningMsg, "Shuffle strategy requires a provider and a name");
+            return nullptr;
+        }
+        return add("shuffle", id, descriptor,
+                   [id, provider, manager = m_manager](Run &run) {
+                       run.shuffle.insert(id, {provider, ++manager->m_generation, false});
+                   },
+                   [id](Run &run) { run.shuffle.remove(id); });
     }
     void publish(const QString &event, const sdk::Params &data) override {
         onRun([manager = m_manager, event, data](const std::shared_ptr<Run> &run) {
@@ -315,9 +334,10 @@ class PluginManager::Context final : public sdk::IExtensionContext {
                              std::function<void(Run &)> install, std::function<void(Run &)> remove) {
         auto work = [manager = m_manager, kind, id, descriptor, install](const std::shared_ptr<Run> &run) {
             const auto added = manager->addRegistration(run, kind, id, descriptor);
-            if (added)
+            if (added) {
                 install(*run);
-            else
+                if (kind == "shuffle") emit manager->shuffleCatalogueChanged();
+            } else
                 manager->recordLog(run->id, "error", added.error().message);
             return bool(added);
         };
@@ -331,9 +351,10 @@ class PluginManager::Context final : public sdk::IExtensionContext {
             onRun(work);
         if (!accepted)
             return nullptr;
-        return std::make_unique<Handle>(m_manager, m_run, [kind, id, remove](Run &run) {
+        return std::make_unique<Handle>(m_manager, m_run, [kind, id, remove, manager = m_manager](Run &run) {
             run.registrations[kind].remove(id);
             remove(run);
+            if (kind == "shuffle") emit manager->shuffleCatalogueChanged();
         });
     }
     void secret(const QString &operation, const QString &key, const QString &value, IExtensionBackend::Completion done) {
@@ -399,6 +420,64 @@ PluginManager::PluginManager(QObject *parent) : IExtensionBackend(parent) {
 }
 PluginManager::~PluginManager() { shutdown(); }
 
+QList<ShuffleStrategyDescriptor> PluginManager::shuffleStrategies() const {
+    QList<ShuffleStrategyDescriptor> result;
+    for (const auto &owner : m_order) {
+        const auto run = m_runs.value(owner);
+        if (!run || run->state != "running") continue;
+        for (auto it = run->shuffle.cbegin(); it != run->shuffle.cend(); ++it) {
+            if (!it->failed)
+                result.append({owner + '/' + it.key(),
+                               run->registrations.value("shuffle").value(it.key()).value("name").toString(),
+                               it->generation});
+        }
+    }
+    return result;
+}
+
+Result<sdk::ShuffleSelection> PluginManager::selectShuffle(const QString &id, quint64 generation,
+                                                          const sdk::ShuffleRequest &request) {
+    if (request.queue.isEmpty()) return failure("Queue is empty");
+    const auto owner = id.section('/', 0, 0);
+    const auto local = id.section('/', 1);
+    const auto run = m_runs.value(owner);
+    if (!run || run->state != "running")
+        return failure("Shuffle extension unavailable: " + owner, ErrorCode::Unavailable);
+    const auto found = run->shuffle.constFind(local);
+    if (found == run->shuffle.cend() || found->generation != generation || found->failed)
+        return failure("Shuffle registration unavailable: " + id, ErrorCode::Unavailable);
+    auto *provider = found->provider;
+    Result<sdk::ShuffleSelection> result = failure("Shuffle selection failed");
+    {
+        crashguard::Scope scope(owner);
+        try {
+            result = provider->select(request);
+        } catch (const std::exception &exception) {
+            result = failure(QStringLiteral("Unhandled shuffle exception: %1")
+                                 .arg(QString::fromLocal8Bit(exception.what())));
+        } catch (...) {
+            result = failure("Unhandled shuffle exception");
+        }
+    }
+    const auto live = run->shuffle.constFind(local);
+    if (run->state != "running" || live == run->shuffle.cend() || live->generation != generation)
+        return failure("Shuffle registration changed during selection", ErrorCode::Unavailable);
+    if (result) {
+        const int selected = result.value().queueId;
+        const bool exists = std::any_of(request.queue.cbegin(), request.queue.cend(),
+                                        [selected](const auto &track) { return track.queueId == selected && selected > 0; });
+        if (!exists) result = failure("Shuffle strategy selected an unavailable queue item");
+    }
+    if (!result) {
+        // Re-find after foreign code; registration disposal may have invalidated the iterator.
+        auto current = run->shuffle.find(local);
+        if (current != run->shuffle.end() && current->generation == generation) current->failed = true;
+        recordLog(owner, "error", "Shuffle strategy " + id + ": " + result.error().message);
+        notifyChanged();
+    }
+    return result;
+}
+
 QString PluginManager::root() const { return AppPaths::extensionsDirectory(); }
 QString PluginManager::dataDirectory(const QString &id) const { return QDir(root()).filePath("data/" + id); }
 
@@ -440,6 +519,7 @@ void PluginManager::notifyChanged() {
         m_changePending = false;
         if (m_closing)
             return;
+        emit shuffleCatalogueChanged();
         emit changed();
         auto event = snapshot();
         event.insert("event", "extensions.changed");
@@ -1010,6 +1090,7 @@ void PluginManager::activated(const std::shared_ptr<Run> &run, Result<void> resu
     const auto waiters = std::exchange(run->waiters, {});
     if (result) {
         run->state = "running";
+        emit shuffleCatalogueChanged();
         if (m_entries.value(run->id).development)
             watchDevelopment(run);
         notifyChanged();
@@ -1033,6 +1114,7 @@ void PluginManager::stop(const QString &id) {
     if (!run || run->state == "stopping")
         return;
     run->state = "stopping";
+    emit shuffleCatalogueChanged();
     m_audio->revoke(id);
     run->startTimer.reset();
     run->debounce.reset();
@@ -1045,6 +1127,7 @@ void PluginManager::stop(const QString &id) {
     run->commands.clear();
     run->music.clear();
     run->lyrics.clear();
+    run->shuffle.clear();
     run->subscriptions.clear();
     for (auto &kind : run->registrations)
         kind.clear();

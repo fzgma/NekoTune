@@ -8,6 +8,9 @@
 class PlaybackController final : public FeatureController {
     Q_OBJECT
     Q_PROPERTY(QString playbackMode READ playbackMode NOTIFY playbackModeChanged)
+    Q_PROPERTY(QVariantList shuffleStrategies READ shuffleStrategies NOTIFY shuffleStrategiesChanged)
+    Q_PROPERTY(QString shuffleStrategy READ shuffleStrategy NOTIFY shuffleStrategiesChanged)
+    Q_PROPERTY(QString effectiveShuffleStrategy READ effectiveShuffleStrategy NOTIFY shuffleStrategiesChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(double position READ position NOTIFY positionChanged)
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
@@ -20,6 +23,9 @@ class PlaybackController final : public FeatureController {
   public:
     explicit PlaybackController(IpcClient &client);
     QString playbackMode() const { return m_playbackMode; }
+    QVariantList shuffleStrategies() const { return m_shuffleStrategies; }
+    QString shuffleStrategy() const { return m_shuffleStrategy; }
+    QString effectiveShuffleStrategy() const { return m_effectiveShuffleStrategy; }
     QString state() const { return m_state; }
     double position() const { return m_position; }
     double duration() const { return m_duration; }
@@ -34,6 +40,7 @@ class PlaybackController final : public FeatureController {
     /// Each changed field emits its own notification without resetting unrelated models.
     void apply(const QJsonObject &data);
     Q_INVOKABLE void setPlaybackMode(const QString &mode) { send("player.set_playback_mode", {{"mode", mode}}); }
+    Q_INVOKABLE void setShuffleStrategy(const QString &id) { send("player.set_shuffle_strategy", {{"id", id}}); }
     Q_INVOKABLE void playPath(const QString &path) {
         send("player.play", {{"path", IpcClient::normalizePath(path)}});
     }
@@ -58,6 +65,7 @@ class PlaybackController final : public FeatureController {
     Q_INVOKABLE void toggleMute() { setVolume(m_volume > 0 ? 0 : (m_lastVolume > 0 ? m_lastVolume : .8)); }
   signals:
     void playbackModeChanged();
+    void shuffleStrategiesChanged();
     void stateChanged();
     void positionChanged();
     void durationChanged();
@@ -71,6 +79,8 @@ class PlaybackController final : public FeatureController {
 
   private:
     QString m_playbackMode = "sequential";
+    QVariantList m_shuffleStrategies{{QVariantMap{{"id", "shuffle_bag"}, {"name", "Shuffle bag"}}}};
+    QString m_shuffleStrategy = "shuffle_bag", m_effectiveShuffleStrategy = "shuffle_bag";
     QString m_state = "stopped";
     double m_position = 0, m_duration = 0, m_volume = .8, m_lastVolume = .8;
     QVariantMap m_song;

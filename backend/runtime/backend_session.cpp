@@ -8,6 +8,7 @@
 #include "ipc/serialization/audio_serialization.h"
 #include "storage/resource_repository.h"
 #include <QSqlQuery>
+#include <QPointer>
 #include <QTimer>
 #include <algorithm>
 #include <limits>
@@ -48,6 +49,8 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
       m_tags(m_tagRepository), m_queue(m_queueRepository, m_songs, m_database),
       m_audio(audio ? std::move(audio)
                     : std::make_unique<PlaybackBackendSupervisor>(savedAudioSettings().backend)),
+      m_shuffleStrategies(AppPaths::setting("shuffle_strategy").toString(),
+                          [](const QString &id) { return AppPaths::saveSetting("shuffle_strategy", id); }),
       m_player(
           *m_audio, m_queue, std::make_unique<ShuffleBagStrategy>(),
           playbackModeFromString(AppPaths::setting("playback_mode").toString())
@@ -82,6 +85,23 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
           [this](const QString &id, const QString &title) { return m_music.reserveDownload(id, title); }),
       m_maintenance(m_database, m_music, m_imports, m_songs, m_playlistRepository, m_library, m_player,
                     m_router) {
+    m_api.shuffleStrategies = &m_shuffleStrategies;
+    connect(&m_shuffleStrategies, &ShuffleStrategyService::strategyChanged, this, [this] {
+        m_player.setShuffleStrategy(m_shuffleStrategies.createStrategy());
+    });
+    connect(&m_shuffleStrategies, &ShuffleStrategyService::changed, this, [this] {
+        auto event = QJsonObject::fromVariantMap(m_shuffleStrategies.status());
+        event.insert("event", "player.shuffle_strategy_changed");
+        m_server.broadcastEvent(event);
+    });
+    connect(&m_extensionBackend, &PluginManager::shuffleCatalogueChanged, this, [this] {
+        m_shuffleStrategies.setCatalogue(m_extensionBackend.shuffleStrategies(),
+            [backend = QPointer<PluginManager>(&m_extensionBackend)](const QString &id, quint64 generation,
+                                                                   const sdk::ShuffleRequest &request) -> Result<sdk::ShuffleSelection> {
+                if (!backend) return failure("Shuffle extension unavailable", ErrorCode::Unavailable);
+                return backend->selectShuffle(id, generation, request);
+            });
+    });
     m_maintenance.install();
     connect(&m_maintenance, &LibraryMaintenance::event, &m_server, &IpcServer::broadcastEvent);
     connect(&m_maintenance, &LibraryMaintenance::restoreReady, this, &BackendSession::restoreRequested);

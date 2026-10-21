@@ -345,6 +345,8 @@ ApplicationWindow {
                         connected: root.transport.connected
                         queueController: root.app.queue
                         playbackController: root.app.playback
+                        appControllers: root.app
+                        hostWindow: root
                         playbackMode: root.app.playback.playbackMode
                         playlistController: root.app.playlists
                         queue: root.queue

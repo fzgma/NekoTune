@@ -65,6 +65,10 @@ QJsonObject ApiContext::withCover(QJsonObject song) const {
 }
 QJsonObject ApiContext::playbackStatus() const {
     auto state = toJson(player.snapshot());
+    if (shuffleStrategies) {
+        const auto shuffle = QJsonObject::fromVariantMap(shuffleStrategies->status());
+        for (auto it = shuffle.begin(); it != shuffle.end(); ++it) state.insert(it.key(), it.value());
+    }
     state.insert("song", withCover(state.value("song").toObject()));
     const auto audio = audioSettingsStatus();
     if (!audio.isEmpty()) state.insert("audio_settings", audio.value("audio_settings"));

@@ -19,6 +19,7 @@ class PlayerEngine final : public QObject {
     /// The injected mode saver may reject the change without consuming shuffle history.
     /// No change notification is emitted when the requested mode is already active.
     Result<void> setPlaybackMode(PlaybackMode mode);
+    void setShuffleStrategy(std::unique_ptr<IShuffleStrategy> strategy);
     PlaybackSnapshot snapshot() const;
     QUrl loadedSource() const { return m_backend.source(); }
     /// Resume a loaded source or load the selected persisted occurrence.

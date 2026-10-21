@@ -57,6 +57,7 @@ class BackendSession final : public QObject {
     TagService m_tags;
     QueueService m_queue;
     std::unique_ptr<IPlaybackBackend> m_audio;
+    ShuffleStrategyService m_shuffleStrategies;
     PlayerEngine m_player;
     ListeningHistoryService m_history;
     AudioOutputService m_audioOutputs;

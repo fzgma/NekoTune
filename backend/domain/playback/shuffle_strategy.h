@@ -1,4 +1,5 @@
 #pragma once
+#include "domain/playback/player_queue.h"
 #include <QList>
 #include <QString>
 #include <memory>
@@ -10,6 +11,7 @@ class IShuffleStrategy {
   public:
     virtual ~IShuffleStrategy() = default;
     virtual QString id() const = 0;
+    virtual bool allowsImmediateRepeat() const { return false; }
     /// Copy membership, remaining draws and random-generator state together.
     /// Navigation mutates the copy until its queue selection has been saved.
     /// Discarding a proposal must therefore leave the next live draw reproducible.
@@ -19,6 +21,9 @@ class IShuffleStrategy {
     /// New IDs join the remaining choices; removed IDs must not be proposed again.
     /// currentId is excluded from newly admitted draws when alternatives exist.
     virtual void syncQueue(const QList<int> &queueIds, int currentId) = 0;
+    /// Rich snapshots let extension strategies use metadata without changing bag membership rules.
+    virtual void reset(const PlayerQueue &queue);
+    virtual void syncQueue(const PlayerQueue &queue);
     /// Return an eligible occurrence ID, or zero when the queue membership is empty.
     /// Drawing may refill/shuffle the bag, so call on a proposal clone before persistence.
     /// confirmSelection consumes the chosen occurrence from that tentative bag.
@@ -37,6 +42,8 @@ class IShuffleStrategy {
 class ShuffleBagStrategy final : public IShuffleStrategy {
   public:
     explicit ShuffleBagStrategy(quint32 seed = std::random_device{}());
+    using IShuffleStrategy::reset;
+    using IShuffleStrategy::syncQueue;
     QString id() const override { return QStringLiteral("shuffle_bag"); }
     std::unique_ptr<IShuffleStrategy> clone() const override;
     void reset(const QList<int> &queueIds, int currentId) override;
