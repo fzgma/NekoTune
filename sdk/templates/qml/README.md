@@ -1,5 +1,7 @@
 # NekoTune 纯 QML 扩展模板
 
+本模板注册一个普通扩展页面，不是主题包或完整前端模板。主题包只贡献 `themes`；外观、界面与功能职责见宿主仓库的 `docs/theme-boundaries.md`，主题格式见 `docs/themes.md`。
+
 复制本目录的全部内容（包括 `.github/`）到自己的仓库，修改 `extension.json` 的
 ID、名称和版本，在 `Page.qml` 编写页面。无需 C++ 编译器、Qt 开发包或原生 SDK。
 

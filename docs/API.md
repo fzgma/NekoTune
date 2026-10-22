@@ -559,6 +559,8 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 ### 主题与界面
 
+职责与稳定接口范围见[主题边界规范](theme-boundaries.md)。下列是当前已实现协议；该规范中的外观／布局独立选择及完整默认界面模板属于迁移目标，不新增此处的参数或配置键。主题 QML 调用已有接口仍须遵守原业务语义，主题职责约定不构成运行时权限沙箱。
+
 - `extensions.select` 的 `slot: "theme"` 接受主题贡献 ID、`builtin/yozakura`、`builtin/ocean`、`builtin/forest`；空字符串选择默认夜樱。持久化失败不改变当前选择。
 - `extensions.install` 增加可选 `themeOnly: true`，强制按主题包大小限制解包，并拒绝普通可执行扩展。重复 ID 默认拒绝，确认更新后传 `replace: true`。卡片定向更新可传 `expectedId`：目标必须已安装且与新包 ID 一致，在更改旧包前校验，不匹配返回 `theme_update_id_mismatch`。
 - `extensions.export_theme` 参数 `{contribution, path}`：将主题导出到本地 ZIP 文件，返回 `{path, includesQml}`。主题专用包完整导出；内置主题和普通扩展导出独立的配色与静态背景包。支持仍安装的静态主题贡献，以及当前运行时动态注册的主题。

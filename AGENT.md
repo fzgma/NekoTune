@@ -44,6 +44,7 @@ QML → 功能控制器／模型 → IpcClient → 本地 Socket
 - `storage` 实现 SQLite 仓储和事务；`infrastructure` 实现播放、文件、网络、缓存和凭据能力。
 - `ipc` 校验参数并转换 JSON，调用应用服务；`runtime` 装配各层具体实现。
 - QML 通过功能控制器消费后端状态，不直接访问数据库、播放器或网络提供方。
+- 主题、界面与功能扩展遵循 [主题边界规范](docs/theme-boundaries.md)：主题呈现已有能力，宿主或功能扩展拥有业务规则与生命周期；文档中的迁移目标不当作已实现功能。
 - 目录先按架构层，再按业务归组；头文件与实现放在同一业务目录。内部包含路径从 `backend` 根开始。
 - 新增业务进入对应服务和 API 模块，避免扩大 `PlayerEngine`、`IpcRouter` 或 `Main.qml` 的职责。
 - 新增源码同步所属 CMake 目标；新增 QML 同步 `resources.qrc`，新增页面同步 `PageRegistry.js`。

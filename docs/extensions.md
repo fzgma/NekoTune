@@ -263,6 +263,8 @@ m_shuffle = shuffle->registerShuffleStrategy("artist", &m_provider,
 
 ## QML 界面、菜单和主题
 
+主题、界面扩展与功能扩展按[主题边界规范](theme-boundaries.md)区分：主题呈现已有能力，普通界面扩展注册页面等贡献，功能扩展注册新业务能力。同一普通扩展可以同时提供功能、界面和主题；`type: "theme"` 专用包仍只贡献 `themes`。是否使用 QML 或原生代码不改变职责归属。
+
 ```qml
 import QtQuick
 import QtQuick.Controls
@@ -299,6 +301,8 @@ Item {
 | `toolbars` | `id,title,source,height`；插入默认 Shell 顶部工具栏 |
 
 `title` 可用字符串或 `{zh,en}`。主题通过「设置 → 外观」选择；独立界面替换仍通过扩展管理页选择。当前主题声明的插槽优先，切走主题后恢复独立选择；不可用时回退到内置实现。完整 Shell 自行决定布局；默认 Shell 提供的工具栏和菜单不会自动出现在作者完全替换的界面中。
+
+`ExtensionApi.window` 暴露的对象不等于完整稳定接口，不应依赖其私有页面树或跨引擎 JavaScript 对象。新完整界面模板应保留核心功能与扩展页面、设置的可达入口；当前宿主不会自动为自定义 Shell 注入这些入口，详见[组合规则与迁移目标](theme-boundaries.md#5-外观界面与插槽的组合)。
 
 随机算法的设置贡献可增加 `shuffleStrategy`，值为同一扩展注册的算法局部 ID。
 该算法正在生效时，队列页和队列抽屉的播放模式菜单会显示“调整随机算法…”，在按钮附近打开该设置界面。
