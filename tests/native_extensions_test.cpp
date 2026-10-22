@@ -5,6 +5,7 @@
 #include "infrastructure/extensions/extension_manifest.h"
 #include "infrastructure/extensions/plugin_manager.h"
 #include "infrastructure/extensions/semver.h"
+#include "infrastructure/extensions/theme_package.h"
 #include "infrastructure/extensions/zip_archive.h"
 #include <QDirIterator>
 #include <QNetworkAccessManager>
@@ -469,6 +470,19 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(entry(*manager, "example.lyrics").value("state").toString(), "disabled");
         QVERIFY(entry(*manager, "example.lyrics").value("enabled").toBool());
         QVERIFY(!call(*manager, "extensions.enable", {{"id", "example.lyrics"}}));
+    }
+
+    void themeCatalogTokenGroups() {
+        // Separate appearance and layout selection depends on every token declaring its owner.
+        const QStringList groups{"appearance", "layout", "shared", "host"};
+        const auto tokens = themes::catalog().value("tokens").toMap();
+        QCOMPARE(tokens.size(), 68);
+        for (auto it = tokens.cbegin(); it != tokens.cend(); ++it)
+            QVERIFY2(groups.contains(it.value().toMap().value("group").toString()), qPrintable(it.key()));
+        QCOMPARE(tokens.value("accentPrimary").toMap().value("group").toString(), "appearance");
+        QCOMPARE(tokens.value("sidebarWidthWide").toMap().value("group").toString(), "layout");
+        QCOMPARE(tokens.value("radiusMd").toMap().value("group").toString(), "shared");
+        QCOMPARE(tokens.value("reducedMotion").toMap().value("group").toString(), "host");
     }
 
     void zipPackagesAndThemes() {

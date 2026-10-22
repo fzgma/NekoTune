@@ -3,348 +3,416 @@
   "tokens": {
     "bgCanvas": {
       "type": "color",
+      "group": "appearance",
       "default": "#0E0D14"
     },
     "bgSidebar": {
       "type": "color",
+      "group": "appearance",
       "default": "#121019"
     },
     "bgSurface": {
       "type": "color",
+      "group": "appearance",
       "default": "#17141F"
     },
     "bgRaised": {
       "type": "color",
+      "group": "appearance",
       "default": "#211C2D"
     },
     "bgHover": {
       "type": "color",
+      "group": "appearance",
       "default": "#2A2338"
     },
     "bgSelected": {
       "type": "color",
+      "group": "appearance",
       "default": "#322743"
     },
     "bgCard": {
       "type": "color",
+      "group": "appearance",
       "default": "#17141F"
     },
     "borderSubtle": {
       "type": "color",
+      "group": "appearance",
       "default": "#332C41"
     },
     "borderControl": {
       "type": "color",
+      "group": "appearance",
       "default": "#8D809F"
     },
     "textPrimary": {
       "type": "color",
+      "group": "appearance",
       "default": "#F5F1FA"
     },
     "textSecondary": {
       "type": "color",
+      "group": "appearance",
       "default": "#D7CFE2"
     },
     "textMuted": {
       "type": "color",
+      "group": "appearance",
       "default": "#AAA0B8"
     },
     "textDisabled": {
       "type": "color",
+      "group": "appearance",
       "default": "#736A83"
     },
     "textOnAccent": {
       "type": "color",
+      "group": "appearance",
       "default": "#21172F"
     },
     "accentPrimary": {
       "type": "color",
+      "group": "appearance",
       "default": "#CBB8FF"
     },
     "accentHover": {
       "type": "color",
+      "group": "appearance",
       "default": "#DBCDFF"
     },
     "accentPressed": {
       "type": "color",
+      "group": "appearance",
       "default": "#B7A0ED"
     },
     "accentSecondary": {
       "type": "color",
+      "group": "appearance",
       "default": "#E8A9C3"
     },
     "statusSuccess": {
       "type": "color",
+      "group": "appearance",
       "default": "#98D8BC"
     },
     "statusWarning": {
       "type": "color",
+      "group": "appearance",
       "default": "#E8C58A"
     },
     "statusError": {
       "type": "color",
+      "group": "appearance",
       "default": "#FF9BAE"
     },
     "statusErrorBg": {
       "type": "color",
+      "group": "appearance",
       "default": "#38202B"
     },
     "statusInfo": {
       "type": "color",
+      "group": "appearance",
       "default": "#A9C8F5"
     },
     "bgCanvasTop": {
       "type": "color",
+      "group": "appearance",
       "default": "#13111C"
     },
     "bgElevated": {
       "type": "color",
+      "group": "appearance",
       "default": "#1C1826"
     },
     "accentGlow": {
       "type": "color",
+      "group": "appearance",
       "default": "#3A2E52"
     },
     "roseGlow": {
       "type": "color",
+      "group": "appearance",
       "default": "#432A3A"
     },
     "glowOpacity": {
       "type": "real",
+      "group": "appearance",
       "default": 0.1,
       "min": 0,
       "max": 1
     },
     "fontFamily": {
       "type": "string",
+      "group": "appearance",
       "default": "sans-serif"
     },
     "fontFamilyMonospace": {
       "type": "string",
+      "group": "appearance",
       "default": "Monospace, 'Noto Sans Mono', monospace"
     },
     "fontTitle": {
       "type": "int",
+      "group": "shared",
       "default": 24,
       "min": 1,
       "max": 1024
     },
     "fontSongTitle": {
       "type": "int",
+      "group": "shared",
       "default": 22,
       "min": 1,
       "max": 1024
     },
     "fontDialogTitle": {
       "type": "int",
+      "group": "shared",
       "default": 18,
       "min": 1,
       "max": 1024
     },
     "fontBody": {
       "type": "int",
+      "group": "shared",
       "default": 14,
       "min": 1,
       "max": 1024
     },
     "fontBodySecondary": {
       "type": "int",
+      "group": "shared",
       "default": 13,
       "min": 1,
       "max": 1024
     },
     "fontCaption": {
       "type": "int",
+      "group": "shared",
       "default": 12,
       "min": 1,
       "max": 1024
     },
     "fontLyricsWide": {
       "type": "int",
+      "group": "shared",
       "default": 24,
       "min": 1,
       "max": 1024
     },
     "fontLyricsCompact": {
       "type": "int",
+      "group": "shared",
       "default": 20,
       "min": 1,
       "max": 1024
     },
     "lineHeightBody": {
       "type": "real",
+      "group": "shared",
       "default": 1.5,
       "min": 1,
       "max": 4
     },
     "lineHeightLyrics": {
       "type": "real",
+      "group": "shared",
       "default": 1.6,
       "min": 1,
       "max": 4
     },
     "spaceXs": {
       "type": "int",
+      "group": "shared",
       "default": 4,
       "min": 0,
       "max": 1024
     },
     "spaceSm": {
       "type": "int",
+      "group": "shared",
       "default": 8,
       "min": 0,
       "max": 1024
     },
     "spaceMd": {
       "type": "int",
+      "group": "shared",
       "default": 12,
       "min": 0,
       "max": 1024
     },
     "spaceLg": {
       "type": "int",
+      "group": "shared",
       "default": 16,
       "min": 0,
       "max": 1024
     },
     "spaceXl": {
       "type": "int",
+      "group": "shared",
       "default": 24,
       "min": 0,
       "max": 1024
     },
     "space2Xl": {
       "type": "int",
+      "group": "shared",
       "default": 32,
       "min": 0,
       "max": 1024
     },
     "space3Xl": {
       "type": "int",
+      "group": "shared",
       "default": 48,
       "min": 0,
       "max": 1024
     },
     "radiusSm": {
       "type": "int",
+      "group": "shared",
       "default": 8,
       "min": 0,
       "max": 1024
     },
     "radiusMd": {
       "type": "int",
+      "group": "shared",
       "default": 12,
       "min": 0,
       "max": 1024
     },
     "radiusLg": {
       "type": "int",
+      "group": "shared",
       "default": 16,
       "min": 0,
       "max": 1024
     },
     "radiusFull": {
       "type": "int",
+      "group": "shared",
       "default": 999,
       "min": 0,
       "max": 1024
     },
     "sidebarWidthWide": {
       "type": "int",
+      "group": "layout",
       "default": 220,
       "min": 1,
       "max": 1024
     },
     "sidebarWidthCompact": {
       "type": "int",
+      "group": "layout",
       "default": 180,
       "min": 1,
       "max": 1024
     },
     "bottomBarHeight": {
       "type": "int",
+      "group": "layout",
       "default": 96,
       "min": 1,
       "max": 1024
     },
     "songRowHeight": {
       "type": "int",
+      "group": "layout",
       "default": 60,
       "min": 1,
       "max": 1024
     },
     "songThumbnailSize": {
       "type": "int",
+      "group": "layout",
       "default": 40,
       "min": 1,
       "max": 1024
     },
     "controlMinHeight": {
       "type": "int",
+      "group": "layout",
       "default": 40,
       "min": 1,
       "max": 1024
     },
     "iconButtonSize": {
       "type": "int",
+      "group": "layout",
       "default": 40,
       "min": 1,
       "max": 1024
     },
     "iconButtonDenseSize": {
       "type": "int",
+      "group": "layout",
       "default": 32,
       "min": 1,
       "max": 1024
     },
     "playButtonSize": {
       "type": "int",
+      "group": "layout",
       "default": 48,
       "min": 1,
       "max": 1024
     },
     "artworkCompact": {
       "type": "int",
+      "group": "layout",
       "default": 224,
       "min": 1,
       "max": 1024
     },
     "artworkWide": {
       "type": "int",
+      "group": "layout",
       "default": 280,
       "min": 1,
       "max": 1024
     },
     "reducedMotion": {
       "type": "bool",
+      "group": "host",
       "default": false
     },
     "durationFast": {
       "type": "int",
+      "group": "shared",
       "default": 120,
       "min": 0,
       "max": 3000
     },
     "durationNormal": {
       "type": "int",
+      "group": "shared",
       "default": 180,
       "min": 0,
       "max": 3000
     },
     "durationDrawer": {
       "type": "int",
+      "group": "shared",
       "default": 200,
       "min": 0,
       "max": 3000
     },
     "durationSmooth": {
       "type": "int",
+      "group": "shared",
       "default": 240,
       "min": 0,
       "max": 3000
     },
     "durationScroll": {
       "type": "int",
+      "group": "shared",
       "default": 280,
       "min": 0,
       "max": 3000
