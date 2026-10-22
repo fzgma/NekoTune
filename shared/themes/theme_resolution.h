@@ -6,9 +6,12 @@
 namespace nekotune::themes {
 /// Catalog defaults for one color scheme: every token's default, plus the "light" overrides when !dark.
 QVariantMap baseTokens(const QVariantMap &catalog, bool dark);
-/// Final token values for one theme descriptor. Order: base values, common "tokens", then the
-/// variant "tokens" of the requested scheme. Unknown token names are ignored.
-QVariantMap resolveThemeTokens(const QVariantMap &catalog, const QVariantMap &theme, bool dark);
+/// Final token values. Order: base values, then the appearance theme (common "tokens", then the variant
+/// "tokens"), then the layout theme. When layout is non-empty, the appearance theme's "layout" group
+/// tokens are ignored and only the layout theme's "layout" and "shared" group tokens apply.
+/// Unknown token names are ignored.
+QVariantMap resolveThemeTokens(const QVariantMap &catalog, const QVariantMap &theme, bool dark,
+                               const QVariantMap &layout = {});
 /// True when the theme replaces any part of the main window: shell, bottomPlayer, background or pages.
 /// Wallpaper alone does not count as a layout.
 bool providesLayout(const QVariantMap &theme);

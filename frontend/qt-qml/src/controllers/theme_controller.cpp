@@ -104,6 +104,18 @@ QString ThemeController::selectedId() const {
   const auto id = m_extensions.selections().value("theme").toString();
   return id.isEmpty() ? QStringLiteral("builtin/yozakura") : id;
 }
+QString ThemeController::layoutSelectedId() const {
+  const auto selections = m_extensions.selections();
+  if (selections.contains("themeLayout"))
+    return selections.value("themeLayout").toString();
+  // Profiles from before separate selection follow the appearance theme.
+  return find(selectedId()).value("hasLayout").toBool() ? selectedId()
+                                                         : QString();
+}
+bool ThemeController::layoutUnavailable() const {
+  return !safeMode() && !layoutSelectedId().isEmpty() &&
+         activeLayoutId() != layoutSelectedId();
+}
 bool ThemeController::isDark() const {
   return safeMode() || m_mode == "dark" ||
          (m_mode == "system" && QGuiApplication::styleHints()->colorScheme() !=
@@ -157,13 +169,26 @@ void ThemeController::rebuild() {
                                          palette.value("accentPrimary"),
                                          palette.value("accentSecondary"),
                                          palette.value("textPrimary")});
+    item.insert("hasLayout", nekotune::themes::providesLayout(item));
+    item.insert("hasWallpaper", nekotune::themes::providesWallpaper(item));
     value = item;
   }
   m_active =
       find(safeMode() ? QStringLiteral("builtin/yozakura") : selectedId());
   if (!m_active.value("available").toBool())
     m_active = find(QStringLiteral("builtin/yozakura"));
-  m_tokens = resolve(m_active, isDark());
+  m_layout.clear();
+  if (const auto layoutId = layoutSelectedId();
+      !safeMode() && !layoutId.isEmpty()) {
+    const auto candidate = find(layoutId);
+    if (candidate.value("available").toBool() &&
+        candidate.value("hasLayout").toBool())
+      m_layout = candidate;
+  }
+  const bool separateLayout =
+      !m_layout.isEmpty() && m_layout.value("id") != m_active.value("id");
+  m_tokens = nekotune::themes::resolveThemeTokens(
+      m_catalog, m_active, isDark(), separateLayout ? m_layout : QVariantMap{});
   m_background = m_active.value("variants")
                      .toMap()
                      .value(isDark() ? "dark" : "light")
@@ -175,24 +200,33 @@ void ThemeController::rebuild() {
     m_background["source"] = QUrl::fromLocalFile(
         QDir(directory).filePath(m_background.value("source").toString()));
   m_slots.clear();
-  auto add = [&](const QString &slot, const QVariant &source) {
+  auto add = [&](const QVariantMap &theme, const QString &slot,
+                 const QVariant &source) {
     if (source.toString().isEmpty())
       return;
     m_slots.insert(
         slot,
-        QVariantMap{{"id", activeId() + "/" + slot},
+        QVariantMap{{"id", theme.value("id").toString() + "/" + slot},
                     {"slot", slot},
-                    {"source", QDir(directory).filePath(source.toString())},
-                    {"extensionId", m_active.value("extensionId")},
-                    {"generation", m_active.value("generation")}});
+                    {"source", QDir(theme.value("directory").toString())
+                                   .filePath(source.toString())},
+                    {"extensionId", theme.value("extensionId")},
+                    {"generation", theme.value("generation")}});
   };
   if (!safeMode()) {
-    const auto ui = m_active.value("ui").toMap();
-    for (const auto &key : {"background", "shell", "bottomPlayer", "wallpaper"})
-      add(QLatin1String(key), ui.value(QLatin1String(key)));
+    const auto ui = m_layout.value("ui").toMap();
+    for (const auto &key : {"background", "shell", "bottomPlayer"})
+      add(m_layout, QLatin1String(key), ui.value(QLatin1String(key)));
     const auto pages = ui.value("pages").toMap();
     for (auto it = pages.cbegin(); it != pages.cend(); ++it)
-      add("page:" + it.key(), it.value());
+      add(m_layout, "page:" + it.key(), it.value());
+    // "Follow current theme" wallpaper: the layout's entry first, then the
+    // appearance's.
+    const auto &wallpaper = nekotune::themes::providesWallpaper(m_layout)
+                                ? m_layout
+                                : m_active;
+    add(wallpaper, "wallpaper",
+        wallpaper.value("ui").toMap().value("wallpaper"));
   }
   emit changed();
 }
@@ -218,6 +252,35 @@ void ThemeController::request(const QString &method, const QVariantMap &params,
   m_pending = m_extensions.request(method, params);
   emit changed();
 }
+bool ThemeController::ensureAvailable(const QVariantMap &theme, bool trusted,
+                                      const QString &target,
+                                      std::function<void()> retry) {
+  if (theme.value("available").toBool())
+    return true;
+  if (theme.value("hasCode").toBool() && !theme.value("trusted").toBool() &&
+      !trusted) {
+    emit trustRequested(theme.value("id").toString(), target);
+    return false;
+  }
+  request("extensions.enable",
+          {{"id", theme.value("extensionId")}, {"trusted", trusted}},
+          [retry](const QVariantMap &, const QString &error) {
+            if (error.isEmpty())
+              retry();
+          });
+  return false;
+}
+void ThemeController::applySelection(const QString &appearance,
+                                     const QString &layout, Completion done) {
+  // Always write both keys so a later single-part change never falls back to
+  // the legacy "layout follows appearance" rule.
+  const auto stored =
+      appearance == QLatin1String("builtin/yozakura") ? QString() : appearance;
+  request("extensions.select",
+          {{"selections",
+            QVariantMap{{"theme", stored}, {"themeLayout", layout}}}},
+          std::move(done));
+}
 void ThemeController::selectTheme(const QString &id, bool trusted) {
   if (busy())
     return;
@@ -227,23 +290,53 @@ void ThemeController::selectTheme(const QString &id, bool trusted) {
     emit changed();
     return;
   }
-  if (!theme.value("available").toBool()) {
-    if (theme.value("hasCode").toBool() && !theme.value("trusted").toBool() &&
-        !trusted) {
-      emit trustRequested(id);
-      return;
-    }
-    request("extensions.enable",
-            {{"id", theme.value("extensionId")}, {"trusted", trusted}},
-            [this, id](const QVariantMap &, const QString &error) {
-              if (error.isEmpty())
-                selectTheme(id);
-            });
+  if (!ensureAvailable(theme, trusted, "theme", [this, id] { selectTheme(id); }))
+    return;
+  // A theme without layout entries only changes the appearance.
+  applySelection(id, theme.value("hasLayout").toBool() ? id
+                                                        : layoutSelectedId());
+}
+void ThemeController::selectAppearance(const QString &id, bool trusted) {
+  if (busy())
+    return;
+  const auto theme = find(id);
+  if (theme.isEmpty()) {
+    m_error = "theme_unavailable";
+    emit changed();
     return;
   }
-  request("extensions.select",
-          {{"slot", "theme"},
-           {"contribution", id == "builtin/yozakura" ? QString() : id}});
+  if (!ensureAvailable(theme, trusted, "appearance",
+                       [this, id] { selectAppearance(id); }))
+    return;
+  applySelection(id, layoutSelectedId());
+}
+void ThemeController::selectLayout(const QString &id, bool trusted) {
+  if (busy())
+    return;
+  if (id.isEmpty()) {
+    applySelection(selectedId(), {});
+    return;
+  }
+  const auto theme = find(id);
+  if (!theme.value("hasLayout").toBool()) {
+    m_error = "theme_layout_unavailable";
+    emit changed();
+    return;
+  }
+  if (!ensureAvailable(theme, trusted, "layout",
+                       [this, id] { selectLayout(id); }))
+    return;
+  applySelection(selectedId(), id);
+}
+void ThemeController::resetAppearance() {
+  if (busy())
+    return;
+  applySelection({}, layoutSelectedId());
+}
+void ThemeController::resetLayout() {
+  if (busy())
+    return;
+  applySelection(selectedId(), {});
 }
 void ThemeController::importTheme(const QString &path, bool replace) {
   installTheme(path, replace);
@@ -296,9 +389,8 @@ void ThemeController::removeTheme(const QString &id) {
 void ThemeController::reset() {
   if (busy())
     return;
-  request("extensions.select", {{"slot", "theme"}, {"contribution", ""}},
-          [this](const QVariantMap &, const QString &error) {
-            if (error.isEmpty())
-              setMode("dark");
-          });
+  applySelection({}, {}, [this](const QVariantMap &, const QString &error) {
+    if (error.isEmpty())
+      setMode("dark");
+  });
 }

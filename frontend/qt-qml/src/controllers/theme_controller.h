@@ -26,6 +26,9 @@ class ThemeController final : public QObject {
   Q_PROPERTY(QVariantMap tokens READ tokens NOTIFY changed)
   Q_PROPERTY(QVariantMap background READ background NOTIFY changed)
   Q_PROPERTY(QVariantMap uiSlots READ uiSlots NOTIFY changed)
+  Q_PROPERTY(QString layoutSelectedId READ layoutSelectedId NOTIFY changed)
+  Q_PROPERTY(QString activeLayoutId READ activeLayoutId NOTIFY changed)
+  Q_PROPERTY(bool layoutUnavailable READ layoutUnavailable NOTIFY changed)
   Q_PROPERTY(bool legacyLight READ legacyLight NOTIFY changed)
   Q_PROPERTY(bool unavailable READ unavailable NOTIFY changed)
   Q_PROPERTY(bool safeMode READ safeMode CONSTANT)
@@ -43,6 +46,9 @@ public:
   QVariantMap tokens() const { return m_tokens; }
   QVariantMap background() const { return m_background; }
   QVariantMap uiSlots() const { return m_slots; }
+  QString layoutSelectedId() const;
+  QString activeLayoutId() const { return m_layout.value("id").toString(); }
+  bool layoutUnavailable() const;
   bool legacyLight() const;
   bool unavailable() const { return selectedId() != activeId() && !safeMode(); }
   bool safeMode() const;
@@ -52,6 +58,10 @@ public:
   QString notice() const { return m_notice; }
   Q_INVOKABLE void setMode(const QString &mode);
   Q_INVOKABLE void selectTheme(const QString &id, bool trusted = false);
+  Q_INVOKABLE void selectAppearance(const QString &id, bool trusted = false);
+  Q_INVOKABLE void selectLayout(const QString &id, bool trusted = false);
+  Q_INVOKABLE void resetAppearance();
+  Q_INVOKABLE void resetLayout();
   Q_INVOKABLE void importTheme(const QString &path, bool replace = false);
   Q_INVOKABLE void updateTheme(const QString &id, const QString &path,
                               bool replace = false);
@@ -62,7 +72,8 @@ public:
   Q_INVOKABLE void presentWindow(QQuickWindow *window);
 signals:
   void changed();
-  void trustRequested(const QString &id);
+  // target is "theme", "appearance" or "layout" so the dialog can retry the same action.
+  void trustRequested(const QString &id, const QString &target);
   void replaceRequested(const QString &path, const QString &themeId);
 
 private:
@@ -71,11 +82,15 @@ private:
                Completion done = {});
   void rebuild();
   void installTheme(const QString &path, bool replace, const QString &id = {});
+  bool ensureAvailable(const QVariantMap &theme, bool trusted,
+                       const QString &target, std::function<void()> retry);
+  void applySelection(const QString &appearance, const QString &layout,
+                      Completion done = {});
   QVariantMap find(const QString &id) const;
   QVariantMap resolve(const QVariantMap &theme, bool dark) const;
   IpcClient &m_client;
   ExtensionsController &m_extensions;
-  QVariantMap m_catalog, m_active, m_tokens, m_background, m_slots;
+  QVariantMap m_catalog, m_active, m_layout, m_tokens, m_background, m_slots;
   QVariantList m_items;
   QString m_mode, m_error, m_notice;
   int m_pending = 0;

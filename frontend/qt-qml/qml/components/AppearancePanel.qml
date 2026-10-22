@@ -9,6 +9,7 @@ Item {
     required property var controller
     required property var translator
     property string pendingId: ""
+    property string pendingTarget: "theme"
     property string pendingPath: ""
     property string pendingUpdateId: ""
     property string updateId: ""
@@ -170,7 +171,7 @@ Item {
     Connections {
         target: root.controller
         enabled: root.visible
-        function onTrustRequested(id) { root.pendingId = id; trustDialog.open() }
+        function onTrustRequested(id, target) { root.pendingId = id; root.pendingTarget = target; trustDialog.open() }
         function onReplaceRequested(path, themeId) { root.pendingPath = path; root.pendingUpdateId = themeId; replaceDialog.open() }
     }
     Dialog {
@@ -179,7 +180,14 @@ Item {
         parent: root; anchors.centerIn: parent; width: Math.min(500, parent ? parent.width - 40 : 500)
         title: root.t("extension_trust_title"); modal: true; standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Label { text: root.t("theme_trust_body"); color: Theme.textPrimary; wrapMode: Text.WordWrap }
-        onAccepted: root.controller.selectTheme(root.pendingId, true)
+        onAccepted: {
+            if (root.pendingTarget === "layout")
+                root.controller.selectLayout(root.pendingId, true)
+            else if (root.pendingTarget === "appearance")
+                root.controller.selectAppearance(root.pendingId, true)
+            else
+                root.controller.selectTheme(root.pendingId, true)
+        }
     }
     Dialog {
         id: replaceDialog

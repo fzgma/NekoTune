@@ -644,6 +644,31 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(selections().value("themeLayout").toString(), QString());
     }
 
+    void layeredThemeTokenResolution() {
+        const auto &catalog = themes::catalog();
+        const QVariantMap appearance{
+            {"schemaVersion", 1},
+            {"tokens", QVariantMap{{"accentPrimary", "#AA0000"}, {"sidebarWidthWide", 300}, {"radiusMd", 6}}}};
+        const QVariantMap layout{
+            {"schemaVersion", 1},
+            {"tokens", QVariantMap{{"accentPrimary", "#00AA00"}, {"sidebarWidthWide", 260}, {"radiusMd", 20}}}};
+        QCOMPARE(themes::resolveThemeTokens(catalog, appearance, true).value("sidebarWidthWide").toInt(), 300);
+        const auto combined = themes::resolveThemeTokens(catalog, appearance, true, layout);
+        QCOMPARE(combined.value("accentPrimary").toString(), "#AA0000");
+        QCOMPARE(combined.value("sidebarWidthWide").toInt(), 260);
+        QCOMPARE(combined.value("radiusMd").toInt(), 20);
+        // The appearance theme's layout tokens never leak into another layout.
+        const QVariantMap plainLayout{{"schemaVersion", 1}};
+        const auto plain = themes::resolveThemeTokens(catalog, appearance, true, plainLayout);
+        QCOMPARE(plain.value("sidebarWidthWide"), themes::baseTokens(catalog, true).value("sidebarWidthWide"));
+        QCOMPARE(plain.value("radiusMd").toInt(), 6);
+        // A legacy dark-only appearance still receives the layout's tokens in light mode.
+        const QVariantMap legacy{{"tokens", QVariantMap{{"accentPrimary", "#555555"}}}};
+        const auto legacyLight = themes::resolveThemeTokens(catalog, legacy, false, layout);
+        QCOMPARE(legacyLight.value("sidebarWidthWide").toInt(), 260);
+        QCOMPARE(legacyLight.value("accentPrimary"), themes::baseTokens(catalog, false).value("accentPrimary"));
+    }
+
     void zipPackagesAndThemes() {
         auto manager = startManager();
         const auto exported = m_home->filePath("ocean.zip");

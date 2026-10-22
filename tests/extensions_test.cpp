@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocalSocket>
+#include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -906,7 +907,9 @@ class ExtensionsTest final : public QObject {
           ocean->mapToScene(QPointF(ocean->width() / 2, ocean->height() / 2))
               .toPoint());
       QTRY_COMPARE(app.theme->activeId(), "builtin/ocean");
-      QTRY_VERIFY(player.isNull());
+      // A palette-only card changes colors and keeps the selected layout.
+      QCOMPARE(app.theme->activeLayoutId(), QString("test.theme/default"));
+      QVERIFY(!player.isNull());
       QCOMPARE(window->color(), QColor("#F3FAFD"));
       const auto screenshots =
           qEnvironmentVariable("NEKOTUNE_TEST_SCREENSHOT_DIR");
@@ -1091,6 +1094,197 @@ class ExtensionsTest final : public QObject {
       QCOMPARE(app.queue->model()->items(), playingQueue);
       QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
       recoveryWindow->close();
+      window->close();
+      peer.socket.abort();
+      runtime.stop();
+    }
+    void themeAppearanceAndLayoutCombine() {
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME"),
+                 oldSocket = qgetenv("NEKOTUNE_SOCKET"),
+                 oldDb = qgetenv("NEKOTUNE_DB_PATH");
+      auto restore = qScopeGuard([&] {
+        qputenv("NEKOTUNE_HOME", oldHome);
+        qputenv("NEKOTUNE_SOCKET", oldSocket);
+        qputenv("NEKOTUNE_DB_PATH", oldDb);
+        qunsetenv("NEKOTUNE_SAFE_MODE");
+      });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      qputenv("NEKOTUNE_SOCKET", profile.filePath("combo.sock").toUtf8());
+      qputenv("NEKOTUNE_DB_PATH", profile.filePath("combo.sqlite3").toUtf8());
+      QVERIFY(AppPaths::prepare());
+      QVERIFY(AppPaths::saveSetting("lyrics_offline", true));
+      BackendRuntime runtime([] { return std::make_unique<ExtensionAudio>(); });
+      QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+      ExtensionPeer peer;
+      peer.socket.connectToServer(runtime.serverName());
+      QVERIFY(peer.socket.waitForConnected(3000));
+      QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
+                                   .value("data")
+                                   .toObject()
+                                   .value("runtimeReady")
+                                   .toBool(),
+                               15000);
+      const auto folder = profile.filePath("combo");
+      QVERIFY(QDir().mkpath(folder));
+      auto write = [&](const QString &name, const QByteArray &bytes) {
+        QFile file(folder + '/' + name);
+        return file.open(QIODevice::WriteOnly) &&
+               file.write(bytes) == bytes.size();
+      };
+      QVERIFY(write("Player.qml",
+                    "import QtQuick\nRectangle { objectName: 'comboPlayer' }"));
+      auto variants = [](const QString &accent) {
+        const QJsonObject tokens{
+            {"tokens", QJsonObject{{"accentPrimary", accent}}}};
+        return QJsonObject{{"light", tokens}, {"dark", tokens}};
+      };
+      const QJsonObject palette{
+          {"id", "palette"}, {"title", "Palette"}, {"schemaVersion", 1},
+          {"tokens", QJsonObject{{"sidebarWidthWide", 300}}},
+          {"variants", variants("#AA0000")}};
+      const QJsonObject layout{
+          {"id", "layout"}, {"title", "Layout"}, {"schemaVersion", 1},
+          {"tokens", QJsonObject{{"sidebarWidthWide", 260}, {"radiusMd", 20}}},
+          {"variants", variants("#00AA00")},
+          {"ui", QJsonObject{{"bottomPlayer", "Player.qml"}}}};
+      const QJsonObject manifest{
+          {"id", "test.combo"}, {"name", "Combo test"}, {"version", "1.0.0"},
+          {"apiVersion", 1}, {"type", "theme"},
+          {"contributes",
+           QJsonObject{{"themes", QJsonArray{palette, layout}}}}};
+      QVERIFY(write("extension.json", QJsonDocument(manifest).toJson()));
+      QCOMPARE(peer.call("extensions.install",
+                         {{"path", folder}, {"development", true}})
+                   .value("status").toString(),
+               "ok");
+      QCOMPARE(peer.call("extensions.enable",
+                         {{"id", "test.combo"}, {"trusted", true}})
+                   .value("status").toString(),
+               "ok");
+      IpcClient client;
+      AppControllers app(client);
+      I18n translator;
+      QStringList qmlWarnings;
+      QQmlApplicationEngine engine;
+      auto collectWarnings = [&](const QList<QQmlError> &errors) {
+        for (const auto &error : errors)
+          qmlWarnings.append(error.toString());
+      };
+      connect(&engine, &QQmlEngine::warnings, this, collectWarnings);
+      engine.rootContext()->setContextProperty("controllers", &app);
+      engine.rootContext()->setContextProperty("ipcClient", &client);
+      engine.rootContext()->setContextProperty("i18n", &translator);
+      engine.rootContext()->setContextProperty("lyricsDebugEnabled", false);
+      engine.load(QUrl("qrc:/qml/Main.qml"));
+      QVERIFY(!engine.rootObjects().isEmpty());
+      auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+      QVERIFY(window);
+      window->resize(1100, 760);
+      window->show();
+      client.connectBackend();
+      QTRY_COMPARE(app.theme->items().size(), 5);
+      app.theme->setMode("dark");
+      auto idle = [&] { QTRY_VERIFY(!app.theme->busy()); };
+      auto comboPlayer = [&] {
+        return window->findChild<QObject *>("comboPlayer");
+      };
+
+      // Legacy single-slot selection: the layout follows the appearance.
+      QCOMPARE(peer.call("extensions.select",
+                         {{"slot", "theme"},
+                          {"contribution", "test.combo/layout"}})
+                   .value("status").toString(),
+               "ok");
+      QTRY_COMPARE(app.theme->activeLayoutId(), QString("test.combo/layout"));
+      QVERIFY(!app.extensions->selections().contains("themeLayout"));
+      QCOMPARE(app.theme->layoutSelectedId(), QString("test.combo/layout"));
+      QTRY_VERIFY(comboPlayer());
+      QCOMPARE(peer.call("extensions.select",
+                         {{"slot", "theme"},
+                          {"contribution", "test.combo/palette"}})
+                   .value("status").toString(),
+               "ok");
+      QTRY_COMPARE(app.theme->activeId(), QString("test.combo/palette"));
+      QCOMPARE(app.theme->layoutSelectedId(), QString());
+      QTRY_VERIFY(!comboPlayer());
+
+      // One-click apply of a theme with layout entries sets both parts.
+      idle();
+      app.theme->selectTheme("test.combo/layout");
+      QTRY_COMPARE(app.theme->activeLayoutId(), QString("test.combo/layout"));
+      QCOMPARE(app.theme->activeId(), QString("test.combo/layout"));
+      QCOMPARE(app.theme->tokens().value("accentPrimary").toString(),
+               QString("#00AA00"));
+      QCOMPARE(app.theme->tokens().value("sidebarWidthWide").toInt(), 260);
+      QTRY_VERIFY(comboPlayer());
+      QPointer<QObject> player = comboPlayer();
+
+      // Appearance only: colors change, layout tokens and view stay.
+      idle();
+      app.theme->selectAppearance("test.combo/palette");
+      QTRY_COMPARE(app.theme->activeId(), QString("test.combo/palette"));
+      QCOMPARE(app.theme->activeLayoutId(), QString("test.combo/layout"));
+      QCOMPARE(app.theme->tokens().value("accentPrimary").toString(),
+               QString("#AA0000"));
+      QCOMPARE(app.theme->tokens().value("sidebarWidthWide").toInt(), 260);
+      QCOMPARE(app.theme->tokens().value("radiusMd").toInt(), 20);
+      QTest::qWait(50);
+      QVERIFY(player);
+      QCOMPARE(comboPlayer(), player.data());
+
+      // Built-in layout: the palette's layout tokens apply as recommendations.
+      idle();
+      app.theme->selectLayout("");
+      QTRY_COMPARE(app.theme->layoutSelectedId(), QString());
+      QTRY_VERIFY(!comboPlayer());
+      QCOMPARE(app.theme->tokens().value("sidebarWidthWide").toInt(), 300);
+      QCOMPARE(app.theme->activeId(), QString("test.combo/palette"));
+
+      // A theme without layout entries leaves the layout selection alone.
+      idle();
+      app.theme->selectLayout("test.combo/layout");
+      QTRY_COMPARE(app.theme->activeLayoutId(), QString("test.combo/layout"));
+      idle();
+      app.theme->selectTheme("builtin/ocean");
+      QTRY_COMPARE(app.theme->activeId(), QString("builtin/ocean"));
+      QCOMPARE(app.theme->activeLayoutId(), QString("test.combo/layout"));
+
+      idle();
+      app.theme->selectLayout("builtin/ocean");
+      QCOMPARE(app.theme->error(), QString("theme_layout_unavailable"));
+      QCOMPARE(app.theme->layoutSelectedId(), QString("test.combo/layout"));
+
+      // Disabling the package falls back per part and keeps both choices.
+      idle();
+      app.theme->selectAppearance("test.combo/palette");
+      QTRY_COMPARE(app.theme->activeId(), QString("test.combo/palette"));
+      idle();
+      QCOMPARE(peer.call("extensions.disable", {{"id", "test.combo"}})
+                   .value("status").toString(),
+               "ok");
+      QTRY_VERIFY(app.theme->layoutUnavailable());
+      QCOMPARE(app.theme->activeLayoutId(), QString());
+      QVERIFY(app.theme->unavailable());
+      QCOMPARE(app.theme->activeId(), QString("builtin/yozakura"));
+      QTRY_VERIFY(!comboPlayer());
+      idle();
+      app.theme->selectAppearance("builtin/forest");
+      QTRY_COMPARE(app.theme->activeId(), QString("builtin/forest"));
+      QCOMPARE(app.theme->layoutSelectedId(), QString("test.combo/layout"));
+      QCOMPARE(peer.call("extensions.enable",
+                         {{"id", "test.combo"}, {"trusted", true}})
+                   .value("status").toString(),
+               "ok");
+      QTRY_COMPARE(app.theme->activeLayoutId(), QString("test.combo/layout"));
+      QTRY_VERIFY(comboPlayer());
+
+      idle();
+      app.theme->reset();
+      QTRY_COMPARE(app.theme->layoutSelectedId(), QString());
+      QCOMPARE(app.theme->selectedId(), QString("builtin/yozakura"));
+      QTRY_VERIFY(!comboPlayer());
+      QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
       window->close();
       peer.socket.abort();
       runtime.stop();
