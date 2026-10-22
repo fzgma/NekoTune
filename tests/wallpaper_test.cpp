@@ -583,6 +583,93 @@ class WallpaperTest final : public QObject {
         QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
         QCOMPARE(window()->property("themeStatus").toString(), QString("active"));
     }
+    void themeWallpaperSourceCanDifferFromTheme() {
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        setup();
+        send(snapshot());
+        QTRY_VERIFY(m_manager->dataReady());
+        QTRY_VERIFY(m_controllers->extensions->appearanceReady());
+        const auto example = QFINDTESTDATA("../examples/extensions/theme-qml/Wallpaper.qml");
+        QVERIFY(!example.isEmpty());
+        // The wallpaper package is available, but a built-in palette is the current theme.
+        auto publish = [&](const QString &state, bool trusted) {
+            send({{"event", "extensions.changed"},
+                  {"selections", QJsonObject{{"theme", "builtin/ocean"}}},
+                  {"extensions", QJsonArray{QJsonObject{
+                      {"id", "test.wallpaper"}, {"type", "theme"}, {"state", state},
+                      {"directory", QFileInfo(example).absolutePath()}, {"generation", 1}, {"trusted", trusted},
+                      {"themes", QJsonArray{QJsonObject{
+                          {"id", "test.wallpaper/default"}, {"schemaVersion", 1},
+                          {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
+                          {"ui", QJsonObject{{"wallpaper", "Wallpaper.qml"}}}}}}}}}});
+        };
+        publish("running", true);
+        QTRY_VERIFY(m_controllers->theme->wallpaperSlots().contains("test.wallpaper/default"));
+        QVERIFY(!m_controllers->theme->uiSlots().contains("wallpaper"));
+
+        QVERIFY(m_manager->setOption("style", "theme"));
+        QVERIFY(m_manager->setOption("themeWallpaper", "test.wallpaper/default"));
+        QVERIFY(m_manager->setOption("enabled", true));
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("active"));
+
+        QCOMPARE(m_controllers->theme->activeId(), QString("builtin/ocean"));
+        QPointer<QQuickWindow> first = window();
+        QPointer<QQuickItem> item = themeView()->item();
+        publish("disabled", true);
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("source-missing"));
+        QTRY_VERIFY(item.isNull());
+        QVERIFY(window()->findChild<QObject *>("wallpaperLyrics"));
+        QCOMPARE(m_manager->settings().value("themeWallpaper").toString(), QString("test.wallpaper/default"));
+        publish("running", false);
+        QTRY_VERIFY(!m_controllers->theme->items().last().toMap().value("trusted").toBool());
+        QVERIFY(m_controllers->theme->wallpaperSlots().isEmpty());
+        QVERIFY(!themeView()->ready());
+        publish("running", true);
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("active"));
+        QCOMPARE(window(), first.data());
+
+        // Following and explicitly choosing the same source must keep its QML instance.
+        publishTheme(QFileInfo(example).absolutePath());
+        QTRY_VERIFY(m_controllers->theme->uiSlots().contains("wallpaper"));
+        QCOMPARE(m_controllers->theme->uiSlots().value("wallpaper"),
+                 m_controllers->theme->wallpaperSlots().value("test.wallpaper/default"));
+        item = themeView()->item();
+        QVERIFY(m_manager->setOption("themeWallpaper", ""));
+        QTest::qWait(50);
+        QVERIFY(item);
+        QCOMPARE(themeView()->item(), item.data());
+        QVERIFY(m_manager->setOption("themeWallpaper", "test.wallpaper/default"));
+        QTest::qWait(50);
+        QVERIFY(item);
+        QCOMPARE(themeView()->item(), item.data());
+        publish("running", true);
+        QTRY_COMPARE(m_controllers->theme->activeId(), QString("builtin/ocean"));
+
+        QVERIFY(m_manager->setOption("themeWallpaper", "test.wallpaper/missing"));
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("source-missing"));
+        QVERIFY(m_manager->setOption("themeWallpaper", ""));
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("missing"));
+
+        QVERIFY(!m_manager->setOption("themeWallpaper", 1));
+        QVERIFY(!m_manager->setOption("themeWallpaper", QString(201, QLatin1Char('x'))));
+
+        // The source is persisted, but safe mode never publishes or creates its QML.
+        QVERIFY(m_manager->setOption("themeWallpaper", "test.wallpaper/default"));
+        QVERIFY(m_manager->setOption("autoRestore", true));
+        m_manager.reset();
+        qputenv("NEKOTUNE_SAFE_MODE", "1");
+        setup();
+        QCOMPARE(m_manager->settings().value("themeWallpaper").toString(), QString("test.wallpaper/default"));
+        QVERIFY(!m_manager->requestedEnabled());
+        publish("running", true);
+        QTRY_VERIFY(m_controllers->theme->wallpaperSlots().isEmpty());
+        QVERIFY(m_manager->setOption("enabled", true));
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        QTRY_COMPARE(window()->property("themeStatus").toString(), QString("safe-mode"));
+        QVERIFY(!themeView()->ready());
+        QVERIFY(window()->findChild<QObject *>("wallpaperLyrics"));
+    }
     void themeWallpaperContextTracksPlaybackLyricsAndConnection() {
         qputenv("NEKOTUNE_SAFE_MODE", "0");
         setup();

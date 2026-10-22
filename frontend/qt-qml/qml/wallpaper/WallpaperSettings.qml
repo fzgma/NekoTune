@@ -12,13 +12,28 @@ Rectangle {
     readonly property var preferences: manager ? manager.settings : ({})
     readonly property var outputs: manager ? manager.outputs : []
     readonly property var styles: ["classic", "vinyl", "lyrics", "theme"]
+    readonly property string themeSource: preferences.themeWallpaper || ""
     readonly property string themeHint: preferences.style !== "theme" || !themeController ? ""
         : themeController.safeMode ? "safe-mode"
+        : themeSource !== "" ? (((themeController.wallpaperSlots || {})[themeSource] || {}).source ? "" : "source-missing")
         : !((themeController.uiSlots || {}).wallpaper || {}).source ? "missing" : ""
+    readonly property var themeSources: {
+        const slots = themeController ? themeController.wallpaperSlots || {} : {}
+        const list = [{id: "", label: t("wallpaper_theme_follow")}]
+        for (const id of Object.keys(slots))
+            list.push({id: id, label: label(slots[id].title) || id})
+        if (themeSource !== "" && !slots[themeSource])
+            list.push({id: themeSource, label: t("wallpaper_theme_source_unavailable")})
+        return list
+    }
     function t(key) { return translator.text(key, translator.language) }
+    function label(value) {
+        return typeof value === "string" ? value : value ? value[translator.language] || value.en || value.zh || "" : ""
+    }
     function themeMessage(status, detail) {
         const keys = {missing: "wallpaper_theme_missing", error: "wallpaper_theme_error",
-                      "safe-mode": "wallpaper_theme_safe_mode", loading: "wallpaper_theme_loading"}
+                      "safe-mode": "wallpaper_theme_safe_mode", loading: "wallpaper_theme_loading",
+                      "source-missing": "wallpaper_theme_source_missing"}
         return keys[status] ? t(keys[status]) + (status === "error" && detail ? "\n" + detail : "") : ""
     }
     component OptionCheck: CheckBox {
@@ -76,6 +91,20 @@ Rectangle {
             model: root.styles.map(style => root.t("wallpaper_style_" + style))
             currentIndex: root.styles.indexOf(root.preferences.style || "classic")
             onActivated: index => root.manager.setOption("style", root.styles[index])
+        }
+        Label {
+            visible: themeSourcePicker.visible
+            text: root.t("wallpaper_theme_source"); color: Theme.textSecondary
+        }
+        ChoiceField {
+            id: themeSourcePicker
+            objectName: "wallpaperThemeSource"
+            Layout.fillWidth: true
+            visible: root.preferences.style === "theme" && root.themeController !== null
+            model: root.themeSources
+            textRole: "label"; valueRole: "id"
+            currentIndex: Math.max(0, model.findIndex(item => item.id === root.themeSource))
+            onActivated: root.manager.setOption("themeWallpaper", currentValue)
         }
         Label {
             objectName: "wallpaperThemeHint"

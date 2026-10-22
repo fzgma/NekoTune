@@ -18,7 +18,7 @@ const QVariantMap defaults{{"enabled", false}, {"autoRestore", false},     {"tar
                            {"screenId", ""},   {"coverBackground", false}, {"blur", false},
                            {"lyrics", true},   {"nextLine", true},         {"spectrum", false},
                            {"updateHz", 30},   {"intensity", 0.35},        {"transparent", true},
-                           {"style", "classic"}};
+                           {"style", "classic"}, {"themeWallpaper", ""}};
 
 bool valid(const QString &key, const QVariant &value) {
     if (!defaults.contains(key))
@@ -30,6 +30,8 @@ bool valid(const QString &key, const QVariant &value) {
     if (key == "style")
         return value.metaType().id() == QMetaType::QString &&
                (value == "classic" || value == "vinyl" || value == "lyrics" || value == "theme");
+    if (key == "themeWallpaper")
+        return value.metaType().id() == QMetaType::QString && value.toString().size() <= 200;
     if (key == "screenId")
         return value.metaType().id() == QMetaType::QString && value.toString().size() <= 128;
     if (value.metaType().id() != QMetaType::Int && value.metaType().id() != QMetaType::Double &&

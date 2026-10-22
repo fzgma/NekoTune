@@ -212,14 +212,17 @@ void ThemeController::rebuild() {
                  const QVariant &source) {
     if (source.toString().isEmpty())
       return;
-    m_slots.insert(
-        slot,
-        QVariantMap{{"id", theme.value("id").toString() + "/" + slot},
-                    {"slot", slot},
-                    {"source", QDir(theme.value("directory").toString())
-                                   .filePath(source.toString())},
-                    {"extensionId", theme.value("extensionId")},
-                    {"generation", theme.value("generation")}});
+    QVariantMap descriptor{
+        {"id", theme.value("id").toString() + "/" + slot},
+        {"slot", slot},
+        {"source", QDir(theme.value("directory").toString())
+                       .filePath(source.toString())},
+        {"extensionId", theme.value("extensionId")},
+        {"generation", theme.value("generation")}};
+    // Keep follow-current and explicit wallpaper descriptors identical, including metadata.
+    if (slot == QLatin1String("wallpaper"))
+      descriptor.insert("title", theme.value("title"));
+    m_slots.insert(slot, descriptor);
   };
   if (!safeMode()) {
     const auto ui = m_layout.value("ui").toMap();
@@ -237,6 +240,26 @@ void ThemeController::rebuild() {
       add(wallpaper, "wallpaper",
           wallpaper.value("ui").toMap().value("wallpaper"));
   }
+  // Every usable wallpaper, keyed by theme ID, for an explicit wallpaper source.
+  m_wallpaperSlots.clear();
+  if (!safeMode())
+    for (const auto &value : std::as_const(m_items)) {
+      const auto item = value.toMap();
+      const auto source =
+          item.value("ui").toMap().value("wallpaper").toString();
+      if (source.isEmpty() || !item.value("available").toBool() ||
+          !codeAllowed(item))
+        continue;
+      m_wallpaperSlots.insert(
+          item.value("id").toString(),
+          QVariantMap{{"id", item.value("id").toString() + "/wallpaper"},
+                      {"slot", "wallpaper"},
+                      {"source",
+                       QDir(item.value("directory").toString()).filePath(source)},
+                      {"extensionId", item.value("extensionId")},
+                      {"generation", item.value("generation")},
+                      {"title", item.value("title")}});
+    }
   emit changed();
 }
 void ThemeController::setMode(const QString &mode) {

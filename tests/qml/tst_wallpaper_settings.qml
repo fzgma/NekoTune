@@ -36,6 +36,7 @@ Item {
         id: mockTheme
         property bool safeMode: false
         property var uiSlots: ({})
+        property var wallpaperSlots: ({})
     }
     QtObject {
         id: mockControllers
@@ -98,6 +99,7 @@ Item {
         mockManager.outputs = [{id: "edid", name: "DP-1", selected: true, state: "unavailable", error: "wallpaper_qpa_unavailable"}]
         mockTheme.safeMode = false
         mockTheme.uiSlots = ({})
+        mockTheme.wallpaperSlots = ({})
         mockWallpaper.playing = true
         mockWallpaper.updating = true
         mockPreferences.lyrics = true
@@ -212,6 +214,7 @@ Item {
         return [
             {tag: "loading", status: "loading", key: "wallpaper_theme_loading"},
             {tag: "missing", status: "missing", key: "wallpaper_theme_missing"},
+            {tag: "source-missing", status: "source-missing", key: "wallpaper_theme_source_missing"},
             {tag: "error", status: "error", key: "wallpaper_theme_error"},
             {tag: "safe-mode", status: "safe-mode", key: "wallpaper_theme_safe_mode"},
             {tag: "active", status: "active", key: ""},
@@ -279,6 +282,63 @@ Item {
                 testTranslator.text("wallpaper_theme_error", language) + "\nWallpaper.qml:12: <b>Unexpected token</b>")
             if (screenshot) grabImage(panel).save(screenshot)
         }
+    }
+    function test_themeWallpaperSource() {
+        const panel = createTemporaryObject(panelComponent, testCase, {width: 360, themeController: mockTheme})
+        verify(panel)
+        mockManager.settings = Object.assign({}, mockManager.settings, {style: "classic", themeWallpaper: ""})
+        const picker = findChild(panel, "wallpaperThemeSource")
+        const hint = findChild(panel, "wallpaperThemeHint")
+        verify(picker)
+        verify(!picker.visible)
+
+        mockManager.settings = Object.assign({}, mockManager.settings, {style: "theme"})
+        mockTheme.wallpaperSlots = {"pkg/wall": {source: "file:///pkg/Wallpaper.qml", title: {en: "Wall", zh: "壁纸"}}}
+        verify(picker.visible)
+        compare(picker.count, 2)
+        compare(picker.currentIndex, 0)
+
+        picker.forceActiveFocus()
+        keyClick(Qt.Key_Down)
+        compare(mockManager.lastKey, "themeWallpaper")
+        compare(mockManager.settings.themeWallpaper, "pkg/wall")
+        verify(!hint.visible)
+
+        mockTheme.wallpaperSlots = ({})
+        compare(picker.count, 2)
+        compare(hint.text, "wallpaper_theme_source_missing")
+
+        mockTheme.wallpaperSlots = {"pkg/wall": {source: "file:///pkg/Wallpaper.qml", title: "Wall"}}
+        compare(picker.currentIndex, 1)
+        verify(!hint.visible)
+        mockTheme.safeMode = true
+        compare(hint.text, "wallpaper_theme_safe_mode")
+    }
+    function test_themeWallpaperSourceTranslated_data() {
+        return [{tag: "zh", language: "zh"}, {tag: "en", language: "en"}]
+    }
+    function test_themeWallpaperSourceTranslated(data) {
+        testTranslator.language = data.language
+        mockManager.settings = Object.assign({}, mockManager.settings, {style: "theme", themeWallpaper: "pkg/wall"})
+        mockTheme.wallpaperSlots = {"pkg/wall": {source: "file:///pkg/Wallpaper.qml", title: {en: "Wall", zh: "壁纸"}}}
+        const panel = createTemporaryObject(panelComponent, testCase,
+            {width: 360, translator: testTranslator, themeController: mockTheme})
+        verify(panel)
+        const picker = findChild(panel, "wallpaperThemeSource")
+        compare(picker.currentIndex, 1)
+        compare(picker.displayText, data.language === "zh" ? "壁纸" : "Wall")
+        waitForRendering(panel)
+        let screenshot = testFixtures.screenshotPath("wallpaper-source-" + data.language)
+        if (screenshot) grabImage(panel).save(screenshot)
+
+        mockTheme.wallpaperSlots = ({})
+        compare(picker.displayText, testTranslator.text("wallpaper_theme_source_unavailable", data.language))
+        compare(findChild(panel, "wallpaperThemeHint").text,
+            testTranslator.text("wallpaper_theme_source_missing", data.language))
+        waitForRendering(panel)
+        screenshot = testFixtures.screenshotPath("wallpaper-source-missing-" + data.language)
+        if (screenshot) grabImage(panel).save(screenshot)
+        testTranslator.language = "en"
     }
     }
 }

@@ -30,6 +30,7 @@ class ThemeController final : public QObject {
   Q_PROPERTY(QString activeLayoutId READ activeLayoutId NOTIFY changed)
   Q_PROPERTY(bool layoutUnavailable READ layoutUnavailable NOTIFY changed)
   Q_PROPERTY(bool reducedMotion READ reducedMotion NOTIFY changed)
+  Q_PROPERTY(QVariantMap wallpaperSlots READ wallpaperSlots NOTIFY changed)
   Q_PROPERTY(bool legacyLight READ legacyLight NOTIFY changed)
   Q_PROPERTY(bool unavailable READ unavailable NOTIFY changed)
   Q_PROPERTY(bool safeMode READ safeMode CONSTANT)
@@ -51,6 +52,7 @@ public:
   QString activeLayoutId() const { return m_layout.value("id").toString(); }
   bool layoutUnavailable() const;
   bool reducedMotion() const { return m_reducedMotion; }
+  QVariantMap wallpaperSlots() const { return m_wallpaperSlots; }
   bool legacyLight() const;
   bool unavailable() const { return selectedId() != activeId() && !safeMode(); }
   bool safeMode() const;
@@ -93,7 +95,8 @@ private:
   QVariantMap resolve(const QVariantMap &theme, bool dark) const;
   IpcClient &m_client;
   ExtensionsController &m_extensions;
-  QVariantMap m_catalog, m_active, m_layout, m_tokens, m_background, m_slots;
+  QVariantMap m_catalog, m_active, m_layout, m_tokens, m_background, m_slots,
+      m_wallpaperSlots;
   QVariantList m_items;
   QString m_mode, m_error, m_notice;
   bool m_reducedMotion = false;

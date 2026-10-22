@@ -26,10 +26,14 @@ Window {
     readonly property bool updating: visible && outputRunning && connected && hasSong
     readonly property bool playing: updating && playback.state === "playing"
     readonly property bool transparentOverlay: manager.linuxOverlay && preferences.transparent
-    readonly property var themeDescriptor: app.theme ? app.theme.uiSlots.wallpaper || ({}) : ({})
+    // An explicit source wins; an empty value follows the current layout, then appearance.
+    readonly property string themeSource: preferences.themeWallpaper || ""
+    readonly property var themeDescriptor: !app.theme ? ({})
+        : themeSource !== "" ? app.theme.wallpaperSlots[themeSource] || ({})
+        : app.theme.uiSlots.wallpaper || ({})
     readonly property string themeStatus: style !== "theme" ? ""
         : app.theme && app.theme.safeMode ? "safe-mode"
-        : !themeDescriptor.source ? "missing"
+        : !themeDescriptor.source ? (themeSource !== "" ? "source-missing" : "missing")
         : themeContent.error !== "" ? "error"
         : themeContent.ready ? "active" : "loading"
     readonly property string themeError: style === "theme" ? themeContent.error : ""
