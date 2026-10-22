@@ -18,6 +18,10 @@ Item {
     function label(value) {
         return typeof value === "string" ? value : value ? value[translator.language] || value.en || value.zh || "" : ""
     }
+    function themeTitle(id) {
+        const item = controller.items.find(entry => entry.id === id)
+        return item ? label(item.title) : id
+    }
     ScrollView {
         id: scroll
         anchors.fill: parent
@@ -28,6 +32,25 @@ Item {
             spacing: Theme.spaceLg
             Label { text: root.t("appearance"); color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.bold: true }
             Label { Layout.fillWidth: true; text: root.t("theme_description"); color: Theme.textSecondary; wrapMode: Text.WordWrap }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: Theme.spaceMd; rowSpacing: Theme.spaceXs
+                Label { text: root.t("theme_current_palette"); color: Theme.textSecondary }
+                Label {
+                    objectName: "currentPaletteLabel"
+                    Layout.fillWidth: true
+                    text: root.themeTitle(root.controller.selectedId)
+                    color: Theme.textPrimary; textFormat: Text.PlainText; elide: Text.ElideRight
+                }
+                Label { text: root.t("theme_current_layout"); color: Theme.textSecondary }
+                Label {
+                    objectName: "currentLayoutLabel"
+                    Layout.fillWidth: true
+                    text: root.controller.layoutSelectedId ? root.themeTitle(root.controller.layoutSelectedId) : root.t("theme_layout_builtin")
+                    color: Theme.textPrimary; textFormat: Text.PlainText; elide: Text.ElideRight
+                }
+            }
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: root.t("theme_mode"); color: Theme.textSecondary }
@@ -56,6 +79,8 @@ Item {
                 Layout.fillWidth: true
                 spacing: Theme.spaceSm
                 TextButton { text: root.t("theme_import"); enabled: root.controller.connected && !root.controller.busy; onClicked: importPicker.open() }
+                TextButton { objectName: "resetAppearanceButton"; text: root.t("theme_reset_appearance"); subtle: true; enabled: root.controller.connected && !root.controller.busy; onClicked: root.controller.resetAppearance() }
+                TextButton { objectName: "resetLayoutButton"; text: root.t("theme_reset_layout"); subtle: true; enabled: root.controller.connected && !root.controller.busy; onClicked: root.controller.resetLayout() }
                 TextButton { objectName: "resetThemeButton"; text: root.t("theme_reset"); subtle: true; enabled: root.controller.connected && !root.controller.busy; onClicked: root.controller.reset() }
             }
             Label {
@@ -77,6 +102,13 @@ Item {
                     : root.controller.unavailable ? root.t("theme_unavailable") : root.controller.legacyLight ? root.t("theme_legacy_light") : ""
                 color: Theme.statusWarning; wrapMode: Text.WordWrap
             }
+            Label {
+                objectName: "layoutUnavailableLabel"
+                Layout.fillWidth: true
+                visible: root.controller.layoutUnavailable && !root.controller.safeMode
+                text: root.t("theme_layout_unavailable")
+                color: Theme.statusWarning; wrapMode: Text.WordWrap
+            }
             GridLayout {
                 Layout.fillWidth: true
                 columns: width >= 1000 ? 3 : width >= 610 ? 2 : 1
@@ -86,7 +118,12 @@ Item {
                     delegate: Rectangle {
                         id: card
                         required property var modelData
-                        readonly property bool selected: root.controller.selectedId === modelData.id
+                        readonly property bool paletteSelected: root.controller.selectedId === modelData.id
+                        readonly property bool layoutSelected: root.controller.layoutSelectedId === modelData.id
+                        readonly property bool selected: paletteSelected || layoutSelected
+                        readonly property string badge: paletteSelected && layoutSelected ? root.t("theme_badge_both")
+                            : paletteSelected ? root.t("theme_badge_palette")
+                            : layoutSelected ? root.t("theme_badge_layout") : ""
                         Layout.fillWidth: true
                         Layout.minimumWidth: 250
                         Layout.fillHeight: true
@@ -125,11 +162,13 @@ Item {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         Label { Layout.fillWidth: true; text: root.label(card.modelData.title); font.pixelSize: Theme.fontDialogTitle; font.bold: true; color: Theme.textPrimary; textFormat: Text.PlainText; elide: Text.ElideRight }
-                                        Label { text: card.selected ? "✓" : ""; color: Theme.accentPrimary }
+                                        Label { objectName: "themeBadge_" + card.modelData.id; text: card.badge; color: Theme.accentPrimary; textFormat: Text.PlainText }
                                     }
                                     Label {
                                         Layout.fillWidth: true
                                         text: root.t("theme_origin_" + card.modelData.origin) + (card.modelData.ui ? " · QML" : "")
+                                            + (card.modelData.hasLayout ? " · " + root.t("theme_has_layout") : "")
+                                            + (card.modelData.hasWallpaper ? " · " + root.t("theme_has_wallpaper") : "")
                                             + (card.modelData.version ? " · v" + card.modelData.version : "")
                                             + (card.modelData.schemaVersion ? "" : " · " + root.t("theme_dark_only"))
                                         color: Theme.textMuted; font.pixelSize: Theme.fontCaption; wrapMode: Text.WordWrap
@@ -140,6 +179,23 @@ Item {
                             Flow {
                                 Layout.fillWidth: true
                                 spacing: Theme.spaceSm
+                                TextButton {
+                                    objectName: "applyPalette_" + card.modelData.id
+                                    text: root.t("theme_use_palette")
+                                    visible: card.modelData.hasLayout === true
+                                    subtle: true
+                                    enabled: root.controller.connected && !root.controller.busy
+                                        && (!root.controller.safeMode || card.modelData.origin === "builtin")
+                                    onClicked: root.controller.selectAppearance(card.modelData.id)
+                                }
+                                TextButton {
+                                    objectName: "applyLayout_" + card.modelData.id
+                                    text: root.t("theme_use_layout")
+                                    visible: card.modelData.hasLayout === true
+                                    subtle: true
+                                    enabled: root.controller.connected && !root.controller.busy && !root.controller.safeMode
+                                    onClicked: root.controller.selectLayout(card.modelData.id)
+                                }
                                 TextButton {
                                     objectName: "updateTheme_" + card.modelData.id
                                     text: root.t("theme_update")
@@ -187,6 +243,7 @@ Item {
     }
     Dialog {
         id: trustDialog
+        objectName: "themeTrustDialog"
         implicitHeight: 360
         parent: root; anchors.centerIn: parent; width: Math.min(500, parent ? parent.width - 40 : 500)
         title: root.t("extension_trust_title"); modal: true; standardButtons: Dialog.Ok | Dialog.Cancel
