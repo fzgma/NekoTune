@@ -525,7 +525,7 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 | `extensions.set_config` | `id,config` | 原子替换配置，通知运行中的扩展 |
 | `extensions.logs` | `id` | 最近最多 500 条 `logs`，字段为 `time,level,message` |
 | `extensions.call` | `id,service,params?` | 调用扩展注册的服务或命令 |
-| `extensions.select` | `slot,contribution` | 选择命名空间贡献 ID，空字符串恢复默认 |
+| `extensions.select` | `slot,contribution` 或 `selections` | 选择命名空间贡献 ID，空字符串恢复默认；`selections` 为 `{插槽: 贡献 ID}` 对象，全部校验通过后一起保存，任何一项失败均不生效；值未变化的项不重新校验 |
 
 扩展记录包含 `id,name,version,directory,development,trusted,enabled,state,error,generation,contributes,registrations`。`enabled` 表示持久启用意图，`state` 为实际运行状态；可为 `disabled,starting,running,stopping,failed,blocked`。来源和 UI 贡献只有在运行状态下公开。
 
@@ -559,16 +559,24 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 ### 主题与界面
 
-职责与稳定接口范围见[主题边界规范](theme-boundaries.md)。下列是当前已实现协议；该规范中的外观／布局独立选择及完整默认界面模板属于迁移目标，不新增此处的参数或配置键。主题 QML 调用已有接口仍须遵守原业务语义，主题职责约定不构成运行时权限沙箱。
+职责与稳定接口范围见[主题边界规范](theme-boundaries.md)。下列是当前已实现协议，包括外观、界面独立选择与主题壁纸来源；完整默认界面模板仍属于迁移目标。主题 QML 调用已有接口仍须遵守原业务语义，主题职责约定不构成运行时权限沙箱。
 
 - `extensions.select` 的 `slot: "theme"` 接受主题贡献 ID、`builtin/yozakura`、`builtin/ocean`、`builtin/forest`；空字符串选择默认夜樱。持久化失败不改变当前选择。
+- `slot: "themeLayout"` 接受运行中且声明了 `shell`、`bottomPlayer`、`background` 或非空 `pages` 的主题贡献 ID；空字符串表示内置界面，键不存在时界面跟随 `theme`。删除主题包时，指向它的 `theme`、`themeLayout` 均重置为空字符串；新前端选择操作总是同时写入两个键。
 - `extensions.install` 增加可选 `themeOnly: true`，强制按主题包大小限制解包，并拒绝普通可执行扩展。重复 ID 默认拒绝，确认更新后传 `replace: true`。卡片定向更新可传 `expectedId`：目标必须已安装且与新包 ID 一致，在更改旧包前校验，不匹配返回 `theme_update_id_mismatch`。
 - `extensions.export_theme` 参数 `{contribution, path}`：将主题导出到本地 ZIP 文件，返回 `{path, includesQml}`。主题专用包完整导出；内置主题和普通扩展导出独立的配色与静态背景包。支持仍安装的静态主题贡献，以及当前运行时动态注册的主题。
-- 主题包沿用 `extensions.enable/disable/reload/uninstall`。没有扩展库的主题仍以 `running` 表示已启用，含代码时需要 `trusted: true` 完成首次授权。删除当前主题包先保存默认主题选择；禁用保留选择以便恢复。
+- 主题包沿用 `extensions.enable/disable/reload/uninstall`，启用不需要 `trusted`，仍以 `running` 表示已启用。对已运行主题包调用 `extensions.enable` 并传 `trusted: true` 会记录信任，不会重启；信任按包保存，前端在信任前不生成含代码主题的界面或壁纸入口。普通扩展的授权规则不变；禁用保留选择以便恢复。
 
-前端 `controllers.theme` 暴露 `items`、`selectedId`、`activeId`、`mode`、`isDark`、`tokens`、`background`、`uiSlots`、`busy/error/notice` 等状态。`setMode` 保存本地 `theme_mode`，`selectTheme/importTheme/exportTheme/removeTheme/reset` 走既有扩展管理接口。QML 的 `Theme` 兼容原变量名并新增 `isDark`。格式与示例见 [主题制作](themes.md)。
+前端 `controllers.theme` 提供：
 
-主题可声明 `ui.wallpaper` QML `Item`，前端解析为 `uiSlots.wallpaper`。用户选择 `wallpaper.style: "theme"` 后加载，使用 `ExtensionApi.wallpaper` 的只读播放、歌词、设置及屏幕上下文；无入口或加载失败回退经典卡片并保留选择。它不新增后端 IPC，详见 [主题音乐壁纸](themes.md#主题音乐壁纸) 与 [壁纸状态](wallpaper.md)。
+- 状态：`items`、`selectedId`、`activeId`、`layoutSelectedId`、`activeLayoutId`、`layoutUnavailable`、`mode`、`isDark`、`reducedMotion`、`tokens`、`background`、`uiSlots`、`wallpaperSlots`、`busy/error/notice` 等；`items` 每项有 `hasLayout`、`hasWallpaper`。`wallpaperSlots` 以主题贡献 ID 为键，仅包含可用且允许加载的壁纸入口。
+- 选择：`selectAppearance(id, trusted = false)`、`selectLayout(id, trusted = false)`；`selectTheme` 对含界面的主题同时设置配色和界面，对不含界面的主题只设置配色。`resetAppearance`、`resetLayout` 分别重置；`reset` 重置配色、界面与深色模式，不重置壁纸偏好。
+- 管理：`importTheme/updateTheme/reloadTheme/exportTheme/removeTheme` 走既有扩展管理接口；`setMode` 保存本地 `theme_mode`，`setReducedMotion(bool)` 保存布尔设置 `reduced_motion`（默认 `false`），主题不能覆盖它。
+- 信号：`trustRequested(id, target)`，`target` 为 `theme`、`appearance` 或 `layout`，授权后应重试同一操作。主题包的 `selectAppearance` 不请求代码授权；普通扩展仍须先授权。
+
+QML 的 `Theme` 兼容原变量名，并提供 `isDark` 与用户设置的 `reducedMotion`。格式与示例见 [主题制作](themes.md)。
+
+主题可声明 `ui.wallpaper` QML `Item`。用户选择 `wallpaper.style: "theme"` 后加载；`wallpaper.themeWallpaper` 是字符串，空字符串（默认）使用 `uiSlots.wallpaper`，先取界面选择、再取外观选择的壁纸；指定主题贡献 ID 则使用 `wallpaperSlots` 中该来源。入口使用 `ExtensionApi.wallpaper` 的只读播放、歌词、设置及屏幕上下文；无入口或加载失败回退经典卡片并保留选择。`themeStatus` 包括 `loading/active/missing/source-missing/error/safe-mode`，其中 `source-missing` 表示指定来源不可用，恢复后自动接回。它不新增后端 IPC，详见 [主题音乐壁纸](themes.md#主题音乐壁纸) 与 [壁纸状态](wallpaper.md)。
 
 
 ## 听歌历史与统计

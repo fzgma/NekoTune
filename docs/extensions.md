@@ -377,4 +377,4 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ctest --test-dir build --out
 
 `nekotune_native_extensions_test` 覆盖信任、加载失败、依赖、存储、事件、ZIP 安装、主题导出、音频代理、下载和崩溃记录。`cmake --install build --prefix <directory>` 安装应用、后台和扩展 SDK；Qt 等系统依赖仍由部署环境提供。
 
-主题包使用 `type: "theme"`，仅贡献 `themes`，没有扩展库。纯数据主题可以直接启用；含 QML/JavaScript 时按扩展信任流程启用。`extensions.list` 的条目包含 `type`、`hasCode` 和 `themes`（包含未启用主题的展示描述），`contributes` 仍只包含运行中的贡献。切勿根据 `themes` 列表直接加载 QML。
+主题包使用 `type: "theme"`，仅贡献 `themes`，没有扩展库。主题包无需信任即可启用；含 QML/JavaScript 的界面和壁纸在用户确认信任前不会加载，配色可单独使用。`extensions.list` 的条目包含 `type`、`hasCode` 和 `themes`（包含未启用主题的展示描述），`contributes` 仍只包含运行中的贡献。切勿根据 `themes` 列表直接加载 QML。前端只加载 `ThemeController` 生成的、已信任含代码主题的入口。
