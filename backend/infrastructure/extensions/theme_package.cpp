@@ -1,5 +1,6 @@
 #include "infrastructure/extensions/theme_package.h"
 #include "infrastructure/extensions/zip_archive.h"
+#include "themes/theme_resolution.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -139,27 +140,6 @@ Result<qint64> checkImage(const QString &directory, const QString &relative) {
     if (!pixels.value() || pixels.value() > pixelLimit)
         return failure("Theme image pixel limit exceeded");
     return pixels;
-}
-QVariantMap resolveTokens(const QVariantMap &theme, const QString &mode) {
-    QVariantMap base;
-    const auto rules = catalog().value("tokens").toMap();
-    for (auto it = rules.cbegin(); it != rules.cend(); ++it)
-        base.insert(it.key(), it.value().toMap().value("default"));
-    if (mode == "light") {
-        const auto light = catalog().value("light").toMap();
-        for (auto it = light.cbegin(); it != light.cend(); ++it)
-            base.insert(it.key(), it.value());
-    }
-    if (!theme.contains("schemaVersion") && mode == "light")
-        return base;
-    const auto variant = theme.value("variants").toMap().value(mode).toMap().value("tokens").toMap();
-    for (const auto &values : {theme.value("tokens").toMap(), variant})
-        for (auto it = values.cbegin(); it != values.cend(); ++it)
-            if (rules.contains(it.key()))
-                base.insert(it.key(), it.value());
-    if (!theme.value("tokens").toMap().contains("bgCard") && !variant.contains("bgCard"))
-        base.insert("bgCard", base.value("bgSurface"));
-    return base;
 }
 } // namespace
 
@@ -304,7 +284,7 @@ Result<QVariantMap> exportTheme(const QVariantMap &theme, const QString &directo
         qint64 resources = 0;
         QVariantMap variants;
         for (const auto &mode : modes) {
-            QVariantMap variant{{"tokens", resolveTokens(theme, mode)}};
+            QVariantMap variant{{"tokens", resolveThemeTokens(catalog(), theme, mode == QLatin1String("dark"))}};
             auto background = theme.value("variants").toMap().value(mode).toMap().value("background").toMap();
             if (!background.isEmpty() && !directory.isEmpty()) {
                 const auto source = background.value("source").toString();

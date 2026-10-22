@@ -43,6 +43,10 @@ add_library(nekotune_paths STATIC shared/app_paths.cpp)
 target_include_directories(nekotune_paths PUBLIC ${CMAKE_SOURCE_DIR}/shared)
 target_link_libraries(nekotune_paths PUBLIC Qt6::Core)
 
+add_library(nekotune_theme_resolution STATIC shared/themes/theme_resolution.cpp shared/themes/theme_resolution.h)
+target_include_directories(nekotune_theme_resolution PUBLIC ${CMAKE_SOURCE_DIR}/shared)
+target_link_libraries(nekotune_theme_resolution PUBLIC Qt6::Core)
+
 add_subdirectory(sdk)
 add_subdirectory(backend)
 add_subdirectory(examples/extensions)

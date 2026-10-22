@@ -7,6 +7,7 @@
 #include "infrastructure/extensions/semver.h"
 #include "infrastructure/extensions/theme_package.h"
 #include "infrastructure/extensions/zip_archive.h"
+#include "themes/theme_resolution.h"
 #include <QDirIterator>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -483,6 +484,38 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(tokens.value("sidebarWidthWide").toMap().value("group").toString(), "layout");
         QCOMPARE(tokens.value("radiusMd").toMap().value("group").toString(), "shared");
         QCOMPARE(tokens.value("reducedMotion").toMap().value("group").toString(), "host");
+    }
+
+    void sharedThemeTokenResolution() {
+        const auto &catalog = themes::catalog();
+        const auto rules = catalog.value("tokens").toMap();
+        const auto dark = themes::baseTokens(catalog, true);
+        QCOMPARE(dark.size(), rules.size());
+        QCOMPARE(dark.value("bgCanvas").toString(), rules.value("bgCanvas").toMap().value("default").toString());
+        const auto light = themes::baseTokens(catalog, false);
+        QCOMPARE(light.value("bgCanvas").toString(), catalog.value("light").toMap().value("bgCanvas").toString());
+
+        const QVariantMap theme{
+            {"schemaVersion", 1},
+            {"tokens", QVariantMap{{"accentPrimary", "#111111"}, {"radiusMd", 20}, {"notAToken", 1}}},
+            {"variants",
+             QVariantMap{{"dark", QVariantMap{{"tokens", QVariantMap{{"accentPrimary", "#222222"},
+                                                                     {"bgSurface", "#333333"}}}}},
+                         {"light", QVariantMap{{"tokens", QVariantMap{}}}}}}};
+        const auto resolved = themes::resolveThemeTokens(catalog, theme, true);
+        QCOMPARE(resolved.value("accentPrimary").toString(), "#222222");
+        QCOMPARE(resolved.value("radiusMd").toInt(), 20);
+        QVERIFY(!resolved.contains("notAToken"));
+        QCOMPARE(resolved.value("bgCard").toString(), "#333333");
+        QCOMPARE(themes::resolveThemeTokens(catalog, theme, false).value("accentPrimary").toString(), "#111111");
+
+        auto explicitCard = theme;
+        explicitCard["tokens"] = QVariantMap{{"bgCard", "#444444"}};
+        QCOMPARE(themes::resolveThemeTokens(catalog, explicitCard, true).value("bgCard").toString(), "#444444");
+
+        const QVariantMap legacy{{"tokens", QVariantMap{{"accentPrimary", "#555555"}}}};
+        QVERIFY(themes::resolveThemeTokens(catalog, legacy, false) == light);
+        QCOMPARE(themes::resolveThemeTokens(catalog, legacy, true).value("accentPrimary").toString(), "#555555");
     }
 
     void zipPackagesAndThemes() {

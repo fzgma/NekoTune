@@ -61,7 +61,7 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/playback/playback_backend_supervisor.cpp
     infrastructure/playback/qt_playback_backend.cpp
 )
-target_link_libraries(nekotune_infrastructure PUBLIC nekotune_domain nekotune_storage nekotune_paths Qt6::Network Qt6::Gui Qt6::Multimedia)
+target_link_libraries(nekotune_infrastructure PUBLIC nekotune_domain nekotune_storage nekotune_paths nekotune_theme_resolution Qt6::Network Qt6::Gui Qt6::Multimedia)
 target_link_libraries(nekotune_infrastructure PRIVATE qt6keychain PkgConfig::FFMPEG Threads::Threads)
 qt_add_resources(nekotune_infrastructure "nekotune_theme_catalog"
     PREFIX "/nekotune"

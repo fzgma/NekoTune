@@ -2,6 +2,7 @@
 #include "app_paths.h"
 #include "controllers/extensions_controller.h"
 #include "ipc_client.h"
+#include "themes/theme_resolution.h"
 #include "extensions/extension_view.h"
 #include <QDir>
 #include <QFile>
@@ -65,17 +66,7 @@ void ThemeController::presentWindow(QQuickWindow *window) {
   timer->start();
 }
 QVariantMap ThemeDefaults::defaults(bool dark) const {
-  const auto catalog = themeCatalog();
-  const auto rules = catalog.value("tokens").toMap();
-  QVariantMap result;
-  for (auto it = rules.cbegin(); it != rules.cend(); ++it)
-    result.insert(it.key(), it.value().toMap().value("default"));
-  if (!dark) {
-    const auto light = catalog.value("light").toMap();
-    for (auto it = light.cbegin(); it != light.cend(); ++it)
-      result.insert(it.key(), it.value());
-  }
-  return result;
+  return nekotune::themes::baseTokens(themeCatalog(), dark);
 }
 
 ThemeController::ThemeController(IpcClient &client,
@@ -129,36 +120,7 @@ QVariantMap ThemeController::find(const QString &id) const {
 }
 QVariantMap ThemeController::resolve(const QVariantMap &theme,
                                      bool dark) const {
-  QVariantMap result;
-  const auto rules = m_catalog.value("tokens").toMap();
-  for (auto it = rules.cbegin(); it != rules.cend(); ++it)
-    result.insert(it.key(), it.value().toMap().value("default"));
-  auto merge = [&](const QVariantMap &values) {
-    for (auto it = values.cbegin(); it != values.cend(); ++it)
-      if (rules.contains(it.key()))
-        result.insert(it.key(), it.value());
-  };
-  if (!dark)
-    merge(m_catalog.value("light").toMap());
-  if (dark || theme.contains("schemaVersion")) {
-    merge(theme.value("tokens").toMap());
-    merge(theme.value("variants")
-              .toMap()
-              .value(dark ? "dark" : "light")
-              .toMap()
-              .value("tokens")
-              .toMap());
-  }
-  if (!theme.value("tokens").toMap().contains("bgCard") &&
-      !theme.value("variants")
-           .toMap()
-           .value(dark ? "dark" : "light")
-           .toMap()
-           .value("tokens")
-           .toMap()
-           .contains("bgCard"))
-    result["bgCard"] = result.value("bgSurface");
-  return result;
+  return nekotune::themes::resolveThemeTokens(m_catalog, theme, dark);
 }
 void ThemeController::rebuild() {
   m_items.clear();

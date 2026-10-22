@@ -43,7 +43,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(nekotune_frontend PUBLIC NEKOTUNE_MPRIS)
 endif()
 target_include_directories(nekotune_frontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(nekotune_frontend PUBLIC nekotune_paths Qt6::Core Qt6::Network Qt6::Quick Qt6::Qml Qt6::Widgets)
+target_link_libraries(nekotune_frontend PUBLIC nekotune_paths nekotune_theme_resolution Qt6::Core Qt6::Network Qt6::Quick Qt6::Qml Qt6::Widgets)
 add_executable(nekotune-qt-qml
     src/main.cpp
     resources.qrc
