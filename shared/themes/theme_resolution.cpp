@@ -32,4 +32,15 @@ QVariantMap resolveThemeTokens(const QVariantMap &catalog, const QVariantMap &th
         result.insert("bgCard", result.value("bgSurface"));
     return result;
 }
+bool providesLayout(const QVariantMap &theme) {
+    const auto ui = theme.value("ui").toMap();
+    for (const auto *key : {"shell", "bottomPlayer", "background"})
+        if (!ui.value(QLatin1String(key)).toString().isEmpty())
+            return true;
+    return !ui.value("pages").toMap().isEmpty();
+}
+
+bool providesWallpaper(const QVariantMap &theme) {
+    return !theme.value("ui").toMap().value("wallpaper").toString().isEmpty();
+}
 } // namespace nekotune::themes

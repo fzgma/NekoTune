@@ -14,6 +14,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
@@ -516,6 +517,131 @@ class NativeExtensionsTest final : public QObject {
         const QVariantMap legacy{{"tokens", QVariantMap{{"accentPrimary", "#555555"}}}};
         QVERIFY(themes::resolveThemeTokens(catalog, legacy, false) == light);
         QCOMPARE(themes::resolveThemeTokens(catalog, legacy, true).value("accentPrimary").toString(), "#555555");
+    }
+
+    void themeUiCapabilities() {
+        QVERIFY(!themes::providesLayout({}));
+        QVERIFY(!themes::providesLayout({{"ui", QVariantMap{{"wallpaper", "Wallpaper.qml"}}}}));
+        QVERIFY(!themes::providesLayout({{"ui", QVariantMap{{"pages", QVariantMap{}}}}}));
+        for (const auto *key : {"shell", "bottomPlayer", "background"}) {
+            QVERIFY(!themes::providesLayout({{"ui", QVariantMap{{QLatin1String(key), ""}}}}));
+            QVERIFY(themes::providesLayout({{"ui", QVariantMap{{QLatin1String(key), "View.qml"}}}}));
+        }
+        QVERIFY(themes::providesLayout({{"ui", QVariantMap{{"pages", QVariantMap{{"home", "Home.qml"}}}}}}));
+        QVERIFY(themes::providesWallpaper({{"ui", QVariantMap{{"wallpaper", "Wallpaper.qml"}}}}));
+        QVERIFY(!themes::providesWallpaper({}));
+        QVERIFY(!themes::providesWallpaper({{"ui", QVariantMap{{"wallpaper", ""}}}}));
+        QVERIFY(!themes::providesWallpaper({{"ui", QVariantMap{{"shell", "Shell.qml"}}}}));
+    }
+
+    void themeLayoutSelection() {
+        auto manager = startManager();
+        const QDir folder(m_home->filePath("layout-theme"));
+        QVERIFY(QDir().mkpath(folder.path()));
+        auto write = [&](const QString &name, const QByteArray &bytes) {
+            QFile file(folder.filePath(name));
+            return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+        };
+        QVERIFY(write("Player.qml", "import QtQuick\nItem {}\n"));
+        QVERIFY(write("Wallpaper.qml", "import QtQuick\nItem {}\n"));
+        const QJsonObject variants{{"light", QJsonObject{}}, {"dark", QJsonObject{}}};
+        auto theme = [&](const QString &id, const QJsonObject &ui) {
+            QJsonObject value{{"id", id}, {"title", id}, {"schemaVersion", 1}, {"variants", variants}};
+            if (!ui.isEmpty())
+                value.insert("ui", ui);
+            return value;
+        };
+        const QJsonObject manifest{
+            {"id", "test.layout"}, {"name", "Layout test"}, {"version", "1.0.0"}, {"apiVersion", 1}, {"type", "theme"},
+            {"contributes", QJsonObject{{"themes", QJsonArray{theme("palette", {}),
+                                                              theme("layout", {{"bottomPlayer", "Player.qml"}}),
+                                                              theme("wall", {{"wallpaper", "Wallpaper.qml"}})}}}}};
+        QVERIFY(write("extension.json", QJsonDocument(manifest).toJson()));
+        install(*manager, folder.path());
+        enable(*manager, "test.layout");
+        const auto selections = [&] { return manager->snapshot().value("selections").toMap(); };
+
+        // The legacy single-slot form keeps working and does not create themeLayout.
+        QVERIFY(call(*manager, "extensions.select", {{"slot", "theme"}, {"contribution", "test.layout/palette"}}));
+        QVERIFY(!selections().contains("themeLayout"));
+        QVERIFY(call(*manager, "extensions.uninstall", {{"id", "test.layout"}}));
+        QVERIFY(!selections().contains("themeLayout"));
+        install(*manager, folder.path());
+        enable(*manager, "test.layout");
+
+        const auto both = call(*manager, "extensions.select",
+                               {{"selections", QVariantMap{{"theme", "builtin/ocean"}, {"themeLayout", "test.layout/layout"}}}});
+        QVERIFY2(both, qPrintable(errorOf(both)));
+        QCOMPARE(selections().value("theme").toString(), "builtin/ocean");
+        QCOMPARE(selections().value("themeLayout").toString(), "test.layout/layout");
+
+        // Only running themes with layout entries qualify; wallpaper-only themes do not.
+        for (const auto *invalid : {"builtin/ocean", "test.layout/palette", "test.layout/wall", "test.layout/missing"})
+            QVERIFY(!call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", QString(invalid)}}));
+        QCOMPARE(selections().value("themeLayout").toString(), "test.layout/layout");
+
+        QVERIFY(call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", ""}}));
+        QCOMPARE(selections().value("themeLayout").toString(), QString());
+
+        // One invalid entry rejects the whole batch.
+        const auto beforeInvalid = selections();
+        QVERIFY(!call(*manager, "extensions.select",
+                      {{"selections", QVariantMap{{"theme", "test.layout/palette"}, {"themeLayout", "builtin/ocean"}}}}));
+        QCOMPARE(selections(), beforeInvalid);
+        QVERIFY(!call(*manager, "extensions.select", {{"selections", QVariantMap{}}}));
+        QVERIFY(!call(*manager, "extensions.select", {{"selections", QVariantMap{{"themeLayout", 1}}}}));
+        QVERIFY(!call(*manager, "extensions.select", {{"selections", "theme"}}));
+        QVERIFY(!call(*manager, "extensions.select", {{"selections", QVariantMap{{"", ""}}}}));
+        QVERIFY(!call(*manager, "extensions.select", {{"slot", "themeLayout"}}));
+        QCOMPARE(selections(), beforeInvalid);
+
+        // A failed save rolls back every slot in the batch.
+        const auto registry = QDir(AppPaths::extensionsDirectory()).filePath("registry.json");
+        QVERIFY(QFile::rename(registry, registry + ".saved"));
+        QVERIFY(QDir().mkdir(registry));
+        const auto failed = call(*manager, "extensions.select",
+                                 {{"selections", QVariantMap{{"theme", "test.layout/palette"},
+                                                            {"themeLayout", "test.layout/layout"}}}});
+        QVERIFY(!failed);
+        QCOMPARE(failed.error().code, ErrorCode::Io);
+        QCOMPARE(selections(), beforeInvalid);
+        QVERIFY(QDir().rmdir(registry));
+        QVERIFY(QFile::rename(registry + ".saved", registry));
+
+        QVERIFY(call(*manager, "extensions.select",
+                     {{"selections", QVariantMap{{"theme", "test.layout/palette"}, {"themeLayout", "test.layout/layout"}}}}));
+        manager.reset();
+        manager = startManager();
+        QCOMPARE(selections().value("theme").toString(), "test.layout/palette");
+        QCOMPARE(selections().value("themeLayout").toString(), "test.layout/layout");
+
+        // A disabled package keeps its selections; unchanged entries are not revalidated.
+        QVERIFY(call(*manager, "extensions.disable", {{"id", "test.layout"}}));
+        const auto keep = call(*manager, "extensions.select",
+                               {{"selections", QVariantMap{{"theme", "test.layout/palette"}, {"themeLayout", ""}}}});
+        QVERIFY2(keep, qPrintable(errorOf(keep)));
+        QCOMPARE(selections().value("theme").toString(), "test.layout/palette");
+        // Changing to a contribution of the disabled package is still rejected.
+        QVERIFY(!call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", "test.layout/layout"}}));
+
+        enable(*manager, "test.layout");
+        QVERIFY(call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", "test.layout/layout"}}));
+        QVERIFY(call(*manager, "extensions.disable", {{"id", "test.layout"}}));
+        QVERIFY(call(*manager, "extensions.select",
+                     {{"selections", QVariantMap{{"theme", "builtin/ocean"}, {"themeLayout", "test.layout/layout"}}}}));
+        QCOMPARE(selections().value("theme").toString(), "builtin/ocean");
+        QCOMPARE(selections().value("themeLayout").toString(), "test.layout/layout");
+        enable(*manager, "test.layout");
+        QVERIFY(call(*manager, "extensions.select", {{"slot", "theme"}, {"contribution", "test.layout/palette"}}));
+
+        // Uninstalling the package resets both nonempty selections to the defaults.
+        QVERIFY(call(*manager, "extensions.uninstall", {{"id", "test.layout"}}));
+        QCOMPARE(selections().value("theme").toString(), QString());
+        QCOMPARE(selections().value("themeLayout").toString(), QString());
+        manager.reset();
+        manager = startManager();
+        QCOMPARE(selections().value("theme").toString(), QString());
+        QCOMPARE(selections().value("themeLayout").toString(), QString());
     }
 
     void zipPackagesAndThemes() {

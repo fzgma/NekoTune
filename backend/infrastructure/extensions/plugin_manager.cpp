@@ -6,6 +6,7 @@
 #include "infrastructure/extensions/semver.h"
 #include "infrastructure/extensions/theme_package.h"
 #include "infrastructure/extensions/zip_archive.h"
+#include "themes/theme_resolution.h"
 #include <nekotune/sdk/extension_plugin.h>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -1388,14 +1389,17 @@ void PluginManager::uninstall(const QVariantMap &params, Completion done) {
         done(failure("Extension not found"));
         return;
     }
-    if (m_entries[id].manifest.isTheme() && m_selections.value("theme").toString().startsWith(id + "/")) {
+    if (m_entries[id].manifest.isTheme()) {
         const auto previous = m_selections;
-        m_selections.insert("theme", QString());
-        if (auto saved = save(); !saved) {
-            m_selections = previous;
-            done(saved.error());
-            return;
-        }
+        for (const auto *key : {"theme", "themeLayout"})
+            if (m_selections.value(QLatin1String(key)).toString().startsWith(id + "/"))
+                m_selections.insert(QLatin1String(key), QString());
+        if (m_selections != previous)
+            if (auto saved = save(); !saved) {
+                m_selections = previous;
+                done(saved.error());
+                return;
+            }
     }
     disable(id);
     const bool clearData = params.value("clearData").toBool();
@@ -1428,27 +1432,49 @@ void PluginManager::uninstall(const QVariantMap &params, Completion done) {
             done(snapshot());
         });
 }
+Result<void> PluginManager::validateSelection(const QString &slot, const QString &contribution) const {
+    if (contribution.isEmpty())
+        return {};
+    if (slot == "theme")
+        for (const auto &theme : themes::catalog().value("themes").toList())
+            if (theme.toMap().value("id") == contribution)
+                return {};
+    const bool themeSlot = slot == "theme" || slot == "themeLayout";
+    for (const auto &value : snapshot().value("extensions").toList())
+        for (const auto &item : value.toMap().value("contributes").toMap().value(themeSlot ? "themes" : "slots").toList()) {
+            const auto map = item.toMap();
+            if (map.value("id") != contribution)
+                continue;
+            if (slot == "theme" || (slot == "themeLayout" && themes::providesLayout(map)) ||
+                (!themeSlot && map.value("slot") == slot))
+                return {};
+        }
+    return failure("Contribution is unavailable for this slot");
+}
 Result<QVariantMap> PluginManager::select(const QVariantMap &params) {
-    if (params.value("slot").typeId() != QMetaType::QString || params.value("contribution").typeId() != QMetaType::QString)
+    // {selections: {slot: contribution}} updates several slots atomically; {slot, contribution} is the legacy form.
+    QVariantMap changes;
+    if (params.contains("selections")) {
+        if (params.value("selections").typeId() != QMetaType::QVariantMap)
+            return failure("Invalid selection");
+        changes = params.value("selections").toMap();
+    } else if (params.value("slot").typeId() == QMetaType::QString) {
+        changes.insert(params.value("slot").toString(), params.value("contribution"));
+    }
+    if (changes.isEmpty())
         return failure("Invalid selection");
-    const auto slot = params.value("slot").toString();
-    const auto contribution = params.value("contribution").toString();
-    if (!contribution.isEmpty()) {
-        bool available = false;
-        if (slot == "theme")
-            for (const auto &theme : themes::catalog().value("themes").toList())
-                available = available || theme.toMap().value("id") == contribution;
-        for (const auto &value : snapshot().value("extensions").toList())
-            for (const auto &item : value.toMap().value("contributes").toMap().value(slot == "theme" ? "themes" : "slots").toList()) {
-                const auto map = item.toMap();
-                if (map.value("id") == contribution && (slot == "theme" || map.value("slot") == slot))
-                    available = true;
-            }
-        if (!available)
-            return failure("Contribution is unavailable for this slot");
+    for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
+        if (it.key().isEmpty() || it.value().typeId() != QMetaType::QString)
+            return failure("Invalid selection");
+        // Unchanged entries keep a selection whose package is temporarily disabled.
+        if (m_selections.value(it.key()) == it.value())
+            continue;
+        if (auto valid = validateSelection(it.key(), it.value().toString()); !valid)
+            return valid.error();
     }
     const auto previous = m_selections;
-    m_selections.insert(slot, contribution);
+    for (auto it = changes.cbegin(); it != changes.cend(); ++it)
+        m_selections.insert(it.key(), it.value());
     if (auto saved = save(); !saved) {
         m_selections = previous;
         return saved.error();

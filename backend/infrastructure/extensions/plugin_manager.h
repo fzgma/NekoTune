@@ -83,6 +83,7 @@ class PluginManager final : public IExtensionBackend {
     void install(const QVariantMap &params, Completion done);
     void uninstall(const QVariantMap &params, Completion done);
     Result<QVariantMap> select(const QVariantMap &params);
+    Result<void> validateSelection(const QString &slot, const QString &contribution) const;
     Result<QVariantMap> exportTheme(const QVariantMap &params);
     void cleanUnusedPackages();
     Result<QVariantMap> setConfig(const QString &id, const QVariant &config);
