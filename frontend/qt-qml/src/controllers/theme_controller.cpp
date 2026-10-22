@@ -300,7 +300,7 @@ bool ThemeController::ensureAvailable(const QVariantMap &theme, bool trusted,
                                       const QString &target,
                                       std::function<void()> retry) {
   // Colors alone never need trust for theme packages. Layouts, one-click
-  // themes and ordinary extensions (which run code) do.
+  // themes with layouts and ordinary extensions (which run code) do.
   const bool codeNeeded = target != QLatin1String("appearance") ||
                           theme.value("origin") == QLatin1String("extension");
   const bool untrusted =
@@ -340,11 +340,14 @@ void ThemeController::selectTheme(const QString &id, bool trusted) {
     emit changed();
     return;
   }
+  // Wallpaper-only contributions change colors without authorizing their QML.
+  if (!theme.value("hasLayout").toBool()) {
+    selectAppearance(id, trusted);
+    return;
+  }
   if (!ensureAvailable(theme, trusted, "theme", [this, id] { selectTheme(id); }))
     return;
-  // A theme without layout entries only changes the appearance.
-  applySelection(id, theme.value("hasLayout").toBool() ? id
-                                                        : layoutSelectedId());
+  applySelection(id, id);
 }
 void ThemeController::selectAppearance(const QString &id, bool trusted) {
   if (busy())

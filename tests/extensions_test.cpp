@@ -994,10 +994,25 @@ class ExtensionsTest final : public QObject {
       auto *ocean =
           visualItem(window->contentItem(), "themeCard_builtin/ocean");
       QVERIFY(ocean->isVisible());
+      // Visibility does not account for clipping by the appearance scroll view.
+      auto *viewport = ocean->parentItem();
+      while (viewport && !viewport->property("contentY").isValid())
+        viewport = viewport->parentItem();
+      QVERIFY(viewport);
+      const QPointF center(ocean->width() / 2, ocean->height() / 2);
+      viewport->setProperty(
+          "contentY",
+          qBound(0.0,
+                 viewport->property("contentY").toDouble() +
+                     ocean->mapToItem(viewport, center).y() - viewport->height() / 2,
+                 qMax(0.0, viewport->property("contentHeight").toDouble() -
+                               viewport->height())));
+      QTRY_VERIFY(viewport->boundingRect().contains(
+          ocean->mapRectToItem(viewport, ocean->boundingRect())));
+      QVERIFY(window->contentItem()->contains(ocean->mapToScene(center)));
       QTest::mouseClick(
           window, Qt::LeftButton, Qt::NoModifier,
-          ocean->mapToScene(QPointF(ocean->width() / 2, ocean->height() / 2))
-              .toPoint());
+          ocean->mapToScene(center).toPoint());
       QTRY_COMPARE(app.theme->activeId(), "builtin/ocean");
       // A palette-only card changes colors and keeps the selected layout.
       QCOMPARE(app.theme->activeLayoutId(), QString("test.theme/default"));
@@ -1381,6 +1396,86 @@ class ExtensionsTest final : public QObject {
       peer.socket.abort();
       runtime.stop();
     }
+    void wallpaperOnlyThemeDoesNotRequestTrust_data() {
+      QTest::addColumn<bool>("enabled");
+      QTest::newRow("disabled-package") << false;
+      QTest::newRow("running-package") << true;
+    }
+    void wallpaperOnlyThemeDoesNotRequestTrust() {
+      QFETCH(bool, enabled);
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME"),
+                 oldSocket = qgetenv("NEKOTUNE_SOCKET"),
+                 oldDb = qgetenv("NEKOTUNE_DB_PATH");
+      auto restore = qScopeGuard([&] {
+        qputenv("NEKOTUNE_HOME", oldHome);
+        qputenv("NEKOTUNE_SOCKET", oldSocket);
+        qputenv("NEKOTUNE_DB_PATH", oldDb);
+      });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      qputenv("NEKOTUNE_SOCKET", profile.filePath("wallpaper.sock").toUtf8());
+      qputenv("NEKOTUNE_DB_PATH", profile.filePath("wallpaper.sqlite3").toUtf8());
+      QVERIFY(AppPaths::prepare());
+      QVERIFY(AppPaths::saveSetting("lyrics_offline", true));
+      const auto folder = profile.filePath("theme");
+      QVERIFY(QDir().mkpath(folder));
+      QFile wallpaper(folder + "/Wallpaper.qml");
+      QVERIFY(wallpaper.open(QIODevice::WriteOnly));
+      QVERIFY(wallpaper.write("import QtQuick\nItem {}") > 0);
+      wallpaper.close();
+      const QJsonObject theme{
+          {"id", "default"}, {"title", "Wallpaper only"}, {"schemaVersion", 1},
+          {"tokens", QJsonObject{{"accentPrimary", "#123456"}}},
+          {"variants", QJsonObject{{"light", QJsonObject{}},
+                                    {"dark", QJsonObject{}}}},
+          {"ui", QJsonObject{{"wallpaper", "Wallpaper.qml"}}}};
+      const QJsonObject manifest{
+          {"id", "test.wallpaper"}, {"name", "Wallpaper only"},
+          {"version", "1.0.0"}, {"apiVersion", 1}, {"type", "theme"},
+          {"contributes", QJsonObject{{"themes", QJsonArray{theme}}}}};
+      QFile file(folder + "/extension.json");
+      QVERIFY(file.open(QIODevice::WriteOnly));
+      QVERIFY(file.write(QJsonDocument(manifest).toJson()) > 0);
+      file.close();
+
+      BackendRuntime runtime([] { return std::make_unique<ExtensionAudio>(); });
+      QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+      ExtensionPeer peer;
+      peer.socket.connectToServer(runtime.serverName());
+      QVERIFY(peer.socket.waitForConnected(3000));
+      QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
+                                   .value("data").toObject()
+                                   .value("runtimeReady").toBool(), 15000);
+      QCOMPARE(peer.call("extensions.install",
+                         {{"path", folder}, {"development", true}})
+                   .value("status").toString(), "ok");
+      if (enabled)
+        QCOMPARE(peer.call("extensions.enable", {{"id", "test.wallpaper"}})
+                     .value("status").toString(), "ok");
+
+      IpcClient client;
+      AppControllers app(client);
+      client.connectBackend();
+      QTRY_COMPARE(app.theme->items().size(), 4);
+      app.theme->setMode("dark");
+      QSignalSpy trust(app.theme, &ThemeController::trustRequested);
+      app.theme->selectTheme("test.wallpaper/default");
+      QCOMPARE(trust.size(), 0);
+      QTRY_COMPARE(app.theme->activeId(), QString("test.wallpaper/default"));
+      QTRY_VERIFY(!app.theme->busy());
+      QCOMPARE(app.theme->tokens().value("accentPrimary").toString(),
+               QString("#123456"));
+      QCOMPARE(app.theme->layoutSelectedId(), QString());
+      QVERIFY(app.theme->uiSlots().isEmpty());
+      QVERIFY(app.theme->wallpaperSlots().isEmpty());
+      const auto entry = app.extensions->items().first().toMap();
+      QCOMPARE(entry.value("state").toString(), QString("running"));
+      QVERIFY(entry.value("hasCode").toBool());
+      QVERIFY(!entry.value("trusted").toBool());
+      QCOMPARE(trust.size(), 0);
+      peer.socket.abort();
+      runtime.stop();
+    }
     void themeCodeLoadsOnlyAfterTrust() {
       QTemporaryDir profile;
       const auto oldHome = qgetenv("NEKOTUNE_HOME"),
@@ -1482,10 +1577,11 @@ class ExtensionsTest final : public QObject {
 
       // An untrusted wallpaper is not exposed through "follow current theme".
       idle();
-      app.theme->selectAppearance("test.trust/wall");
+      app.theme->selectTheme("test.trust/wall");
       QTRY_COMPARE(app.theme->activeId(), QString("test.trust/wall"));
       QCOMPARE(trust.size(), 0);
       QVERIFY(!app.theme->uiSlots().contains("wallpaper"));
+      QVERIFY(app.theme->wallpaperSlots().isEmpty());
 
       // Stored selections cannot bypass the QML gate on an already running package.
       idle();
