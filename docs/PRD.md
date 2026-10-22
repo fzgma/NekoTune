@@ -1,8 +1,10 @@
 # NekoTune 音乐播放器 PRD
 
+本文记录产品定位与早期里程碑，里程碑中的条目不表示全部已实现或尚未实现。当前能力见[项目 README](../README.md)，实施状态与后续优先级见[待办](todo.md)，技术实现见[架构文档](architecture.md)。
+
 ## 产品定位
 
-NekoTune 是一款本地优先的 Linux 桌面音乐播放器。
+NekoTune 是一款本地优先的 Linux／Windows 桌面音乐播放器。
 
 目标：
 
@@ -23,16 +25,18 @@ IPC / API Interface
       |
 C++ Backend
       |
---------------------------------
-Decoder       Library      Audio Engine
-FFmpeg        SQLite       PipeWire/ALSA
+------------------------------------------
+Decoder       Library      Audio Output
+FFmpeg / Qt   SQLite       QAudioSink / Qt
 ```
 
-前端负责 UI 展示、用户交互和状态展示。后端负责音频播放、队列、音乐库数据、持久化和 Linux 系统集成。
+前端负责 UI 展示、用户交互和状态展示，并承载系统托盘、Linux MPRIS 等桌面集成。后端负责音频播放、队列、音乐库数据与持久化。默认播放链路使用 FFmpeg 解码和 `QAudioSink` 输出，Qt Multimedia 作为可选兼容后端；具体边界见[音频引擎](audio-engine.md)。
 
-播放队列与歌曲资料分开管理：歌曲资料长期保存在 SQLite，队列保存顺序、重复项、文件路径和当前项。后端重启后恢复最近一次队列，用户清空队列后历史歌曲不会自动重新加入。
+播放队列与歌曲资料分开管理：歌曲资料长期保存在 SQLite，队列保存顺序、重复项和当前项，通过歌曲资源关联解析播放路径。后端重启后恢复最近一次队列，用户清空队列后历史歌曲不会自动重新加入。
 
 ## 开发阶段
+
+以下保留最初的阶段划分，供理解产品演进方向；继续开发应按当前待办和专题文档复核。例如扩展、主题及 MPRIS 已有实现，Web 前端与远程网关仍待开发。
 
 ### Milestone 1
 

@@ -1,6 +1,6 @@
 # NekoTune 架构与扩展开发
 
-本文说明当前源码的职责、依赖和扩展约定。构建与使用见 [README](../README.md)，协议字段和方法见 [API 文档](API.md)。
+本文说明当前源码的职责、依赖和扩展约定。构建与使用见 [README](../README.md)，协议字段和方法见 [API 文档](API.md)，其他专题见[文档导航](README.md)。
 
 NekoTune 使用分层模块化架构：QML 展示界面，前端 C++ 控制器拥有功能状态，应用服务组织业务，领域类型与接口隔离存储、播放和网络实现。后端服务由构造函数显式注入，装配集中在 `BackendSession`；内置功能采用编译期模块注册，用户扩展以 Qt 插件形式在后端进程内加载，并通过动态 QML 注册接入。
 
@@ -77,7 +77,7 @@ backend/
 ├── storage/                    # SQLite 会话与歌曲、队列、歌单、标签仓储
 ├── infrastructure/
 │   ├── library/                # 文件检查、时长读取与托管资源目录
-│   ├── playback/               # Qt Multimedia 播放实现
+│   ├── playback/               # FFmpeg／Qt 播放、连续 PCM 管线、DSP 与设备输出
 │   ├── lyrics/                 # 网络来源、缓存、存储与配套文件
 │   ├── extensions/             # 扩展加载、清单、包管理、主题包、音频代理与崩溃记录
 │   ├── kugou/                  # 仅旧凭据迁移和兼容密钥存储
@@ -86,7 +86,7 @@ backend/
 ├── ipc/
 │   ├── api/                    # 方法注册、参数处理与 ApiContext
 │   └── serialization/          # 领域结果与 JSON 的转换
-└── runtime/                    # 服务装配、后端线程与扫描协调
+└── runtime/                    # 服务装配、后端线程、资源校验及曲库维护
 frontend/qt-qml/
 ├── src/controllers/            # 播放、曲库、队列、歌单、歌词、扩展、AI 等
 ├── src/models/                 # RecordModel
@@ -110,15 +110,16 @@ tests/                          # 服务、存储、协议、QML 和依赖边界
 | 目标 | 主要直接依赖 |
 | --- | --- |
 | `nekotune_paths` | Qt Core |
+| `nekotune_theme_resolution` | Qt Core；前后端共用主题变量合成与能力判断 |
 | `nekotune_sdk` | Qt Core（仅头文件，扩展与宿主共用） |
 | `nekotune_domain` | sdk、Qt Core、Zlib |
 | `nekotune_storage` | domain、paths、Qt SQL |
 | `nekotune_providers` | domain、Qt Network |
-| `nekotune_infrastructure` | domain、storage、paths、Qt Network／Gui／Multimedia、QtKeychain、FFmpeg；Linux 增加 libsecret 和线程库 |
+| `nekotune_infrastructure` | domain、storage、paths、theme_resolution、Qt Network／Gui／Multimedia、QtKeychain、FFmpeg；Linux 增加 libsecret 和线程库 |
 | `nekotune_application` | domain |
 | `nekotune_ipc` | application、paths、Qt Network |
 | `nekotune_core` | ipc、storage、providers、infrastructure；源码来自 `runtime` |
-| `nekotune_frontend` | paths、Qt Core／Network／Quick／Qml／Widgets |
+| `nekotune_frontend` | paths、theme_resolution、Qt Core／Network／Quick／Qml／Widgets |
 
 依赖项中省略共同的 `nekotune_` 前缀。`nekotune_core` 是运行时装配库名称，源码没有额外的 `backend/core` 层。网络歌词来源与本地歌词存储共享 `infrastructure/lyrics` 目录，但分别编入 providers 和 infrastructure 目标；目录归组不等于合并构建目标。
 
@@ -235,7 +236,7 @@ LRCLIB 在后端装配处注册，扩展歌词来源随运行时动态注册。�
 | 执行环境 | 对象与任务 |
 | --- | --- |
 | GUI 主线程 | IpcClient、前端控制器、列表模型和 QML 对象 |
-| 后端线程 | BackendSession、SQLite 会话、业务协调、IPC、播放器适配器和扩展进程通信对象 |
+| 后端线程 | BackendSession、SQLite 会话、业务协调、IPC、播放器适配器和原生扩展对象 |
 | 导入线程 | ImportExecutor 的目录遍历、SHA-256、音频时长读取 |
 | 歌词线程 | LyricsService、歌词来源、解析与歌词存储 |
 | AI 线程 | AI 配置、歌词输入准备及模型网络请求 |
@@ -245,7 +246,7 @@ SQLite 连接只能在创建它的线程使用。导入线程返回 `ImportedFil
 
 `LyricsService` 和它的 provider 子对象一起移入歌词线程，新增网络对象必须保持正确线程归属。线程退出前先取消任务和网络请求，完成等待回调，再释放对象。
 
-当前 `BackendSession::shutdown()` 依次停止扩展进程、扫描和配套文件任务、停止接收连接、关闭命令调度、停止 AI 与导入任务、断开客户端、停止歌词任务，最后停止播放。`BackendRuntime` 在后端线程销毁 session 后才退出线程并等待结束。每个模块的关闭应可重复调用。
+当前 `BackendSession::shutdown()` 先停止曲库维护并取消响度分析，再停止播放以释放解码器与代理资源租约，随后关闭原生扩展、扫描和配套文件任务，再停止接收连接、关闭命令调度、停止 AI 与导入任务、断开客户端并停止歌词任务。`BackendRuntime` 在后端线程销毁 session 后才退出线程并等待结束。每个模块的关闭应可重复调用。
 
 ## 7. 持久化、托管文件与一致性
 
@@ -275,13 +276,13 @@ SQLite 连接只能在创建它的线程使用。导入线程返回 `ImportedFil
 
 完整使用与开发契约见 [扩展文档](extensions.md)。`IExtensionBackend` 是领域侧的异步调用与事件边界，`ExtensionService` 和 `MusicService` 在应用层编排注册来源和业务操作。基础设施中的 `PluginManager` 实现该边界：读取清单与注册表，在用户信任后用 `QPluginLoader` 加载扩展库，并把服务、命令、来源和事件直接路由到扩展对象，不再经过进程间协议。扩展库只依赖 `sdk/` 的头文件，宿主实现隐藏在 `IExtensionContext` 之后。所有扩展调用都在后端线程执行；扩展从其他线程回调时由上下文转回后端线程，停用后迟到的回调被丢弃。库在本次运行中不卸载，再次启用复用同一插件对象；开发目录按内容哈希复制后加载。调用扩展代码期间 `crash_guard` 在内存中记录当前扩展，致命信号（Windows 为未处理异常）时写入哨兵文件，下次启动停用该扩展。无库的主题和纯界面扩展直接发布清单贡献，仍参与启停、更新与开发重载。普通扩展调用不会占住 `CommandScheduler`，只有短暂的数据库变更和已有文件导入流程进入串行队列。
 
-音乐来源以来源 ID 和来源曲目 ID 保存稳定身份，`songs.hash` 对在线记录为空。`ISourceResolver` 将在线引用异步解析成 `AudioProxy` 提供的回环代理 URL（扩展返回 `file://` 时为其数据目录内的文件），再交给现有 Qt Multimedia 适配器；网络地址、鉴权头和有效期只存在于运行时。解析代次与播放意图隔离迟到结果。下载复用托管资源分配、文件校验与曲库入库。远程资源的歌词、封面使用独立资源键，不进行本地配套文件探测或清理。
+音乐来源以来源 ID 和来源曲目 ID 保存稳定身份，`songs.hash` 对在线记录为空。`ISourceResolver` 将在线引用异步解析成 `AudioProxy` 提供的回环代理 URL（扩展返回 `file://` 时为其数据目录内的文件），再交给当前播放后端；网络地址、鉴权头和有效期只存在于运行时。解析代次与播放意图隔离迟到结果。下载复用托管资源分配、文件校验与曲库入库。远程资源的歌词、封面使用独立资源键，不进行本地配套文件探测或清理。
 
 前端 `ExtensionsController` 消费后台注册快照。`PageHost` 保留原页面，并按用户选择加载替代项；`ExtensionView` 使用独立 QML 引擎管理视图和重载生命周期。默认 Shell 仍由 `Main.qml` 组织，完整 Shell 扩展接管窗口内容。恢复窗口由宿主独立加载，并强制使用内置主题。QML 故障不能实现进程级隔离，安全模式用于重启恢复。
 
-`ThemeController` 消费同一扩展快照，合并 `shared/themes/catalog.json` 的基础变量与所选主题，监听系统明暗并通过 `AppPaths` 保存显示模式。主题 ID 仍由扩展选择配置保存。`ThemeSlot` 按当前主题、独立扩展、内置界面的顺序回退，不改写独立插槽选择；主题页面按实际显示加载。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出由 `theme_package` 完成，卡片与导入流程不实例化主题 QML。格式、限制与恢复方法见 [主题文档](themes.md)。
+`ThemeController` 消费同一扩展快照，与后端共用 `nekotune_theme_resolution`，按 `catalog.json` 中的变量归属合成外观与界面。外观和界面分别保存在 `selections.theme`、`selections.themeLayout`；旧配置缺少后者时继续跟随外观，前端新的选择操作通过批量 `extensions.select` 原子保存两项。显示模式和用户的减少动态效果偏好由 `AppPaths` 保存，主题无法覆盖后者。`ThemeSlot` 按界面选择、独立扩展、内置界面的顺序回退，不改写独立插槽选择；静态背景来自外观选择，主题页面按实际显示加载。壁纸来源独立保存在 `wallpaper.themeWallpaper`，未指定时先取界面、再取外观的壁纸入口。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出由 `theme_package` 完成，卡片与导入流程不实例化主题 QML。格式、信任、限制与恢复方法见 [主题文档](themes.md)。
 
-主题的职责、状态和接口边界统一见[主题边界规范](theme-boundaries.md)。新代码保持主题为已有业务能力的呈现层，宿主拥有业务控制器、数据及系统生命周期；新的来源、算法或后台服务进入宿主或功能扩展。外观与布局独立选择、默认前端抽取为完整主题以及跨 Shell 会话状态恢复均为待实现目标，当前目录与加载机制尚未完成这些迁移。
+主题的职责、状态和接口边界统一见[主题边界规范](theme-boundaries.md)。新代码保持主题为已有业务能力的呈现层，宿主拥有业务控制器、数据及系统生命周期；新的来源、算法或后台服务进入宿主或功能扩展。外观、界面与壁纸来源已可独立选择；默认前端抽取为完整主题以及跨 Shell 会话状态恢复仍为待实现目标。
 
 ### 内置功能扩展
 

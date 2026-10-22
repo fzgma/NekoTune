@@ -23,6 +23,7 @@
 | `frontend/qt-qml/i18n/zh.json`、`en.json` | 新文案 |
 | `tests/native_extensions_test.cpp` | 扩充 `layeredThemeTokenResolution` |
 | `tests/extensions_test.cpp` | 新增 `themeReducedMotionPreference` |
+| `tests/wallpaper_test.cpp` | 更新 `vinylAnimationPausesAndStopsWhenInactive` 中依赖旧行为的一段（见 5.6 (c)） |
 
 ## 步骤
 
@@ -215,6 +216,53 @@ void ThemeController::setReducedMotion(bool enabled) {
     }
 ```
 
+**(c)** 文件：`tests/wallpaper_test.cpp`，函数 `vinylAnimationPausesAndStopsWhenInactive`。
+
+这段代码断言“主题把 `reducedMotion` 设为 `true` 会停止动画”，而这正是本阶段有意去掉的行为，所以必须修改。找到从 `qputenv("NEKOTUNE_SAFE_MODE", "0");` 开始、到 `QTRY_VERIFY(animation->property("running").toBool());`（紧跟在 `send({{"event", "extensions.changed"}});` 之后）为止的代码：
+
+```cpp
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        send({
+            {"event", "extensions.changed"},
+            {"selections", QJsonObject{{"theme", "test/still"}}},
+            {"extensions", QJsonArray{QJsonObject{
+                {"id", "test"}, {"state", "running"},
+                {"themes", QJsonArray{QJsonObject{
+                    {"id", "test/still"},
+                    {"tokens", QJsonObject{{"reducedMotion", true}}}}}}}}}});
+        QTRY_VERIFY(!animation->property("running").toBool());
+        QVERIFY(!window()->findChild<QObject *>("lyricsFrameTimer")->property("running").toBool());
+        send({{"event", "extensions.changed"}});
+        QTRY_VERIFY(animation->property("running").toBool());
+```
+
+替换为：
+
+```cpp
+        qputenv("NEKOTUNE_SAFE_MODE", "0");
+        // A theme cannot reduce motion on the user's behalf.
+        send({
+            {"event", "extensions.changed"},
+            {"selections", QJsonObject{{"theme", "test/still"}}},
+            {"extensions", QJsonArray{QJsonObject{
+                {"id", "test"}, {"state", "running"},
+                {"themes", QJsonArray{QJsonObject{
+                    {"id", "test/still"},
+                    {"tokens", QJsonObject{{"reducedMotion", true}}}}}}}}}});
+        QTRY_COMPARE(m_controllers->theme->activeId(), QString("test/still"));
+        QVERIFY(!m_controllers->theme->tokens().value("reducedMotion").toBool());
+        QVERIFY(animation->property("running").toBool());
+        // The user preference does.
+        m_controllers->theme->setReducedMotion(true);
+        QTRY_VERIFY(!animation->property("running").toBool());
+        QVERIFY(!window()->findChild<QObject *>("lyricsFrameTimer")->property("running").toBool());
+        m_controllers->theme->setReducedMotion(false);
+        QTRY_VERIFY(animation->property("running").toBool());
+        send({{"event", "extensions.changed"}});
+```
+
+只改这一段，函数后面的隐藏、显示、断线断言保持不变。测试的 `init()` 已经把 `NEKOTUNE_HOME` 指向临时目录，`setReducedMotion` 写入的设置不会影响真实配置。
+
 ## 验证命令
 
 ```sh
@@ -232,7 +280,7 @@ git diff --check
 
 - [ ] 主题里写 `reducedMotion: true` 不再生效。
 - [ ] 开关可以保存，重启后保留；保存失败时提示 `theme_save_failed` 并保留原值。
-- [ ] 歌词和壁纸相关测试没有新增失败。
+- [ ] 歌词和壁纸相关测试没有新增失败；`wallpaper_test.cpp` 只修改了 5.6 (c) 指定的那一段。
 
 ## 提交
 
@@ -241,6 +289,6 @@ git add shared/themes/theme_resolution.h shared/themes/theme_resolution.cpp \
   frontend/qt-qml/src/controllers/theme_controller.h frontend/qt-qml/src/controllers/theme_controller.cpp \
   frontend/qt-qml/qml/components/Theme.qml frontend/qt-qml/qml/components/AppearancePanel.qml \
   frontend/qt-qml/i18n/zh.json frontend/qt-qml/i18n/en.json \
-  tests/native_extensions_test.cpp tests/extensions_test.cpp
-git commit -m "feat(theme): 减少动态效果改为用户设置"
+  tests/native_extensions_test.cpp tests/extensions_test.cpp tests/wallpaper_test.cpp
+git commit -m "feat(theme): 减少动态效果改为用户设置" -m "主题中的 reducedMotion 不再生效，改由用户设置控制。"
 ```

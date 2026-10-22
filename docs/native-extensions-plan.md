@@ -2,9 +2,11 @@
 
 > 状态：已实施（2026-10-20），使用文档见 [扩展开发与使用](extensions.md)。本文保留设计取舍与迁移记录。目标是移除捆绑的 Node.js 运行时，扩展后台改为 Qt 插件（共享库），由后端进程直接加载。QML 界面、清单贡献、主题和信任模型保持不变。
 
+本文中的旧目录、Node 依赖及“迁移后”描述属于迁移时的背景与方案，不能作为当前构建或开发步骤。实施记录见[第 9 节](#9-实施阶段)；现行 SDK、信任与加载规则以[扩展文档](extensions.md)和[主题边界规范](theme-boundaries.md)为准，后续调整不在此重复维护。
+
 ## 1. 背景与范围
 
-当前链路是 `ExtensionBackend`（`backend/infrastructure/extensions`）启动 Node 管理进程 `extensions/runtime/supervisor.mjs`，管理进程再为每个有 `main` 的扩展启动 Worker。两级通信各用一个本地 Socket，在线音频经 `runtime/audio.mjs` 的本地 HTTP 代理交给 Qt Multimedia。
+迁移前的链路是 `ExtensionBackend`（`backend/infrastructure/extensions`）启动 Node 管理进程 `extensions/runtime/supervisor.mjs`，管理进程再为每个有 `main` 的扩展启动 Worker。两级通信各用一个本地 Socket，在线音频经 `runtime/audio.mjs` 的本地 HTTP 代理交给 Qt Multimedia。
 
 迁移后：
 

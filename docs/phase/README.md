@@ -2,6 +2,12 @@
 
 本目录是 [主题边界规范 §5.3](../theme-boundaries.md#53-开发方向外观界面壁纸分开选择) 的实施步骤。执行者按阶段顺序完成，每个阶段都能单独构建、测试和提交。
 
+## 当前状态与适用范围
+
+2026-10-22 按源码核对：变量分组、共享合成库、外观／界面独立选择、用户减少动态效果设置、主题按用途授权、壁纸来源选择及外观页入口均已接入。当前使用与接口见[主题文档](../themes.md)、[主题边界规范](../theme-boundaries.md)和 [API 文档](../API.md)。
+
+下文及各 Phase 文件保留原实施步骤、代码片段和验收清单，供追溯与补充验收；步骤中的“新增”“目前”等描述基于编写时的源码，不应直接重放。源码已接入不等于所有阶段的构建、自动化、视觉及平台验收都已完成；原检查框和历史命令不作为本次通过证据。
+
 ## 1. 执行者必读
 
 ### 1.1 总规则
@@ -105,9 +111,10 @@ git diff --check
 | 文件 | 本计划中的作用 |
 | --- | --- |
 | `shared/themes/catalog.json` | 变量定义、浅色覆盖值、内置主题 |
-| `backend/infrastructure/extensions/theme_package.{h,cpp}` | 主题校验、导出；目前包含一份变量合成实现 `resolveTokens` |
+| `shared/themes/theme_resolution.{h,cpp}` | 当前前后端共用的变量合成与能力判断 |
+| `backend/infrastructure/extensions/theme_package.{h,cpp}` | 主题校验、导出，变量合成已委托共享实现 |
 | `backend/infrastructure/extensions/plugin_manager.{h,cpp}` | `select()`、`uninstall()`、`enable()`、`install` 的信任处理、`selections` 持久化 |
-| `backend/infrastructure/extensions/extension_manifest.h` | `isTheme()`、`needsTrust()` |
+| `backend/infrastructure/extensions/extension_manifest.h` | `isTheme()`、`needsTrust()` 与 `needsTrustToRun()` |
 | `frontend/qt-qml/src/controllers/theme_controller.{h,cpp}` | 前端主题状态、变量合成、插槽生成、选择操作 |
 | `frontend/qt-qml/src/controllers/extensions_controller.{h,cpp}` | `selections()`、`request()` |
 | `frontend/qt-qml/src/wallpaper/wallpaper_manager.cpp` | 壁纸设置的默认值与校验 |
