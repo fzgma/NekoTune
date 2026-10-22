@@ -17,6 +17,8 @@ struct ExtensionManifest {
     QString version() const { return data.value("version").toString(); }
     bool isTheme() const { return data.value("type").toString() == "theme"; }
     bool needsTrust() const { return !isTheme() || themeHasCode; }
+    // Theme packages have no backend code; their QML is gated by the frontend until trusted.
+    bool needsTrustToRun() const { return !isTheme(); }
     QVariantMap dependencies() const { return data.value("dependencies").toMap(); }
     QVariantMap contributes() const { return data.value("contributes").toMap(); }
 };

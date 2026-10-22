@@ -868,7 +868,7 @@ void PluginManager::enable(const QString &id, bool trusted, Done done) {
         done(inspected);
         return;
     }
-    if (m_entries[id].manifest.needsTrust() && !m_entries[id].trusted) {
+    if (m_entries[id].manifest.needsTrustToRun() && !m_entries[id].trusted) {
         done(failure("Trust must be explicitly granted to " + id));
         return;
     }
@@ -878,7 +878,7 @@ void PluginManager::enable(const QString &id, bool trusted, Done done) {
         return;
     }
     for (const auto &dependency : order.value())
-        if (m_entries[dependency].manifest.needsTrust() && !m_entries[dependency].trusted) {
+        if (m_entries[dependency].manifest.needsTrustToRun() && !m_entries[dependency].trusted) {
             done(failure("Enable and trust dependency first: " + dependency));
             return;
         }
@@ -981,7 +981,7 @@ Result<QString> PluginManager::loadablePath(const Entry &entry) {
 }
 void PluginManager::startOne(const QString &id, Done done) {
     auto &entry = m_entries[id];
-    if (entry.manifest.needsTrust() && !entry.trusted) {
+    if (entry.manifest.needsTrustToRun() && !entry.trusted) {
         done(failure("Trust must be explicitly granted to " + id));
         return;
     }
@@ -1306,15 +1306,14 @@ void PluginManager::install(const QVariantMap &params, Completion done) {
     for (auto it = affected.crbegin(); it != affected.crend(); ++it)
         stop(*it);
     const bool trustRetained = hadOld && old.trusted && (old.manifest.needsTrust() || !manifest.themeHasCode);
-    const bool codeNeedsTrust = manifest.isTheme() && manifest.themeHasCode && !trustRetained;
     Entry entry;
     entry.directory = directory;
     entry.development = development;
     entry.manifest = manifest;
+    // QML newly added to a theme stays unloaded until the user trusts it; the package keeps running.
     entry.trusted = trustRetained;
-    // Importing code into a formerly data-only theme waits for an explicit trust decision.
-    entry.enabled = hadOld && old.enabled && !codeNeedsTrust;
-    if (hadOld && (!old.enabled || codeNeedsTrust))
+    entry.enabled = hadOld && old.enabled;
+    if (hadOld && !old.enabled)
         entry.previous = !old.previous.isEmpty() ? old.previous
                                                  : QVariantMap{{"directory", old.directory},
                                                                {"development", old.development},

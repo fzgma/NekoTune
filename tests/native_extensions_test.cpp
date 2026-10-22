@@ -673,6 +673,70 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(themes::resolveThemeTokens(catalog, appearance, true, motion).value("reducedMotion").toBool(), false);
     }
 
+    void themePackagesRunWithoutTrust() {
+        auto manager = startManager();
+        const QDir folder(m_home->filePath("trust-theme"));
+        QVERIFY(QDir().mkpath(folder.path()));
+        auto write = [&](const QString &name, const QByteArray &bytes) {
+            QFile file(folder.filePath(name));
+            return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+        };
+        auto package = [&](bool withCode, const QString &zipName) {
+            QJsonObject theme{{"id", "default"}, {"title", "Trust"}, {"schemaVersion", 1},
+                              {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}}};
+            if (withCode)
+                theme.insert("ui", QJsonObject{{"bottomPlayer", "Player.qml"}});
+            const QJsonObject manifest{{"id", "test.trust"}, {"name", "Trust"}, {"version", "1.0.0"},
+                                       {"apiVersion", 1}, {"type", "theme"},
+                                       {"contributes", QJsonObject{{"themes", QJsonArray{theme}}}}};
+            QFile::remove(folder.filePath("Player.qml"));
+            if (!write("extension.json", QJsonDocument(manifest).toJson()))
+                return QString();
+            if (withCode && !write("Player.qml", "import QtQuick\nItem {}\n"))
+                return QString();
+            zip::Writer writer;
+            if (!writer.addFile("extension.json", folder.filePath("extension.json")))
+                return QString();
+            if (withCode && !writer.addFile("Player.qml", folder.filePath("Player.qml")))
+                return QString();
+            const auto path = m_home->filePath(zipName);
+            return writer.save(path) ? path : QString();
+        };
+
+        // A data-only package that later gains QML keeps running but is no longer trusted.
+        const auto plain = package(false, "plain.nktheme.zip");
+        QVERIFY(!plain.isEmpty());
+        QVERIFY(call(*manager, "extensions.install", {{"path", plain}, {"themeOnly", true}}));
+        QVERIFY(call(*manager, "extensions.enable", {{"id", "test.trust"}}));
+        QVERIFY(call(*manager, "extensions.enable", {{"id", "test.trust"}, {"trusted", true}}));
+        QVERIFY(entry(*manager, "test.trust").value("trusted").toBool());
+        const auto code = package(true, "code.nktheme.zip");
+        QVERIFY(!code.isEmpty());
+        const auto updated = call(*manager, "extensions.install",
+                                  {{"path", code}, {"themeOnly", true}, {"replace", true}, {"expectedId", "test.trust"}});
+        QVERIFY2(updated, qPrintable(errorOf(updated)));
+        QTRY_COMPARE(entry(*manager, "test.trust").value("state").toString(), "running");
+        QVERIFY(entry(*manager, "test.trust").value("hasCode").toBool());
+        QVERIFY(!entry(*manager, "test.trust").value("trusted").toBool());
+
+        // Code themes enable without trust, and trust can be granted while running.
+        QVERIFY(call(*manager, "extensions.disable", {{"id", "test.trust"}}));
+        const auto enabled = call(*manager, "extensions.enable", {{"id", "test.trust"}});
+        QVERIFY2(enabled, qPrintable(errorOf(enabled)));
+        QCOMPARE(entry(*manager, "test.trust").value("state").toString(), "running");
+        const auto generation = entry(*manager, "test.trust").value("generation");
+        QVERIFY(call(*manager, "extensions.enable", {{"id", "test.trust"}, {"trusted", true}}));
+        QVERIFY(entry(*manager, "test.trust").value("trusted").toBool());
+        QCOMPARE(entry(*manager, "test.trust").value("generation"), generation);
+        manager.reset();
+        manager = startManager();
+        QVERIFY(entry(*manager, "test.trust").value("trusted").toBool());
+
+        // Ordinary extensions still require trust.
+        install(*manager, examples + "/example.lyrics");
+        QVERIFY(!call(*manager, "extensions.enable", {{"id", "example.lyrics"}}));
+    }
+
     void zipPackagesAndThemes() {
         auto manager = startManager();
         const auto exported = m_home->filePath("ocean.zip");

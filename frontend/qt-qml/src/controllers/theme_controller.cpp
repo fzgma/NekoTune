@@ -34,6 +34,11 @@ QVariantMap themeCatalog() {
              ? QJsonDocument::fromJson(file.readAll()).object().toVariantMap()
              : QVariantMap{};
 }
+// Theme packages run without trust (their data is harmless), so QML entries
+// are only exposed once the package itself is trusted.
+bool codeAllowed(const QVariantMap &theme) {
+  return !theme.value("hasCode").toBool() || theme.value("trusted").toBool();
+}
 } // namespace
 void ThemeController::presentWindow(QQuickWindow *window) {
   if (!window)
@@ -184,7 +189,7 @@ void ThemeController::rebuild() {
       !safeMode() && !layoutId.isEmpty()) {
     const auto candidate = find(layoutId);
     if (candidate.value("available").toBool() &&
-        candidate.value("hasLayout").toBool())
+        candidate.value("hasLayout").toBool() && codeAllowed(candidate))
       m_layout = candidate;
   }
   const bool separateLayout =
@@ -228,8 +233,9 @@ void ThemeController::rebuild() {
     const auto &wallpaper = nekotune::themes::providesWallpaper(m_layout)
                                 ? m_layout
                                 : m_active;
-    add(wallpaper, "wallpaper",
-        wallpaper.value("ui").toMap().value("wallpaper"));
+    if (codeAllowed(wallpaper))
+      add(wallpaper, "wallpaper",
+          wallpaper.value("ui").toMap().value("wallpaper"));
   }
   emit changed();
 }
@@ -270,13 +276,19 @@ void ThemeController::request(const QString &method, const QVariantMap &params,
 bool ThemeController::ensureAvailable(const QVariantMap &theme, bool trusted,
                                       const QString &target,
                                       std::function<void()> retry) {
-  if (theme.value("available").toBool())
-    return true;
-  if (theme.value("hasCode").toBool() && !theme.value("trusted").toBool() &&
-      !trusted) {
+  // Colors alone never need trust for theme packages. Layouts, one-click
+  // themes and ordinary extensions (which run code) do.
+  const bool codeNeeded = target != QLatin1String("appearance") ||
+                          theme.value("origin") == QLatin1String("extension");
+  const bool untrusted =
+      theme.value("hasCode").toBool() && !theme.value("trusted").toBool();
+  if (codeNeeded && untrusted && !trusted) {
     emit trustRequested(theme.value("id").toString(), target);
     return false;
   }
+  // A granted trust must reach the backend even when the package already runs.
+  if (theme.value("available").toBool() && !(untrusted && trusted))
+    return true;
   request("extensions.enable",
           {{"id", theme.value("extensionId")}, {"trusted", trusted}},
           [retry](const QVariantMap &, const QString &error) {

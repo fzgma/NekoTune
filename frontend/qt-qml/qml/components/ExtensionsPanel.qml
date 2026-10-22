@@ -69,7 +69,7 @@ Item {
                                 onClicked: {
                                     root.selectedId = card.modelData.id
                                     if (card.modelData.state === "running") root.manage("disable", {id: root.selectedId})
-                                    else if (!card.modelData.trusted && card.modelData.hasCode !== false) trustDialog.open()
+                                    else if (card.modelData.type !== "theme" && !card.modelData.trusted && card.modelData.hasCode !== false) trustDialog.open()
                                     else root.manage("enable", {id: root.selectedId})
                                 }
                             }

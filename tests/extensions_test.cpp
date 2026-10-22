@@ -1381,6 +1381,152 @@ class ExtensionsTest final : public QObject {
       peer.socket.abort();
       runtime.stop();
     }
+    void themeCodeLoadsOnlyAfterTrust() {
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME"),
+                 oldSocket = qgetenv("NEKOTUNE_SOCKET"),
+                 oldDb = qgetenv("NEKOTUNE_DB_PATH");
+      auto restore = qScopeGuard([&] {
+        qputenv("NEKOTUNE_HOME", oldHome);
+        qputenv("NEKOTUNE_SOCKET", oldSocket);
+        qputenv("NEKOTUNE_DB_PATH", oldDb);
+        qunsetenv("NEKOTUNE_SAFE_MODE");
+      });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      qputenv("NEKOTUNE_SOCKET", profile.filePath("trust.sock").toUtf8());
+      qputenv("NEKOTUNE_DB_PATH", profile.filePath("trust.sqlite3").toUtf8());
+      QVERIFY(AppPaths::prepare());
+      QVERIFY(AppPaths::saveSetting("lyrics_offline", true));
+      BackendRuntime runtime([] { return std::make_unique<ExtensionAudio>(); });
+      QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
+      ExtensionPeer peer;
+      peer.socket.connectToServer(runtime.serverName());
+      QVERIFY(peer.socket.waitForConnected(3000));
+      QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
+                                   .value("data")
+                                   .toObject()
+                                   .value("runtimeReady")
+                                   .toBool(),
+                               15000);
+      const auto folder = profile.filePath("trust");
+      QVERIFY(QDir().mkpath(folder));
+      auto write = [&](const QString &name, const QByteArray &bytes) {
+        QFile file(folder + '/' + name);
+        return file.open(QIODevice::WriteOnly) &&
+               file.write(bytes) == bytes.size();
+      };
+      QVERIFY(write("Player.qml",
+                    "import QtQuick\nRectangle { objectName: 'trustPlayer' }"));
+      QVERIFY(write("Wallpaper.qml", "import QtQuick\nItem {}"));
+      auto variants = [](const QString &accent) {
+        const QJsonObject tokens{
+            {"tokens", QJsonObject{{"accentPrimary", accent}}}};
+        return QJsonObject{{"light", tokens}, {"dark", tokens}};
+      };
+      const QJsonObject withLayout{
+          {"id", "default"}, {"title", "Trust"}, {"schemaVersion", 1},
+          {"variants", variants("#00AA00")},
+          {"ui", QJsonObject{{"bottomPlayer", "Player.qml"}}}};
+      const QJsonObject withWallpaper{
+          {"id", "wall"}, {"title", "Wall"}, {"schemaVersion", 1},
+          {"variants", variants("#0000AA")},
+          {"ui", QJsonObject{{"wallpaper", "Wallpaper.qml"}}}};
+      const QJsonObject manifest{
+          {"id", "test.trust"}, {"name", "Trust test"}, {"version", "1.0.0"},
+          {"apiVersion", 1}, {"type", "theme"},
+          {"contributes",
+           QJsonObject{{"themes", QJsonArray{withLayout, withWallpaper}}}}};
+      QVERIFY(write("extension.json", QJsonDocument(manifest).toJson()));
+      QCOMPARE(peer.call("extensions.install",
+                         {{"path", folder}, {"development", true}})
+                   .value("status").toString(),
+               "ok");
+      IpcClient client;
+      AppControllers app(client);
+      I18n translator;
+      QStringList qmlWarnings;
+      QQmlApplicationEngine engine;
+      auto collectWarnings = [&](const QList<QQmlError> &errors) {
+        for (const auto &error : errors)
+          qmlWarnings.append(error.toString());
+      };
+      connect(&engine, &QQmlEngine::warnings, this, collectWarnings);
+      engine.rootContext()->setContextProperty("controllers", &app);
+      engine.rootContext()->setContextProperty("ipcClient", &client);
+      engine.rootContext()->setContextProperty("i18n", &translator);
+      engine.rootContext()->setContextProperty("lyricsDebugEnabled", false);
+      engine.load(QUrl("qrc:/qml/Main.qml"));
+      QVERIFY(!engine.rootObjects().isEmpty());
+      auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+      QVERIFY(window);
+      window->resize(1100, 760);
+      window->show();
+      client.connectBackend();
+      QTRY_COMPARE(app.theme->items().size(), 5);
+      app.theme->setMode("dark");
+      auto idle = [&] { QTRY_VERIFY(!app.theme->busy()); };
+      auto trustPlayer = [&] {
+        return window->findChild<QObject *>("trustPlayer");
+      };
+      QSignalSpy trust(app.theme, &ThemeController::trustRequested);
+
+      // Colors only: no trust prompt, the package starts, its QML stays unloaded.
+      app.theme->selectAppearance("test.trust/default");
+      QTRY_COMPARE(app.theme->activeId(), QString("test.trust/default"));
+      QCOMPARE(trust.size(), 0);
+      QCOMPARE(app.theme->tokens().value("accentPrimary").toString(),
+               QString("#00AA00"));
+      QCOMPARE(app.theme->layoutSelectedId(), QString());
+      QTest::qWait(50);
+      QVERIFY(!trustPlayer());
+
+      // An untrusted wallpaper is not exposed through "follow current theme".
+      idle();
+      app.theme->selectAppearance("test.trust/wall");
+      QTRY_COMPARE(app.theme->activeId(), QString("test.trust/wall"));
+      QCOMPARE(trust.size(), 0);
+      QVERIFY(!app.theme->uiSlots().contains("wallpaper"));
+
+      // Stored selections cannot bypass the QML gate on an already running package.
+      idle();
+      QCOMPARE(peer.call("extensions.select",
+                         {{"slot", "themeLayout"},
+                          {"contribution", "test.trust/default"}})
+                   .value("status").toString(),
+               "ok");
+      QTRY_COMPARE(app.theme->layoutSelectedId(), QString("test.trust/default"));
+      QVERIFY(app.theme->activeLayoutId().isEmpty());
+      QVERIFY(!app.theme->uiSlots().contains("bottomPlayer"));
+      QTest::qWait(50);
+      QVERIFY(!trustPlayer());
+      app.theme->resetLayout();
+      QTRY_COMPARE(app.theme->layoutSelectedId(), QString());
+
+      idle();
+      app.theme->selectTheme("test.trust/default");
+      QCOMPARE(trust.size(), 1);
+      QCOMPARE(trust.at(0).at(1).toString(), QString("theme"));
+      QCOMPARE(app.theme->activeId(), QString("test.trust/wall"));
+      QVERIFY(!trustPlayer());
+      trust.clear();
+
+      // Choosing the layout asks for trust and loads nothing until granted.
+      idle();
+      app.theme->selectLayout("test.trust/default");
+      QCOMPARE(trust.size(), 1);
+      QCOMPARE(trust.at(0).at(0).toString(), QString("test.trust/default"));
+      QCOMPARE(trust.at(0).at(1).toString(), QString("layout"));
+      QCOMPARE(app.theme->layoutSelectedId(), QString());
+      idle();
+      app.theme->selectLayout("test.trust/default", true);
+      QTRY_COMPARE(app.theme->activeLayoutId(), QString("test.trust/default"));
+      QTRY_VERIFY(trustPlayer());
+      QTRY_VERIFY(app.theme->uiSlots().contains("wallpaper"));
+      QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
+      window->close();
+      peer.socket.abort();
+      runtime.stop();
+    }
     void managementThemeAndShellInRealFrontend() {
         BackendRuntime runtime;
         QVERIFY2(runtime.start(), qPrintable(runtime.errorString()));
