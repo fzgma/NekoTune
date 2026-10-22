@@ -41,6 +41,17 @@ Item {
                     onActivated: root.controller.setMode(currentValue)
                 }
             }
+            CheckBox {
+                objectName: "reducedMotionCheck"
+                text: root.t("theme_reduced_motion")
+                checked: root.controller.reducedMotion
+                onToggled: root.controller.setReducedMotion(checked)
+            }
+            Label {
+                Layout.fillWidth: true
+                text: root.t("theme_reduced_motion_hint")
+                color: Theme.textMuted; wrapMode: Text.WordWrap
+            }
             Flow {
                 Layout.fillWidth: true
                 spacing: Theme.spaceSm

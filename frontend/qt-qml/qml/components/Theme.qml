@@ -93,7 +93,8 @@ QtObject {
     readonly property int artworkWide: overrides.artworkWide !== undefined ? overrides.artworkWide : baseTokens.artworkWide
 
     // 10. Animation duration (ms) & Accessibility
-    readonly property bool reducedMotion: overrides.reducedMotion !== undefined ? overrides.reducedMotion : baseTokens.reducedMotion
+    // A user preference: recovery windows ignore theme overrides but still honor it.
+    readonly property bool reducedMotion: typeof controllers !== "undefined" && controllers.theme ? controllers.theme.reducedMotion : baseTokens.reducedMotion
     readonly property int durationFast: overrides.durationFast !== undefined ? overrides.durationFast : baseTokens.durationFast
     readonly property int durationNormal: overrides.durationNormal !== undefined ? overrides.durationNormal : baseTokens.durationNormal
     readonly property int durationDrawer: overrides.durationDrawer !== undefined ? overrides.durationDrawer : baseTokens.durationDrawer

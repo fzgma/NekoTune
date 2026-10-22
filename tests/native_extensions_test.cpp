@@ -667,6 +667,10 @@ class NativeExtensionsTest final : public QObject {
         const auto legacyLight = themes::resolveThemeTokens(catalog, legacy, false, layout);
         QCOMPARE(legacyLight.value("sidebarWidthWide").toInt(), 260);
         QCOMPARE(legacyLight.value("accentPrimary"), themes::baseTokens(catalog, false).value("accentPrimary"));
+        // Themes cannot change the user's motion preference.
+        const QVariantMap motion{{"schemaVersion", 1}, {"tokens", QVariantMap{{"reducedMotion", true}}}};
+        QCOMPARE(themes::resolveThemeTokens(catalog, motion, true).value("reducedMotion").toBool(), false);
+        QCOMPARE(themes::resolveThemeTokens(catalog, appearance, true, motion).value("reducedMotion").toBool(), false);
     }
 
     void zipPackagesAndThemes() {

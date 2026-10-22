@@ -31,8 +31,9 @@ QVariantMap resolveThemeTokens(const QVariantMap &catalog, const QVariantMap &th
     };
     // Legacy token-only themes describe a dark palette; light mode keeps the built-in light values.
     if (dark || theme.contains("schemaVersion")) {
+        // Host tokens (reducedMotion) are user preferences and never come from a theme.
         const bool hasCard = merge(theme, [&](const QString &group) {
-            return layout.isEmpty() || group != QLatin1String("layout");
+            return group != QLatin1String("host") && (layout.isEmpty() || group != QLatin1String("layout"));
         });
         if (!hasCard)
             result.insert("bgCard", result.value("bgSurface"));

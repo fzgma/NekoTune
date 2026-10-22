@@ -597,6 +597,98 @@ class ExtensionsTest final : public QObject {
       QVERIFY(unchanged.open(QIODevice::ReadOnly));
       QCOMPARE(unchanged.readAll(), QByteArray("not json"));
     }
+    void themeReducedMotionPreference_data() {
+      QTest::addColumn<bool>("safeMode");
+      QTest::newRow("normal") << false;
+      QTest::newRow("safe") << true;
+    }
+    void themeReducedMotionPreference() {
+      QFETCH(bool, safeMode);
+      QTemporaryDir profile;
+      const auto oldHome = qgetenv("NEKOTUNE_HOME");
+      const auto oldSafeMode = qgetenv("NEKOTUNE_SAFE_MODE");
+      auto restore = qScopeGuard([&] {
+        qputenv("NEKOTUNE_HOME", oldHome);
+        qputenv("NEKOTUNE_SAFE_MODE", oldSafeMode);
+      });
+      qputenv("NEKOTUNE_HOME", profile.path().toUtf8());
+      qputenv("NEKOTUNE_SAFE_MODE", safeMode ? "1" : "0");
+      IpcClient client;
+      AppControllers app(client);
+      auto *theme = app.theme;
+      QVERIFY(!theme->reducedMotion());
+      QCOMPARE(theme->tokens().value("reducedMotion").toBool(), false);
+      theme->setReducedMotion(true);
+      QVERIFY(theme->reducedMotion());
+      QCOMPARE(theme->tokens().value("reducedMotion").toBool(), true);
+      QCOMPARE(AppPaths::setting("reduced_motion").toBool(), true);
+      {
+        AppControllers restarted(client);
+        QVERIFY(restarted.theme->reducedMotion());
+      }
+
+      I18n translator;
+      QQmlApplicationEngine recovery;
+      recovery.rootContext()->setContextProperty("controllers", &app);
+      recovery.rootContext()->setContextProperty("i18n", &translator);
+      recovery.rootContext()->setContextProperty("ignoreExtensionTheme", true);
+      recovery.load(QUrl("qrc:/qml/ExtensionsWindow.qml"));
+      QVERIFY(!recovery.rootObjects().isEmpty());
+      auto *window = qobject_cast<QQuickWindow *>(recovery.rootObjects().first());
+      QVERIFY(window);
+      window->setProperty("appearance", true);
+      window->resize(760, 580);
+      window->show();
+      QVERIFY(QTest::qWaitForWindowExposed(window));
+      QTRY_VERIFY(visualItem(window->contentItem(), "reducedMotionCheck"));
+      auto *check = visualItem(window->contentItem(), "reducedMotionCheck");
+      QVERIFY(check->isEnabled());
+      QVERIFY(check->isVisible());
+      QTest::qWait(50);
+      QTRY_VERIFY(check->property("checked").toBool());
+      QQmlComponent observer(&recovery);
+      observer.setData("import QtQml\nimport \"qrc:/qml/components\"\n"
+                       "QtObject { readonly property bool motion: Theme.reducedMotion; "
+                       "readonly property bool recovery: Theme.recovery }", QUrl());
+      std::unique_ptr<QObject> observed(observer.create());
+      QVERIFY2(observed, qPrintable(observer.errorString()));
+      QVERIFY(observed->property("recovery").toBool());
+      QVERIFY(observed->property("motion").toBool());
+      const auto toggle = [&] {
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                          check->mapToScene(QPointF(check->width() / 2, check->height() / 2)).toPoint());
+      };
+      toggle();
+      QTRY_VERIFY(!theme->reducedMotion());
+      QVERIFY(!observed->property("motion").toBool());
+      QCOMPARE(AppPaths::setting("reduced_motion").toBool(), false);
+      toggle();
+      QTRY_VERIFY(theme->reducedMotion());
+      QVERIFY(observed->property("motion").toBool());
+      const auto screenshots = qEnvironmentVariable("NEKOTUNE_TEST_SCREENSHOT_DIR");
+      if (!screenshots.isEmpty()) {
+        QVERIFY(QDir().mkpath(screenshots));
+        for (const QString language : {"zh", "en"}) {
+          translator.setLanguage(language);
+          QTest::qWait(100);
+          QVERIFY(window->grabWindow().save(screenshots + "/reduced-motion-" + language +
+                                           (safeMode ? "-safe.png" : ".png")));
+        }
+      }
+      QFile broken(AppPaths::configFile("settings.json"));
+      QVERIFY(broken.open(QIODevice::WriteOnly));
+      broken.write("not json");
+      broken.close();
+      theme->setReducedMotion(false);
+      QVERIFY(theme->reducedMotion());
+      QCOMPARE(theme->tokens().value("reducedMotion").toBool(), true);
+      QVERIFY(observed->property("motion").toBool());
+      QCOMPARE(theme->error(), "theme_save_failed");
+      QFile unchanged(broken.fileName());
+      QVERIFY(unchanged.open(QIODevice::ReadOnly));
+      QCOMPARE(unchanged.readAll(), QByteArray("not json"));
+      window->close();
+    }
     void themeSystemColorSchemeNotifications() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
       QTemporaryDir profile;

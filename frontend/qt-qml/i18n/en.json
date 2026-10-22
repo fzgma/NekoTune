@@ -440,6 +440,8 @@
   "theme_light": "Light",
   "theme_dark": "Dark",
   "theme_system": "System",
+  "theme_reduced_motion": "Reduce motion",
+  "theme_reduced_motion_hint": "Turns off lyric scrolling, per-word interpolation and decorative animation. Applies to every theme; themes cannot change it.",
   "theme_import": "Import theme",
   "theme_update": "Update package",
   "theme_reload": "Reload",

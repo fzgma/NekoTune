@@ -29,6 +29,7 @@ class ThemeController final : public QObject {
   Q_PROPERTY(QString layoutSelectedId READ layoutSelectedId NOTIFY changed)
   Q_PROPERTY(QString activeLayoutId READ activeLayoutId NOTIFY changed)
   Q_PROPERTY(bool layoutUnavailable READ layoutUnavailable NOTIFY changed)
+  Q_PROPERTY(bool reducedMotion READ reducedMotion NOTIFY changed)
   Q_PROPERTY(bool legacyLight READ legacyLight NOTIFY changed)
   Q_PROPERTY(bool unavailable READ unavailable NOTIFY changed)
   Q_PROPERTY(bool safeMode READ safeMode CONSTANT)
@@ -49,6 +50,7 @@ public:
   QString layoutSelectedId() const;
   QString activeLayoutId() const { return m_layout.value("id").toString(); }
   bool layoutUnavailable() const;
+  bool reducedMotion() const { return m_reducedMotion; }
   bool legacyLight() const;
   bool unavailable() const { return selectedId() != activeId() && !safeMode(); }
   bool safeMode() const;
@@ -57,6 +59,7 @@ public:
   QString error() const { return m_error; }
   QString notice() const { return m_notice; }
   Q_INVOKABLE void setMode(const QString &mode);
+  Q_INVOKABLE void setReducedMotion(bool enabled);
   Q_INVOKABLE void selectTheme(const QString &id, bool trusted = false);
   Q_INVOKABLE void selectAppearance(const QString &id, bool trusted = false);
   Q_INVOKABLE void selectLayout(const QString &id, bool trusted = false);
@@ -93,6 +96,7 @@ private:
   QVariantMap m_catalog, m_active, m_layout, m_tokens, m_background, m_slots;
   QVariantList m_items;
   QString m_mode, m_error, m_notice;
+  bool m_reducedMotion = false;
   int m_pending = 0;
   Completion m_completion;
 };

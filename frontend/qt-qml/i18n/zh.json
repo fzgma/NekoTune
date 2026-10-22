@@ -440,6 +440,8 @@
   "theme_light": "浅色",
   "theme_dark": "深色",
   "theme_system": "跟随系统",
+  "theme_reduced_motion": "减少动态效果",
+  "theme_reduced_motion_hint": "关闭歌词滚动、逐字插值和装饰动画。此设置对所有主题生效，主题无法更改。",
   "theme_import": "导入主题",
   "theme_update": "更新主题包",
   "theme_reload": "重新加载",

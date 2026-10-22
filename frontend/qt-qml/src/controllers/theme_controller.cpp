@@ -74,6 +74,8 @@ ThemeController::ThemeController(IpcClient &client,
     : m_client(client), m_extensions(extensions) {
   m_catalog = themeCatalog();
   m_mode = nekotune::AppPaths::setting("theme_mode").toString("dark");
+  m_reducedMotion =
+      nekotune::AppPaths::setting("reduced_motion").toBool(false);
   if (m_mode != "light" && m_mode != "dark" && m_mode != "system")
     m_mode = "dark";
   connect(&extensions, &ExtensionsController::changed, this,
@@ -189,6 +191,7 @@ void ThemeController::rebuild() {
       !m_layout.isEmpty() && m_layout.value("id") != m_active.value("id");
   m_tokens = nekotune::themes::resolveThemeTokens(
       m_catalog, m_active, isDark(), separateLayout ? m_layout : QVariantMap{});
+  m_tokens.insert("reducedMotion", m_reducedMotion);
   m_background = m_active.value("variants")
                      .toMap()
                      .value(isDark() ? "dark" : "light")
@@ -235,6 +238,18 @@ void ThemeController::setMode(const QString &mode) {
     return;
   if (nekotune::AppPaths::saveSetting("theme_mode", mode)) {
     m_mode = mode;
+    m_error.clear();
+    rebuild();
+  } else {
+    m_error = "theme_save_failed";
+    emit changed();
+  }
+}
+void ThemeController::setReducedMotion(bool enabled) {
+  if (enabled == m_reducedMotion)
+    return;
+  if (nekotune::AppPaths::saveSetting("reduced_motion", enabled)) {
+    m_reducedMotion = enabled;
     m_error.clear();
     rebuild();
   } else {

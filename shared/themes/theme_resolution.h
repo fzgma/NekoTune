@@ -10,6 +10,7 @@ QVariantMap baseTokens(const QVariantMap &catalog, bool dark);
 /// "tokens"), then the layout theme. When layout is non-empty, the appearance theme's "layout" group
 /// tokens are ignored and only the layout theme's "layout" and "shared" group tokens apply.
 /// Unknown token names are ignored.
+/// Tokens in the "host" group keep their catalog defaults; the host applies user preferences.
 QVariantMap resolveThemeTokens(const QVariantMap &catalog, const QVariantMap &theme, bool dark,
                                const QVariantMap &layout = {});
 /// True when the theme replaces any part of the main window: shell, bottomPlayer, background or pages.

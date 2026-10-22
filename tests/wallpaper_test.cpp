@@ -679,6 +679,7 @@ class WallpaperTest final : public QObject {
         QVERIFY(m_manager->setOption("intensity", 0.5));
         QTRY_VERIFY(animation->property("running").toBool());
         qputenv("NEKOTUNE_SAFE_MODE", "0");
+        // A theme cannot reduce motion on the user's behalf.
         send({
             {"event", "extensions.changed"},
             {"selections", QJsonObject{{"theme", "test/still"}}},
@@ -687,10 +688,16 @@ class WallpaperTest final : public QObject {
                 {"themes", QJsonArray{QJsonObject{
                     {"id", "test/still"},
                     {"tokens", QJsonObject{{"reducedMotion", true}}}}}}}}}});
+        QTRY_COMPARE(m_controllers->theme->activeId(), QString("test/still"));
+        QVERIFY(!m_controllers->theme->tokens().value("reducedMotion").toBool());
+        QVERIFY(animation->property("running").toBool());
+        // The user preference does.
+        m_controllers->theme->setReducedMotion(true);
         QTRY_VERIFY(!animation->property("running").toBool());
         QVERIFY(!window()->findChild<QObject *>("lyricsFrameTimer")->property("running").toBool());
-        send({{"event", "extensions.changed"}});
+        m_controllers->theme->setReducedMotion(false);
         QTRY_VERIFY(animation->property("running").toBool());
+        send({{"event", "extensions.changed"}});
         window()->hide();
         QVERIFY(!animation->property("running").toBool());
         window()->show();
