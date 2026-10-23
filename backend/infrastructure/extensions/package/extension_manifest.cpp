@@ -52,15 +52,15 @@ Result<ExtensionManifest> readManifest(const QString &directory) {
     ExtensionManifest manifest;
     const int apiVersion = data.value("apiVersion").toInt();
     if (!validExtensionId(data.value("id").toString()) || !semver::parse(data.value("version").toString()) ||
-        data.value("name").typeId() != QMetaType::QString || (apiVersion != 1 && apiVersion != 2))
-        return failure("Invalid extension identity, version or apiVersion (expected 2)");
+        data.value("name").typeId() != QMetaType::QString || (apiVersion != 1 && apiVersion != 2 && apiVersion != 3))
+        return failure("Invalid extension identity, version or apiVersion (expected 3)");
     if (data.value("id").toString() == "builtin")
         return failure("Reserved extension ID");
     if (data.contains("main"))
-        return failure("Node.js extensions are no longer supported; update the extension to apiVersion 2");
+        return failure("Node.js extensions are no longer supported; update the extension to apiVersion 3");
     const bool hasLibrary = data.contains("library");
-    if (hasLibrary && apiVersion != 2)
-        return failure("Native libraries require apiVersion 2");
+    if (hasLibrary && apiVersion != 3)
+        return failure("Native libraries require apiVersion 3");
     if (!hasLibrary && !data.contains("contributes"))
         return failure("Extension needs a library or UI contributions");
     if (hasLibrary) {

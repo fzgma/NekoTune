@@ -35,14 +35,9 @@ class ShuffleExample final : public QObject, public sdk::IExtensionPlugin {
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &context, std::function<void(Result<void>)> done) override {
-        auto *shuffle = sdk::shuffleContext(context);
-        if (!shuffle) {
-            done(failure("Artist-aware shuffle requires a host with NekoTune SDK 2.1 shuffle support"));
-            return;
-        }
-        m_registration = shuffle->registerShuffleStrategy("artist", &m_provider,
-                                                           {{"name", "Avoid consecutive artists"}});
+    void activate(sdk::ExtensionContext &context, sdk::Done done) override {
+        m_registration = context.shuffle().add("artist", &m_provider,
+                                                           {.name = "Avoid consecutive artists"});
         done(m_registration ? Result<void>{} : Result<void>{failure("Unable to register shuffle strategy")});
     }
     void deactivate() override { m_registration.reset(); }

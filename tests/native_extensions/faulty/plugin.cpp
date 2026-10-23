@@ -23,7 +23,7 @@ class Tones final : public sdk::IMusicProvider {
     void track(const QString &id, std::function<void(Result<sdk::Track>)> done) override {
         done(sdk::Track{id, "Tone", {}, {}, {}, 0});
     }
-    void resolve(const QString &id, const QString &,
+    void resolve(const QString &id, sdk::ResolvePurpose,
                  std::function<void(Result<sdk::ResolvedAudio>)> done) override {
         sdk::ResolvedAudio audio;
         audio.url = id == "outside" ? QUrl::fromLocalFile(QDir::tempPath())
@@ -39,9 +39,9 @@ class FaultyExtension final : public QObject, public sdk::IExtensionPlugin {
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &context, std::function<void(Result<void>)> done) override {
+    void activate(sdk::ExtensionContext &context, sdk::Done done) override {
         ++m_activations;
-        const auto mode = context.config().value("mode").toString();
+        const auto mode = context.config().get().value("mode").toString();
         if (mode == "throw")
             throw std::runtime_error("activation exploded");
         if (mode == "fail") {
@@ -50,49 +50,49 @@ class FaultyExtension final : public QObject, public sdk::IExtensionPlugin {
         }
         if (mode == "hang")
             return;
-        QFile tone(QDir(context.dataDirectory()).filePath("tone.wav"));
+        QFile tone(QDir(context.info().dataDirectory).filePath("tone.wav"));
         if (tone.open(QIODevice::WriteOnly))
             tone.write("RIFF");
-        m_tones.directory = context.dataDirectory();
-        m_registrations.push_back(context.registerMusicProvider("tones", &m_tones, {{"name", "Tones"}}));
-        m_registrations.push_back(context.registerService(
+        m_tones.directory = context.info().dataDirectory;
+        m_registrations.push_back(context.music().add("tones", &m_tones, {.name = "Tones"}));
+        m_registrations.push_back(context.services().add(
             "state", [this](const sdk::Params &, sdk::Reply reply) { reply(sdk::Params{{"activations", m_activations}}); }));
-        m_registrations.push_back(context.registerService(
+        m_registrations.push_back(context.services().add(
             "throw", [](const sdk::Params &, sdk::Reply) { throw std::runtime_error("service exploded"); }));
-        m_registrations.push_back(context.registerService("thread", [](const sdk::Params &params, sdk::Reply reply) {
+        m_registrations.push_back(context.services().add("thread", [](const sdk::Params &params, sdk::Reply reply) {
             std::thread([params, reply] { reply(sdk::Params{{"echo", params.value("value")}}); }).detach();
         }));
-        m_registrations.push_back(context.registerService("never", [](const sdk::Params &, sdk::Reply) {}));
-        m_registrations.push_back(context.registerService("storage", [&context](const sdk::Params &params, sdk::Reply reply) {
-            context.storageSet("value", params.value("value"), [&context, reply](Result<void> saved) {
+        m_registrations.push_back(context.services().add("never", [](const sdk::Params &, sdk::Reply) {}));
+        m_registrations.push_back(context.services().add("storage", [&context](const sdk::Params &params, sdk::Reply reply) {
+            context.storage().set("value", params.value("value"), [&context, reply](Result<void> saved) {
                 if (!saved) {
                     reply(saved.error());
                     return;
                 }
-                context.storageGet("value", [reply](Result<QVariant> value) {
+                context.storage().get("value", [reply](Result<QVariant> value) {
                     reply(value ? Result<sdk::Params>(sdk::Params{{"value", value.value()}})
                                 : Result<sdk::Params>(value.error()));
                 });
             });
         }));
-        m_registrations.push_back(context.registerService("ui", [this, &context](const sdk::Params &params, sdk::Reply reply) {
-            auto page = context.registerUi("pages", params.value("id").toString(),
+        m_registrations.push_back(context.services().add("ui", [this, &context](const sdk::Params &params, sdk::Reply reply) {
+            auto page = context.ui().add("pages", params.value("id").toString(),
                                            {{"title", "Runtime"}, {"source", params.value("source")}});
             const bool accepted = page != nullptr;
             if (page)
                 m_registrations.push_back(std::move(page));
             reply(sdk::Params{{"accepted", accepted}});
         }));
-        m_registrations.push_back(context.registerService("echo-event", [&context](const sdk::Params &, sdk::Reply reply) {
-            context.publish("ping", {{"value", 1}});
+        m_registrations.push_back(context.services().add("echo-event", [&context](const sdk::Params &, sdk::Reply reply) {
+            context.events().publish("ping", {{"value", 1}});
             reply(sdk::Params{});
         }));
-        m_registrations.push_back(context.registerService("host", [&context](const sdk::Params &params, sdk::Reply reply) {
-            context.hostCall(params.value("method").toString(), params.value("params").toMap(), reply);
+        m_registrations.push_back(context.services().add("host", [&context](const sdk::Params &params, sdk::Reply reply) {
+            context.host().call(params.value("method").toString(), params.value("params").toMap(), reply);
         }));
-        m_registrations.push_back(context.on("test.host", [this, &context](const sdk::Params &event) {
+        m_registrations.push_back(context.events().on("test.host", [this, &context](const sdk::Params &event) {
             m_events.append(event.value("value").toString());
-            context.publish("seen", {{"values", m_events}});
+            context.events().publish("seen", {{"values", m_events}});
         }));
         done({});
     }

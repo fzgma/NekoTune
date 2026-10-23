@@ -10,7 +10,7 @@ Result<void> checkHostCall(const QString &method) {
                                        "ai.config.clear_key"};
     if ((method.startsWith("extensions.") && !extensionMethods.contains(method)) ||
         method.startsWith("appearance.") || refused.contains(method))
-        return failure("Host method is not available to extensions: " + method);
+        return failure("Host method is not available to extensions: " + method, ErrorCode::PermissionDenied);
     return {};
 }
 } // namespace nekotune

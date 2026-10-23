@@ -2,7 +2,7 @@
   "id": "example.custom-ui",
   "name": "Ocean interface",
   "version": "2.0.0",
-  "apiVersion": 2,
+  "apiVersion": 3,
   "contributes": {
     "pages": [
       {

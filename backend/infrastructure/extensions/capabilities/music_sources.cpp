@@ -81,7 +81,10 @@ void MusicSources::resolve(const QString &source, const QString &id, const QStri
     const auto owner = source.section('/', 0, 0);
     const auto reply = m_host.pendingCalls(owner)->add<sdk::ResolvedAudio>(
         m_host.owner(), std::move(done), purpose == "download" ? timeouts::download : timeouts::call);
-    m_host.guarded(owner, [&] { found.value()->resolve(id, purpose, reply); });
+    m_host.guarded(owner, [&] {
+        found.value()->resolve(id, purpose == "download" ? sdk::ResolvePurpose::Download : sdk::ResolvePurpose::Play,
+                               reply);
+    });
 }
 void MusicSources::resolvePlayback(const QString &source, const QString &id,
                                    std::function<void(Result<Playback>)> done) {

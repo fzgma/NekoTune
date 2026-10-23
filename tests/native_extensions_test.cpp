@@ -222,13 +222,23 @@ class NativeExtensionsTest final : public QObject {
         write(R"({"id":"x.node","name":"Old","version":"1.0.0","apiVersion":1,"main":"main.mjs"})");
         auto manifest = readManifest(directory.path());
         QVERIFY(!manifest);
-        QVERIFY(manifest.error().message.contains("apiVersion 2"));
+        QVERIFY(manifest.error().message.contains("apiVersion 3"));
 
-        write(R"({"id":"x.qt","name":"Qt","version":"1.0.0","apiVersion":2,"qt":"5.15",)"
+        write(R"({"id":"x.qt","name":"Qt","version":"1.0.0","apiVersion":3,"qt":"5.15",)"
               R"("library":{")" + extensionPlatform().toUtf8() + R"(":"lib/x.so"}})");
         manifest = readManifest(directory.path());
         QVERIFY(manifest);
         QVERIFY(manifest.value().unavailable.contains("Qt 5.15"));
+
+        write(R"({"id":"x.old","name":"Old native","version":"1.0.0","apiVersion":2,"library":{}})");
+        manifest = readManifest(directory.path());
+        QVERIFY(!manifest);
+        QVERIFY(manifest.error().message.contains("Native libraries require apiVersion 3"));
+        for (const int version : {1, 2, 3}) {
+            write(QByteArray(R"({"id":"x.ui","name":"UI","version":"1.0.0","apiVersion":)") +
+                  QByteArray::number(version) + R"(,"contributes":{}})");
+            QVERIFY(readManifest(directory.path()));
+        }
 
         write(R"({"id":"x.ui","name":"UI","version":"1.0.0","apiVersion":2,)"
               R"("contributes":{"pages":[{"id":"p","source":"../escape.qml"}]}})");
@@ -329,16 +339,13 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(call(*manager, "extensions.disable", {{"id", "test.shuffle"}}));
         QVERIFY(manager->shuffle().strategies().isEmpty());
     }
-    void sdk20BinaryContextRemainsCompatible() {
+    void sdk2BinariesAreRejected() {
         auto manager = startManager();
         install(*manager, QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.legacy"));
-        enable(*manager, "test.legacy");
-        const auto result = call(*manager, "extensions.call", {{"id", "test.legacy"}, {"service", "ping"}});
-        QVERIFY(result);
-        QCOMPARE(result.value().value("value").toString(), "works");
-        QVERIFY(call(*manager, "extensions.disable", {{"id", "test.legacy"}}));
-        enable(*manager, "test.legacy");
-        QVERIFY(call(*manager, "extensions.call", {{"id", "test.legacy"}, {"service", "ping"}}));
+        const auto refused = call(*manager, "extensions.enable", {{"id", "test.legacy"}, {"trusted", true}});
+        QVERIFY(!refused);
+        QVERIFY(refused.error().message.contains("Unsupported extension interface org.nekotune.IExtensionPlugin/2"));
+        QCOMPARE(entry(*manager, "test.legacy").value("state").toString(), "failed");
     }
 
     void shuffleFailuresFallback_data() {
@@ -588,7 +595,7 @@ class NativeExtensionsTest final : public QObject {
             return;
         }
         const auto message = "Host method is not available to extensions: " + method;
-        QCOMPARE(result.error().code, ErrorCode::InvalidArgument);
+        QCOMPARE(result.error().code, ErrorCode::PermissionDenied);
         QCOMPARE(result.error().message, message);
         const auto logs = call(*manager, "extensions.logs", {{"id", "test.faulty"}});
         QVERIFY(logs);
@@ -1079,7 +1086,7 @@ class NativeExtensionsTest final : public QObject {
         auto manager = startManager();
         auto old = entry(*manager, "test.faulty");
         QCOMPARE(old.value("state").toString(), "failed");
-        QVERIFY(old.value("error").toString().contains("apiVersion 2"));
+        QVERIFY(old.value("error").toString().contains("apiVersion 3"));
         // Replacing it with the native build keeps trust, enabled state and data.
         const auto replaced = call(*manager, "extensions.install", {{"path", faultyDirectory}, {"development", true}, {"replace", true}});
         QVERIFY2(replaced, qPrintable(errorOf(replaced)));

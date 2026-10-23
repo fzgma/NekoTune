@@ -2,6 +2,9 @@
 
 复制本目录的**全部内容（包括 `.github/`）**到自己的插件仓库。
 
+模板使用 SDK 3：`activate()` 接收 `sdk::ExtensionContext`，通过 `context.services().add()` 等
+能力接口注册功能。原生清单使用 `apiVersion: 3`，SDK 2.x 插件需要按新接口迁移并重新构建。
+
 1. 在 `extension.json` 修改 `id`、名称和版本；ID 发布后保持不变。
 2. 在 `plugin.cpp` 编写后台能力，在 `Page.qml` 编写界面。
 3. 从目标宿主的 Release 下载对应平台的 `NekoTuneSDK-*.zip` 并解压。

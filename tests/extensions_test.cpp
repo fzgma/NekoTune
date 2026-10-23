@@ -771,7 +771,7 @@ class ExtensionsTest final : public QObject {
         QVERIFY(QDir().mkpath(QFileInfo(folder + "/" + library).absolutePath()));
         QVERIFY(QFile::copy(slow.filePath(library), folder + "/" + library));
         manifest.remove("type");
-        manifest.insert("apiVersion", 2);
+        manifest.insert("apiVersion", 3);
         manifest.insert("library", slowManifest.value("library"));
         manifest.insert("qt", slowManifest.value("qt"));
       }

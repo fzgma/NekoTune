@@ -12,14 +12,20 @@ class EmptyMusic final : public sdk::IMusicProvider {
     void track(const QString &, std::function<void(Result<sdk::Track>)> done) override {
         done(failure("No tracks in this UI fixture"));
     }
-    void resolve(const QString &, const QString &, std::function<void(Result<sdk::ResolvedAudio>)> done) override {
+    void resolve(const QString &, sdk::ResolvePurpose, std::function<void(Result<sdk::ResolvedAudio>)> done) override {
         done(failure("No audio in this UI fixture"));
     }
 };
 class EmptyLyrics final : public sdk::ILyricsProvider {
   public:
-    void search(const sdk::Params &, sdk::Reply done) override { done(sdk::Params{{"candidates", QVariantList{}}}); }
-    void resolve(const sdk::Params &candidate, sdk::Reply done) override { done(candidate); }
+    void search(const sdk::LyricsQuery &,
+                std::function<void(Result<QVector<sdk::LyricsCandidate>>)> done) override {
+        done(QVector<sdk::LyricsCandidate>{});
+    }
+    void resolve(const sdk::LyricsCandidate &candidate,
+                 std::function<void(Result<sdk::LyricsResolution>)> done) override {
+        done(sdk::LyricsResolution{candidate.document, {}});
+    }
 };
 } // namespace
 
@@ -28,9 +34,9 @@ class DedicatedSourceFixture final : public QObject, public sdk::IExtensionPlugi
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &context, std::function<void(Result<void>)> done) override {
-        m_music = context.registerMusicProvider("music", &m_musicProvider, {{"name", "Test source"}, {"page", "music"}});
-        m_lyrics = context.registerLyricsProvider("lyrics", &m_lyricsProvider, {{"name", "Test lyrics"}});
+    void activate(sdk::ExtensionContext &context, sdk::Done done) override {
+        m_music = context.music().add("music", &m_musicProvider, {.name = "Test source", .page = "music"});
+        m_lyrics = context.lyrics().add("lyrics", &m_lyricsProvider, {.name = "Test lyrics"});
         done({});
     }
     void deactivate() override {
