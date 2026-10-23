@@ -4,7 +4,7 @@ NekoTune 是一款本地优先的 Linux／Windows 桌面音乐播放器，使用
 
 桌面程序 `nekotune` 在一个进程内运行界面和后端。项目同时提供独立后端与独立前端，三种程序共用同一套本地 Socket API。
 
-[文档导航](docs/README.md) · [扩展开发](docs/extensions.md) · [本地 API](docs/API.md) · [待办](docs/todo.md)
+[文档导航](docs/README.md) · [扩展开发](docs/extensions.md) · [本地 API](docs/API.md) · [待办](docs/todo/README.md)
 
 ## 功能
 
