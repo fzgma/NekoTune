@@ -1,45 +1,45 @@
-# 主题壁纸独立分类：分阶段实施手册
+# 扩展系统重构：分阶段实施手册
 
-本目录是“主题壁纸成为独立分类”的实施步骤，承接[主题边界规范 §5.3](../theme-boundaries.md#53-开发方向外观界面壁纸分开选择)。执行者按阶段顺序完成，每个阶段都能单独构建、测试和提交。
+本目录是[扩展系统重构方案](../extensions-refactor-plan.md)的实施步骤。执行者按阶段顺序完成，每个阶段都能单独构建、测试和提交。
 
-上一轮“外观、界面、壁纸分开选择”（原 Phase 0–9）已经接入源码，手册已删除，需要追溯时查看 git 历史（提交 `0381c4f` 起）。
+上一轮“主题壁纸独立分类”的手册已经接入源码并删除，需要追溯时查看 git 历史（提交 `d57f608` 起）。
 
 ## 1. 背景与目标
 
 现状（2026-10-23 按源码核对）：
 
-- 主题通过 `ui.wallpaper` 声明壁纸入口，和 `ui.shell`、`ui.bottomPlayer` 等界面入口放在一起；`theme_package.cpp` 的 `uiSlots` 也把 `wallpaper` 当作界面插槽。
-- 壁纸来源只能在「设置 → 动态音乐壁纸 → 主题壁纸来源」里选择，外观页只用卡片上的“含壁纸”标签提示。
-- 未信任的含代码主题不会出现在壁纸来源列表里，用户无法从这里授权它。
+- `backend/infrastructure/extensions/plugin_manager.cpp` 约 1890 行，同时负责持久化、安装、依赖、加载、生命周期、SDK Context、服务与事件、音源与下载、随机算法、PCM、外观选择、主题导出、日志、开发目录监听和对外快照。
+- 进程内模块之间仍使用 Node 时代的字符串协议：`MusicService` 和 `ExtensionLyricsProvider` 通过 `request("extensions.provider_call" / "extensions.resolve_audio" / ...)` 调用扩展。
+- 扩展的 `hostCall` 直接转给 `IpcRouter::dispatch`，激活完成后可以调用 `extensions.enable` 并传 `trusted: true`，绕过用户授信。
+- 崩溃归因只覆盖后端线程上的调用；后端卡死无感知。
 
-目标：
-
-1. **清单**：壁纸从 `ui` 中拆出来，成为主题贡献的顶层字段 `wallpaper`，和 `variants`（配色）、`ui`（界面）并列。
-2. **外观页**：新增「壁纸」分类，与现有的主题卡片列表分开显示，集中选择内置壁纸样式、“跟随当前主题”和任意主题的壁纸。
-3. 「设置 → 动态音乐壁纸」保留现有控件，两处读写同一份设置。
+目标见方案 §1，架构见方案 §3，SDK 3 见方案 §4。
 
 ## 2. 执行者必读
 
 ### 2.1 总规则
 
-1. **严格按阶段顺序执行**（Phase 0 → Phase 4），不能跳过，也不能合并。每个阶段的“完成标准”全部满足后，才能进入下一阶段。
-2. **只改阶段文档列出的文件。** 如果需要改动没有列出的文件，先停下来说明原因。
-3. **行号只作参考。** 一律用函数名或文中给出的代码片段搜索定位。片段与源码对不上时，停下来报告差异，不要猜测。
-4. **不要顺手重构**，也不要改动无关代码的格式、命名或结构。项目约定见仓库根目录 [AGENT.md](../../AGENT.md)。
-5. **每个阶段结束都要运行该阶段的“验证命令”**，并如实报告结果。失败时不能声称完成；跳过的检查要写明“已跳过”。
-6. **代码风格与周围代码保持一致：**
-   - C++：后端与 `frontend/qt-qml/src/wallpaper/` 使用 4 空格缩进；`frontend/qt-qml/src/controllers/theme_controller.cpp` 使用 2 空格缩进。
-   - QML：4 空格缩进；属性多的组件沿用文件里已有的“分号分隔写在一行”风格。
-   - 注释：少写，只解释“为什么”。
-7. **界面文案**必须同时加到 `frontend/qt-qml/i18n/zh.json` 和 `en.json`，两边的键集合保持一致。
-8. **提交**：每个阶段一个提交，使用文中给出的 Conventional Commits 信息。只提交本阶段的文件，提交前用 `git status` 和 `git diff --cached` 检查。
+1. **严格按阶段顺序执行**（Phase 0 → Phase 8），不能跳过，也不能合并。每个阶段的“完成标准”全部满足后，才能进入下一阶段。
+2. **只改阶段文档列出的文件。** 需要改动未列出的文件时，先停下来说明原因。新建文件以阶段文档的“涉及文件”表为准。
+3. **行号只作参考。** 一律用函数名或文中给出的代码片段定位。片段与源码对不上时，停下来报告差异，不要猜测。
+4. **Phase 2–4 是行为不变的重构**：IPC 协议、`extensions.list` 字段、`registry.json` 格式、日志与错误文本都不变；已有测试只允许做文档列出的调整（例如改 include 路径、改为直接调用新类）。如果某个已有断言必须改，停下来报告。
+5. **不要顺手优化**，也不要改动无关代码的格式、命名或结构。项目约定见仓库根目录 [AGENT.md](../../AGENT.md)。
+6. **每个阶段结束都要运行“验证命令”**，并如实报告结果。失败时不能声称完成；跳过的检查要写明“已跳过”。
+7. **代码风格与周围代码保持一致：**
+   - C++：后端、SDK、示例使用 4 空格缩进；`frontend/qt-qml/src/controllers/theme_controller.cpp` 使用 2 空格缩进。
+   - 新类每个文件一个主要类型；头文件 `#pragma once`；命名空间 `nekotune`（SDK 为 `nekotune::sdk`）。
+   - 注释：少写，只解释“为什么”。从 `plugin_manager.cpp` 搬出的代码**连同原注释一起搬**。
+8. **界面文案**必须同时加到 `frontend/qt-qml/i18n/zh.json` 和 `en.json`，两边的键集合保持一致。
+9. **CMake**：新建的 `.cpp` 加入 `backend/CMakeLists.txt` 中原文件所在的目标（`nekotune_infrastructure`、`nekotune_ipc` 等），按目录分组、保持现有顺序风格。
+10. **提交**：每个阶段一个提交（Phase 4 分 4A、4B 两次提交），使用文中给出的 Conventional Commits 信息。只提交本阶段的文件，提交前用 `git status` 和 `git diff --cached` 检查。
 
 ### 2.2 遇到以下情况必须停止并报告
 
 - 阶段的“前置条件”不满足。
 - 文档引用的函数、文件或代码片段不存在，或者与描述明显不同。
 - 修改后出现与本阶段无关的测试失败，并且 Phase 0 的基线里没有这个失败。
-- 需要修改 IPC 协议、后端 `selections` 键或设置键，但文档里没有写到。
+- Phase 2–4 中需要修改 IPC 协议、`extensions.list` 字段、`registry.json` 格式，或改变已有测试断言。
+- 迁移后的文件仍需要 include 违反分层规则的头文件（`tests/dependency_boundaries.cmake` 失败）。
 
 ## 3. 已确定的设计决定
 
@@ -47,37 +47,49 @@
 
 | 编号 | 决定 | 原因 |
 | --- | --- | --- |
-| W1 | 主题贡献新增顶层字段 `wallpaper`：值是包内 `.qml` 相对路径（字符串），根对象继承 `Item`；必须同时声明 `schemaVersion: 1` | 壁纸与配色、界面并列，成为独立分类 |
-| W2 | **废弃 `ui.wallpaper`，不做兼容读取。** 校验遇到 `ui.wallpaper` 时报错 `Theme wallpaper moved from ui.wallpaper to wallpaper`，旧包需要作者修改后重新导入 | 项目尚未正式发布；明确的报错比静默兼容更容易排查 |
-| W3 | `providesWallpaper()` 改为读取顶层 `wallpaper`；`providesLayout()` 不变（壁纸本来就不算界面） | 共享判断只改一处 |
-| W4 | 壁纸选择**继续保存在前端设置** `wallpaper.style` 与 `wallpaper.themeWallpaper`，语义不变：`themeWallpaper` 为 `""` 表示跟随当前主题，否则是主题贡献 ID，只在 `style: "theme"` 时生效。后端 `selections` 不新增键，IPC 不变 | 壁纸是前端功能；保持旧配置有效，不需要迁移 |
-| W5 | “跟随当前主题”的规则不变：先取界面选择的 `wallpaper`，没有时再取外观选择的 `wallpaper`，都没有就回退经典卡片 | 只换字段位置，不改变行为 |
-| W6 | 外观页新增「主题」「壁纸」两个分类标签。「主题」就是现有页面内容，保持不变；「壁纸」依次列出：三个内置样式（经典、黑胶、全屏歌词）、“跟随当前主题”、每个提供壁纸的主题 | 壁纸集中在一处选择，不打乱现有主题卡片 |
-| W7 | 在「壁纸」分类中点选**只修改样式和来源**，**不改变 `enabled`**：内置样式只写 `style`，并保留 `themeWallpaper`；“跟随当前主题”写 `style: "theme"` 和 `themeWallpaper: ""`；具体主题写 `style: "theme"` 和该主题 ID。两个键必须在一次保存中写入 | 开关壁纸仍然归用户在壁纸设置里决定（§6.2）；一次写入避免只保存了一半 |
-| W8 | `WallpaperManager` 新增 `Q_INVOKABLE bool setOptions(const QVariantMap &values)`：全部校验通过后一次保存，任何一项非法就整体拒绝；`setOption` 改为调用它 | W7 需要原子写入；校验和保存只保留一份实现 |
-| W9 | 选择未信任的含代码主题壁纸时，复用现有的信任对话框，`target` 为 `"wallpaper"`。`ThemeController::selectWallpaper(id, trusted)` 负责校验和授权，成功后发出信号 `wallpaperReady(id)`，由外观页写入壁纸设置 | `ThemeController` 不持有 `WallpaperManager`，用信号避免新增依赖；信任流程和其他选择保持一致 |
-| W10 | 外观页新增可选属性 `wallpaper`（`WallpaperManager` 或 `null`）。为 `null` 时（未注入 `wallpaperManager`，例如部分测试或恢复窗口）不显示「壁纸」标签。安全模式下禁用主题壁纸卡片，内置样式仍然可以选 | 外观页在恢复窗口中也会被复用 |
+| R1 | 继续在后端进程内用 `QPluginLoader` 加载原生插件，不做进程隔离、沙箱、C ABI | 当前痛点是结构混乱，不是隔离；保留 2026-10-20 迁移的成果 |
+| R2 | 代码留在现有分层：业务接口放 `backend/domain/extensions/`，实现放 `backend/infrastructure/extensions/{package,runtime,capabilities}/`，外观实现放 `backend/infrastructure/appearance/` | `tests/dependency_boundaries.cmake` 禁止 application/domain/ipc 依赖 infrastructure |
+| R3 | 门面保留类名 `PluginManager` 和文件 `plugin_manager.{h,cpp}`，目标 ≤ 600 行，只编排生命周期 | 减少 `BackendSession`、测试的改名噪音 |
+| R4 | `HostGateway` 拒绝下列方法，其余放行：`extensions.*` 中除 `extensions.call`、`extensions.list` 以外的全部方法；`appearance.*`；`library.delete`、`library.migrate`、`library.restore`、`library.restore_preview`、`library.remove_rollback`；`history.clear`；`ai.config.get`、`ai.config.set`、`ai.config.clear_key`。拒绝时返回 `ErrorCode::InvalidArgument`，消息为 `Host method is not available to extensions: <method>`，并写一条 `error` 级扩展日志 | 信任只能由用户在宿主界面授予；不可逆操作和其他凭据不交给扩展。错误码到 SDK 3 再细化（R11） |
+| R5 | 扩展状态用 `enum class ExtensionState { Disabled, Blocked, Starting, Running, Stopping, Failed }`，对外字符串保持 `disabled/blocked/starting/running/stopping/failed` | 内部类型安全，协议不变 |
+| R6 | 删除内部方法 `extensions.provider_call`、`extensions.resolve_audio`、`extensions.release_audio`、`extensions.download_audio`、`extensions.cancel_download`、`extensions.download_completed`；业务服务改用 `IMusicSourceCatalog`、`ILyricsSourceCatalog` | 方案 §2.1 |
+| R7 | 超时常量集中在 `runtime/call_guard.h`：激活 30 s、普通调用 30 s、下载解析 610 s、`downloaded` 120 s，数值不变 | 只换位置，不改行为 |
+| R8 | SDK 3：IID `org.nekotune.IExtensionPlugin/3`，`NekoTuneSDK` 版本 `3.0.0`；不兼容 2.x，旧库加载时报 `Unsupported extension interface org.nekotune.IExtensionPlugin/2`。带 `library` 的清单必须 `apiVersion: 3`；纯界面扩展和主题包接受 `1`、`2`、`3` | 方案 §4；主题包不因 SDK 改版被迫改清单 |
+| R9 | SDK 3 Context 按能力分组（方案 §4.1），描述符为强类型结构体（§4.2）；`hostCall` 仍是字符串方法 | 方案 §4 |
+| R10 | 只迁移仓库内示例、测试夹具和 SDK 模板；外部插件（酷狗、网易云、世界计划）不在范围内 | 用户决定以后重写 |
+| R11 | SDK 3 在 `nekotune/result.h` 的 `ErrorCode` 末尾追加 `PermissionDenied`，`HostGateway` 在 Phase 5 改用它 | 追加枚举值放在 ABI 破坏的那次升级里 |
+| R12 | 崩溃归因改为 `thread_local`；SDK 3 提供 `sdk::AttributedScope`；启动标记 `config/extensions/session-active` 记录本次加载过代码的扩展，异常退出且无哨兵归因时计数，连续 2 次进入安全模式 | 方案 §3.6 |
+| R13 | 看门狗：后端线程上的扩展调用 5 s 告警（`warn` 日志），30 s 写入崩溃哨兵（下次启动按崩溃停用）；随机算法 `select` 超过 200 ms 告警。看门狗不中断线程 | 方案 §3.6 |
+| R14 | 外观选择移到 `AppearanceService`，保存到 `config/extensions/appearance.json`；首次启动从 `registry.json` 的 `selections` 迁移，迁移后从 `registry.json` 删除该键。IPC `extensions.select` → `appearance.select`，`extensions.export_theme` → `appearance.export_theme`，新增 `appearance.get` 和事件 `appearance.changed`；旧方法删除，不做别名 | 方案 §3.7；项目未正式发布 |
+| R15 | `extensions.list` 改为方案 §3.8 的结构；前端 `ExtensionsController` 的 Q_PROPERTY 名称和 QML 可见行为保持不变 | 协议整理，QML 页面不需要跟着改 |
+| R16 | 已信任扩展的 QML 能拿到完整 `controllers`，同一引擎内无法限制；本次不处理，写入文档的已知限制 | 范围控制 |
 
 ### 名词对照
 
 | 文档用语 | 代码中的名字 |
 | --- | --- |
-| 提供壁纸 | 主题贡献顶层 `wallpaper` 是非空字符串；用 `providesWallpaper()` 判断，前端条目字段为 `hasWallpaper` |
-| 跟随当前主题 | `wallpaper.style === "theme"` 且 `wallpaper.themeWallpaper === ""`；入口来自 `ThemeController::uiSlots().wallpaper` |
-| 指定来源 | `wallpaper.themeWallpaper` 为主题 ID；入口来自 `ThemeController::wallpaperSlots()[id]` |
-| 可用的壁纸 | 主题 `available` 为真，并且 `codeAllowed()` 为真（无代码或已信任） |
+| 门面 | `PluginManager`（实现 `IExtensionBackend`） |
+| 一次运行 | `PluginManager::Run`；Phase 3 后由 `ExtensionRuntime` 表示 |
+| 安装记录 | `PluginManager::Entry`；Phase 2 后由 `ExtensionRecord`（持久化部分）表示 |
+| 注册 | `Context::registerXxx` / SDK 3 `ctx.xxx().add(...)` 返回的 `RegistrationPtr` |
+| 内部方法 | R6 列出的 `extensions.*` 方法，只在后端进程内使用 |
+| 公开方法 | `backend/ipc/api/extensions_api.cpp` 注册的 `extensions.*` 方法 |
 
 ## 4. 阶段一览
 
 | 阶段 | 文档 | 内容 | 用户可见变化 |
 | --- | --- | --- | --- |
 | 0 | [phase-0-baseline.md](phase-0-baseline.md) | 建分支、构建、记录测试基线 | 无 |
-| 1 | [phase-1-manifest-wallpaper.md](phase-1-manifest-wallpaper.md) | 清单新增顶层 `wallpaper`，废弃 `ui.wallpaper`，更新示例 | 旧写法的主题导入时报错 |
-| 2 | [phase-2-frontend-wallpaper.md](phase-2-frontend-wallpaper.md) | 前端读取新字段；`setOptions`；`selectWallpaper` 与信任 | 无（入口在 Phase 3） |
-| 3 | [phase-3-appearance-wallpaper.md](phase-3-appearance-wallpaper.md) | 外观页「壁纸」分类 | 外观页新增壁纸标签 |
-| 4 | [phase-4-docs-and-acceptance.md](phase-4-docs-and-acceptance.md) | 同步文档，完整验收 | 无 |
+| 1 | [phase-1-host-gateway.md](phase-1-host-gateway.md) | `HostGateway` 修复 `hostCall` 越权 | 扩展无法再调用被拒绝的方法 |
+| 2 | [phase-2-package-layer.md](phase-2-package-layer.md) | 强类型 Manifest、`ExtensionRegistry`、`PackageStore` | 无 |
+| 3 | [phase-3-runtime-layer.md](phase-3-runtime-layer.md) | 状态枚举、依赖图、加载器、`CallGuard`、`RegistrationScope`、`DevWatcher` | 无 |
+| 4 | [phase-4-capabilities.md](phase-4-capabilities.md) | 能力注册表，删除内部字符串方法 | 无 |
+| 5 | [phase-5-sdk3.md](phase-5-sdk3.md) | SDK 3，迁移示例、夹具、模板 | 旧插件需要重新构建 |
+| 6 | [phase-6-crash-watchdog.md](phase-6-crash-watchdog.md) | 线程归因、启动标记、看门狗 | 卡死与无法归因的崩溃可恢复 |
+| 7 | [phase-7-appearance-and-snapshot.md](phase-7-appearance-and-snapshot.md) | `AppearanceService`、新的 `extensions.list` | 无（协议变化，界面行为不变） |
+| 8 | [phase-8-docs-and-acceptance.md](phase-8-docs-and-acceptance.md) | 同步文档，完整验收 | 无 |
 
-每个阶段都依赖前一个阶段。
+每个阶段都依赖前一个阶段。Phase 1 可以单独合并发布；Phase 2–7 之间不要发布。
 
 ## 5. 通用命令
 
@@ -99,16 +111,16 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 ./build/tests/nekotune_extensions_test 测试函数名
 
-QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-./build/tests/nekotune_wallpaper_test 测试函数名
-
-# 单个 QML 测试文件（所有 tests/qml/tst_*.qml 都由 nekotune_slider_quick_test 运行）
+# 单个 QML 测试文件
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_QUICK_CONTROLS_STYLE=Fusion \
 ./build/tests/nekotune_slider_quick_test -input tests/qml/tst_文件名.qml
 
 # 依赖边界与空白检查
 cmake -DSOURCE_DIR="$PWD" -P tests/dependency_boundaries.cmake
 git diff --check
+
+# 门面行数（Phase 3 起每阶段记录）
+wc -l backend/infrastructure/extensions/plugin_manager.cpp
 ```
 
 测试可执行文件的实际路径以 `build/tests/` 下的产物为准；找不到时用 `find build -name 'nekotune_*_test' -type f` 查找。
@@ -117,15 +129,19 @@ git diff --check
 
 | 文件 | 本计划中的作用 |
 | --- | --- |
-| `backend/infrastructure/extensions/theme_package.cpp` | `validate()` 校验主题；`uiSlots` 列表；`exportTheme()` 的 `includesQml` |
-| `shared/themes/theme_resolution.{h,cpp}` | `providesLayout()`、`providesWallpaper()` |
-| `examples/extensions/theme-qml/extension.json` | 含壁纸的示例主题 |
-| `frontend/qt-qml/src/controllers/theme_controller.{h,cpp}` | `rebuild()` 生成 `uiSlots.wallpaper` 与 `wallpaperSlots`；选择与信任流程 |
-| `frontend/qt-qml/src/wallpaper/wallpaper_manager.{h,cpp}` | 壁纸设置的默认值、校验和保存 |
-| `frontend/qt-qml/qml/components/AppearancePanel.qml` | 外观页（`SettingsPage.qml` 和恢复窗口 `ExtensionsWindow.qml` 都会复用） |
-| `frontend/qt-qml/qml/pages/SettingsPage.qml` | 创建 `AppearancePanel`，可以拿到 `wallpaperManager` |
-| `frontend/qt-qml/qml/wallpaper/WallpaperSettings.qml` | 壁纸设置；内置样式名称和主题来源列表 |
-| `tests/native_extensions_test.cpp` | `themeUiCapabilities`、`themeLayoutSelection` 等后端测试 |
-| `tests/extensions_test.cpp` | `wallpaperOnlyThemeDoesNotRequestTrust`、`themeCodeLoadsOnlyAfterTrust` 等联合测试 |
-| `tests/wallpaper_test.cpp` | `publishTheme()` 辅助函数与主题壁纸测试 |
-| `tests/qml/tst_appearance_panel.qml`、`tst_wallpaper_settings.qml` | QML 测试 |
+| `backend/infrastructure/extensions/plugin_manager.{h,cpp}` | 被拆分的门面；`Context`、`Run`、`Entry`、`request()` 分派 |
+| `backend/infrastructure/extensions/extension_manifest.{h,cpp}` | 清单解析，Phase 2 改为强类型 |
+| `backend/infrastructure/extensions/audio_proxy.{h,cpp}` | 在线音频代理与下载，Phase 4 移入 `capabilities/` |
+| `backend/infrastructure/extensions/crash_guard.{h,cpp}` | 崩溃哨兵，Phase 3 移入 `runtime/`，Phase 6 改为线程归因 |
+| `backend/infrastructure/extensions/extension_lyrics_provider.{h,cpp}` | 歌词来源适配，Phase 4 改用 `ILyricsSourceCatalog` |
+| `backend/domain/extensions/extension_backend.h` | `IExtensionBackend` |
+| `backend/application/extensions/{extension_service.h,music_service.{h,cpp}}` | Phase 4 改用 `IMusicSourceCatalog` |
+| `backend/application/playback/shuffle_strategy_service.{h,cpp}` | `setCatalogue(catalogue, Selector)` |
+| `backend/runtime/backend_session.{h,cpp}` | 组装：`m_extensionBackend.start(...)`、歌词来源同步、随机目录同步 |
+| `backend/ipc/api/extensions_api.cpp` | 公开 `extensions.*` 方法表 |
+| `sdk/include/nekotune/sdk/*.h`、`sdk/include/nekotune/result.h` | SDK 头文件，Phase 5 重写 |
+| `sdk/CMakeLists.txt`、`sdk/cmake/NekoTuneExtension.cmake` | SDK 版本与 `apiVersion` 写入 |
+| `examples/extensions/*`、`sdk/templates/native/*` | Phase 5 迁移 |
+| `tests/native_extensions_test.cpp`、`tests/native_extensions/*` | 后端扩展测试与夹具 |
+| `tests/extensions_test.cpp` | 前后端联合测试 |
+| `frontend/qt-qml/src/controllers/{extensions_controller,theme_controller}.{h,cpp}` | Phase 7 适配新协议 |

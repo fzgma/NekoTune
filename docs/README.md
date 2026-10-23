@@ -32,7 +32,8 @@
 | --- | --- |
 | [产品需求](PRD.md) | 产品定位、目标及早期里程碑；不作为功能完成清单 |
 | [待办](todo/README.md) | 按 feat、bug、perf、ux、chore 分类；包含优先级、状态与验收记录 |
-| [主题壁纸独立分类](phase/README.md) | 分阶段实施方案：顶层 `wallpaper` 字段与外观页壁纸分类（已实施，步骤保留供追溯） |
+| [扩展系统重构方案](extensions-refactor-plan.md) | 现状诊断、目标分层、SDK 3 与已定取舍 |
+| [扩展系统重构实施手册](phase/README.md) | 分阶段实施步骤（Phase 0–8） |
 | [C++ 原生扩展迁移](native-extensions-plan.md) | 已实施迁移的设计取舍与历史记录，包含迁移前的 Node.js 链路 |
 
 ## 阅读与维护约定
