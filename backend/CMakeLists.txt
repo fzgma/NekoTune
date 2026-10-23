@@ -31,7 +31,6 @@ target_link_libraries(nekotune_providers PUBLIC nekotune_domain nekotune_paths Q
 
 add_library(nekotune_infrastructure STATIC
     infrastructure/extensions/audio_proxy.cpp
-    infrastructure/extensions/crash_guard.cpp
     infrastructure/extensions/extension_lyrics_provider.cpp
     infrastructure/extensions/extension_secrets.cpp
     infrastructure/extensions/host_gateway.cpp
@@ -43,6 +42,14 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/extensions/package/theme_package.cpp
     infrastructure/extensions/package/zip_archive.cpp
     infrastructure/extensions/plugin_manager.cpp
+    infrastructure/extensions/runtime/call_guard.cpp
+    infrastructure/extensions/runtime/crash_guard.cpp
+    infrastructure/extensions/runtime/dependency_graph.cpp
+    infrastructure/extensions/runtime/dev_watcher.cpp
+    infrastructure/extensions/runtime/extension_state.cpp
+    infrastructure/extensions/runtime/host_context.cpp
+    infrastructure/extensions/runtime/native_loader.cpp
+    infrastructure/extensions/runtime/registration_scope.cpp
     infrastructure/ai/ai_backend.cpp
     infrastructure/ai/ai_settings.cpp
     infrastructure/credentials/credential_store.cpp

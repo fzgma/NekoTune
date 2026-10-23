@@ -5,17 +5,21 @@
 #include "infrastructure/extensions/package/extension_manifest.h"
 #include "infrastructure/extensions/package/extension_registry.h"
 #include "infrastructure/extensions/package/package_store.h"
+#include "infrastructure/extensions/runtime/extension_state.h"
+#include "infrastructure/extensions/runtime/call_guard.h"
+#include "infrastructure/extensions/runtime/dependency_graph.h"
+#include "infrastructure/extensions/runtime/native_loader.h"
 #include <QHash>
 #include <QSet>
 #include <QStringList>
 #include <deque>
 #include <memory>
 
-class QPluginLoader;
-
 namespace nekotune {
 class AudioProxy;
 class IPcmSource;
+class HostContext;
+struct ExtensionRuntime;
 }
 
 namespace nekotune {
@@ -44,12 +48,12 @@ class PluginManager final : public IExtensionBackend {
     void shuffleCatalogueChanged();
 
   private:
-    class Context;
-    class Handle;
-    struct Run;
+    friend class HostContext;
+    friend class HostRegistration;
+    using Run = ExtensionRuntime;
     struct Entry : ExtensionRecord {
         ExtensionManifest manifest;
-        QString state = "disabled";
+        ExtensionState state = ExtensionState::Disabled;
         QString error;
     };
     using Done = std::function<void(Result<void>)>;
@@ -67,6 +71,7 @@ class PluginManager final : public IExtensionBackend {
     void runMutations();
     void startup(int index, QStringList order, Done finished);
 
+    DependencyNodes dependencyNodes() const;
     Result<QStringList> dependencyOrder(const QString &id) const;
     QStringList dependents(const QString &id) const;
     void enable(const QString &id, bool trusted, Done done);
@@ -94,20 +99,16 @@ class PluginManager final : public IExtensionBackend {
     void broadcast(const QVariantMap &event);
     void reloading(const QStringList &ids, bool active);
     void watchDevelopment(const std::shared_ptr<Run> &run);
-    Result<QString> loadablePath(const Entry &entry);
 
     /// Call into extension code with crash attribution; exceptions fault the extension.
     template <class F> bool guarded(const QString &id, F &&call);
-    /// Wrap a completion so it may be called once from any thread, fails on timeout and fails
-    /// when the run stops first.
-    Completion pending(const std::shared_ptr<Run> &run, Completion done, int timeoutMs);
 
     PackageStore m_packages;
+    NativeLoader m_loader{this, m_packages};
     ExtensionRegistry m_registry;
     QHash<QString, Entry> m_entries;
     QStringList m_order;
     QHash<QString, std::shared_ptr<Run>> m_runs;
-    QHash<QString, QPluginLoader *> m_loaders;
     QHash<QString, QList<QVariantMap>> m_logs;
     QSet<QString> m_secrets;
     /// Extensions whose native QML modules were loaded this session, and every directory holding
@@ -128,4 +129,14 @@ class PluginManager final : public IExtensionBackend {
     bool m_changePending = false;
     bool m_safeMode = false;
 };
+
+template <class F> bool PluginManager::guarded(const QString &id, F &&call) {
+    const auto error = runAttributed(id, std::forward<F>(call));
+    if (!error)
+        return true;
+    // Fault from the event loop; the caller may still be iterating the run's registrations.
+    post([this, id, message = *error] { fault(id, message); });
+    return false;
+}
+
 } // namespace nekotune

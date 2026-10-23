@@ -1,44 +1,28 @@
-#include "domain/audio/pcm_source.h"
 #include "infrastructure/extensions/plugin_manager.h"
 #include "infrastructure/extensions/audio_proxy.h"
-#include "infrastructure/extensions/crash_guard.h"
+#include "infrastructure/extensions/runtime/call_guard.h"
+#include "infrastructure/extensions/runtime/extension_runtime.h"
+#include "infrastructure/extensions/runtime/host_context.h"
+#include "infrastructure/extensions/runtime/dev_watcher.h"
+#include "infrastructure/extensions/runtime/registration_scope.h"
 #include "infrastructure/extensions/extension_secrets.h"
-#include "infrastructure/extensions/host_gateway.h"
 #include "infrastructure/extensions/package/json_file.h"
-#include "infrastructure/extensions/package/semver.h"
 #include "infrastructure/extensions/package/theme_package.h"
 #include "themes/theme_resolution.h"
 #include <nekotune/sdk/extension_plugin.h>
-#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
-#include <QFileSystemWatcher>
 #include <QJsonDocument>
-#include <QMutex>
 #include <QPluginLoader>
 #include <QPointer>
-#include <QScopeGuard>
 #include <QThread>
 #include <QTimer>
-#include <QUuid>
-#include <atomic>
 #include <algorithm>
-#include <map>
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#endif
 
 namespace nekotune {
 namespace {
-const QStringList uiKinds{"pages", "settings", "slots", "themes", "menus", "toolbars"};
-const QStringList registrationKinds = QStringList{"services", "commands", "music", "lyrics", "shuffle"} + uiKinds;
-const QStringList sourceKinds{"pages", "settings", "slots", "toolbars"};
-constexpr int activationTimeout = 30'000;
-constexpr int callTimeout = 30'000;
-
 using Done = std::function<void(Result<void>)>;
 /// Run asynchronous steps one after another; stopOnError ends the chain at the first failure.
 void sequence(QStringList items, std::function<void(const QString &, Done)> step, bool stopOnError, Done done) {
@@ -54,375 +38,7 @@ void sequence(QStringList items, std::function<void(const QString &, Done)> step
             sequence(items, step, stopOnError, done);
     });
 }
-struct PendingCall {
-    std::atomic<bool> fired{false};
-    IExtensionBackend::Completion done;
-    QTimer *timer = nullptr;
-};
-void finishCall(const std::shared_ptr<PendingCall> &call, Result<QVariantMap> result) {
-    if (call->fired.exchange(true))
-        return;
-    if (call->timer) {
-        call->timer->stop();
-        call->timer->deleteLater();
-    }
-    auto done = std::move(call->done);
-    if (done)
-        done(std::move(result));
-}
 } // namespace
-
-struct PluginManager::Run {
-    QString id;
-    QString directory;
-    quint64 generation = 0;
-    QString state = "starting";
-    sdk::IExtensionPlugin *plugin = nullptr;
-    std::unique_ptr<Context> context;
-    QHash<QString, QMap<QString, QVariantMap>> registrations;
-    // Function objects and providers below belong to the plugin; stop() drops them all.
-    QHash<QString, sdk::Handler> services, commands;
-    QHash<QString, sdk::IMusicProvider *> music;
-    QHash<QString, sdk::ILyricsProvider *> lyrics;
-    struct Shuffle {
-        sdk::IShuffleProvider *provider = nullptr;
-        quint64 generation = 0;
-        bool failed = false;
-    };
-    QMap<QString, Shuffle> shuffle;
-    std::map<quint64, sdk::RegistrationPtr> pcm;
-    std::map<quint64, std::pair<QString, sdk::EventHandler>> subscriptions;
-    quint64 nextSubscription = 1;
-    QVariantMap storage;
-    QSet<QString> secretKeys;
-    QList<Done> waiters;
-    QList<std::shared_ptr<PendingCall>> calls;
-    std::unique_ptr<QTimer> startTimer, debounce;
-    std::unique_ptr<QFileSystemWatcher> watcher;
-};
-
-class PluginManager::Handle final : public sdk::Registration {
-  public:
-    Handle(PluginManager *manager, std::weak_ptr<Run> run, std::function<void(Run &)> remove)
-        : m_manager(manager), m_run(std::move(run)), m_remove(std::move(remove)) {}
-    ~Handle() override { dispose(); }
-    void dispose() override {
-        if (m_disposed.exchange(true) || !m_manager)
-            return;
-        m_manager->post([manager = m_manager, run = m_run, remove = m_remove] {
-            if (const auto alive = run.lock(); alive && manager) {
-                remove(*alive);
-                manager->notifyChanged();
-            }
-        });
-    }
-
-  private:
-    QPointer<PluginManager> m_manager;
-    std::weak_ptr<Run> m_run;
-    std::function<void(Run &)> m_remove;
-    std::atomic<bool> m_disposed{false};
-};
-
-class PluginManager::Context final : public sdk::IExtensionContext, public sdk::IShuffleExtensionContext, public sdk::IPcmExtensionContext {
-  public:
-    Context(PluginManager *manager, std::weak_ptr<Run> run, const Entry &entry, QString dataDirectory,
-            QVariantMap config)
-        : m_manager(manager), m_run(std::move(run)), m_id(entry.manifest.id), m_version(entry.manifest.version),
-          m_directory(entry.directory), m_dataDirectory(std::move(dataDirectory)), m_config(std::move(config)) {}
-
-    QString id() const override { return m_id; }
-    QString version() const override { return m_version; }
-    QString directory() const override { return m_directory; }
-    QString dataDirectory() const override { return m_dataDirectory; }
-    sdk::Params config() const override {
-        QMutexLocker lock(&m_mutex);
-        return m_config;
-    }
-    void setConfig(const QVariantMap &config) {
-        QMutexLocker lock(&m_mutex);
-        m_config = config;
-    }
-    void updateConfig(const sdk::Params &config, std::function<void(Result<void>)> done) override {
-        auto reply = forward(std::move(done));
-        onRun([manager = m_manager, config, reply](const std::shared_ptr<Run> &run) {
-            const auto result = manager->setConfig(run->id, config);
-            reply(result ? Result<void>() : Result<void>(result.error()));
-        });
-    }
-    void hostCall(const QString &method, const sdk::Params &params, sdk::Reply done) override {
-        auto reply = forward(std::move(done));
-        onRun([manager = m_manager, method, params, reply](const std::shared_ptr<Run> &run) {
-            // Also keeps lifecycle mutations out: a starting extension holds the mutation queue.
-            if (const auto allowed = checkHostCall(method); !allowed) {
-                manager->recordLog(run->id, "error", allowed.error().message);
-                reply(allowed.error());
-            } else if (!manager->m_hostCall)
-                reply(failure("Host unavailable"));
-            else
-                manager->m_hostCall(method, params, reply);
-        });
-    }
-    sdk::RegistrationPtr registerService(const QString &id, sdk::Handler handler) override {
-        return add("services", id, {}, [id, handler](Run &run) { run.services.insert(id, handler); },
-                   [id](Run &run) { run.services.remove(id); });
-    }
-    void callService(const QString &extension, const QString &service, const sdk::Params &params,
-                     sdk::Reply done) override {
-        auto reply = forward(std::move(done));
-        onRun([manager = m_manager, extension, service, params, reply](const std::shared_ptr<Run> &) {
-            manager->invoke(extension, service, params, reply);
-        });
-    }
-    sdk::RegistrationPtr registerCommand(const QString &id, sdk::Handler handler,
-                                         const sdk::Params &descriptor) override {
-        return add("commands", id, descriptor, [id, handler](Run &run) { run.commands.insert(id, handler); },
-                   [id](Run &run) { run.commands.remove(id); });
-    }
-    sdk::RegistrationPtr registerUi(const QString &kind, const QString &id, const sdk::Params &descriptor) override {
-        if (!uiKinds.contains(kind)) {
-            log(QtWarningMsg, "Unknown UI registration kind: " + kind);
-            return nullptr;
-        }
-        return add(kind, id, descriptor, [](Run &) {}, [](Run &) {});
-    }
-    sdk::RegistrationPtr registerMusicProvider(const QString &id, sdk::IMusicProvider *provider,
-                                               const sdk::Params &descriptor) override {
-        if (!provider)
-            return nullptr;
-        return add("music", id, descriptor, [id, provider](Run &run) { run.music.insert(id, provider); },
-                   [id](Run &run) { run.music.remove(id); });
-    }
-    sdk::RegistrationPtr registerLyricsProvider(const QString &id, sdk::ILyricsProvider *provider,
-                                                const sdk::Params &descriptor) override {
-        if (!provider)
-            return nullptr;
-        return add("lyrics", id, descriptor, [id, provider](Run &run) { run.lyrics.insert(id, provider); },
-                   [id](Run &run) { run.lyrics.remove(id); });
-    }
-    sdk::RegistrationPtr on(const QString &event, sdk::EventHandler handler) override {
-        // Reserve the key now so the handle can remove a subscription installed later.
-        const auto key = m_nextSubscription.fetch_add(1);
-        onRun([key, event, handler](const std::shared_ptr<Run> &run) {
-            if (run->state != "stopping")
-                run->subscriptions.emplace(key, std::pair{event, handler});
-        });
-        return std::make_unique<Handle>(m_manager, m_run, [key](Run &run) { run.subscriptions.erase(key); });
-    }
-    sdk::PcmCapabilities pcmCapabilities() const override {
-        if (QThread::currentThread() != m_manager->thread() || !m_manager->m_pcm)
-            return {false, {}, QStringLiteral("pcm_unavailable")};
-        return m_manager->m_pcm->capabilities();
-    }
-    sdk::RegistrationPtr subscribePcm(sdk::PcmHandler handler) override {
-        if (QThread::currentThread() != m_manager->thread() || !handler || !m_manager->m_pcm)
-            return nullptr;
-        const auto run = m_run.lock();
-        if (!run || run->state == "stopping") return nullptr;
-        const auto key = m_nextSubscription.fetch_add(1);
-        auto active = std::make_shared<std::atomic<bool>>(true);
-        auto registration = m_manager->m_pcm->subscribe(
-            [manager = QPointer<PluginManager>(m_manager), weak = m_run, id = m_id, active, handler](const sdk::PcmBlock &block) {
-                const auto alive = weak.lock();
-                if (manager && alive && alive->state == "running" && active->load())
-                    manager->guarded(id, [&] { handler(block); });
-            });
-        if (!registration) return nullptr;
-        run->pcm.emplace(key, std::move(registration));
-        class Subscription final : public sdk::Registration {
-          public:
-            Subscription(std::shared_ptr<std::atomic<bool>> active, sdk::RegistrationPtr handle)
-                : active(std::move(active)), handle(std::move(handle)) {}
-            ~Subscription() override { dispose(); }
-            void dispose() override { *active = false; handle.reset(); }
-          private:
-            std::shared_ptr<std::atomic<bool>> active;
-            sdk::RegistrationPtr handle;
-        };
-        return std::make_unique<Subscription>(active,
-            std::make_unique<Handle>(m_manager, m_run, [key](Run &alive) { alive.pcm.erase(key); }));
-    }
-    sdk::RegistrationPtr registerShuffleStrategy(const QString &id, sdk::IShuffleProvider *provider,
-                                                 const sdk::Params &descriptor) override {
-        if (!provider || descriptor.value("name").toString().trimmed().isEmpty()) {
-            log(QtWarningMsg, "Shuffle strategy requires a provider and a name");
-            return nullptr;
-        }
-        return add("shuffle", id, descriptor,
-                   [id, provider, manager = m_manager](Run &run) {
-                       run.shuffle.insert(id, {provider, ++manager->m_generation, false});
-                   },
-                   [id](Run &run) { run.shuffle.remove(id); });
-    }
-    void publish(const QString &event, const sdk::Params &data) override {
-        onRun([manager = m_manager, event, data](const std::shared_ptr<Run> &run) {
-            if (!validExtensionId(event)) {
-                manager->recordLog(run->id, "error", "Invalid event name: " + event);
-                return;
-            }
-            const QVariantMap message{
-                {"event", QStringLiteral("extension.%1.%2").arg(run->id, event)}, {"extensionId", run->id}, {"data", data}};
-            manager->broadcast(message);
-            emit manager->eventReady(message);
-        });
-    }
-    void storageGet(const QString &key, std::function<void(Result<QVariant>)> done) override {
-        auto reply = forward(std::move(done));
-        onRun([key, reply](const std::shared_ptr<Run> &run) {
-            if (key.size() > 256)
-                reply(failure("Invalid storage key"));
-            else
-                reply(run->storage.value(key));
-        });
-    }
-    void storageSet(const QString &key, const QVariant &value, std::function<void(Result<void>)> done) override {
-        auto reply = forward(std::move(done));
-        onRun([dataDirectory = m_dataDirectory, key, value, reply](const std::shared_ptr<Run> &run) {
-            if (key.size() > 256) {
-                reply(failure("Invalid storage key"));
-                return;
-            }
-            auto next = run->storage;
-            next.insert(key, value);
-            if (QJsonDocument::fromVariant(next).toJson(QJsonDocument::Compact).size() > 8 * 1024 * 1024) {
-                reply(failure("SDK storage limit exceeded; use dataDirectory for larger files"));
-                return;
-            }
-            const auto saved = writeJsonFile(QDir(dataDirectory).filePath("storage.json"), next);
-            if (saved)
-                run->storage = next;
-            reply(saved);
-        });
-    }
-    void secretGet(const QString &key, std::function<void(Result<QString>)> done) override {
-        auto reply = forward(std::move(done));
-        secret("get", key, {}, [reply](Result<QVariantMap> result) {
-            if (!result)
-                reply(result.error());
-            else
-                reply(result.value().value("value").toString());
-        });
-    }
-    void secretSet(const QString &key, const QString &value, std::function<void(Result<void>)> done) override {
-        auto reply = forward(std::move(done));
-        secret("set", key, value, [reply](Result<QVariantMap> result) {
-            reply(result ? Result<void>() : Result<void>(result.error()));
-        });
-    }
-    void secretDelete(const QString &key, std::function<void(Result<void>)> done) override {
-        auto reply = forward(std::move(done));
-        secret("delete", key, {}, [reply](Result<QVariantMap> result) {
-            reply(result ? Result<void>() : Result<void>(result.error()));
-        });
-    }
-    void reportTask(const QString &task, const sdk::Params &progress) override {
-        auto data = progress;
-        data.insert("task", task);
-        publish("task", data);
-    }
-    void log(QtMsgType level, const QString &message) override {
-        const QString name = level == QtDebugMsg ? "debug" : level == QtInfoMsg ? "info" : level == QtWarningMsg ? "warn" : "error";
-        onRun([manager = m_manager, name, message](const std::shared_ptr<Run> &run) {
-            manager->recordLog(run->id, name, message);
-        });
-    }
-
-  private:
-    void onRun(std::function<void(const std::shared_ptr<Run> &)> work) const {
-        m_manager->post([run = m_run, work] {
-            if (const auto alive = run.lock())
-                work(alive);
-        });
-    }
-    /// Return a host-side completion that calls the plugin's callback on the backend thread,
-    /// or drops it when the run has stopped.
-    template <class T> std::function<void(Result<T>)> forward(std::function<void(Result<T>)> done) const {
-        return [manager = QPointer<PluginManager>(m_manager), run = m_run, id = m_id, done](Result<T> result) {
-            if (!manager || !done)
-                return;
-            manager->post([manager, run, id, done, result] {
-                if (const auto alive = run.lock(); alive && manager)
-                    manager->guarded(id, [&] { done(result); });
-            });
-        };
-    }
-    sdk::RegistrationPtr add(const QString &kind, const QString &id, const QVariantMap &descriptor,
-                             std::function<void(Run &)> install, std::function<void(Run &)> remove) {
-        auto work = [manager = m_manager, kind, id, descriptor, install](const std::shared_ptr<Run> &run) {
-            const auto added = manager->addRegistration(run, kind, id, descriptor);
-            if (added) {
-                install(*run);
-                if (kind == "shuffle") emit manager->shuffleCatalogueChanged();
-            } else
-                manager->recordLog(run->id, "error", added.error().message);
-            return bool(added);
-        };
-        bool accepted = true;
-        if (QThread::currentThread() == m_manager->thread()) {
-            if (const auto run = m_run.lock())
-                accepted = work(run);
-            else
-                accepted = false;
-        } else
-            onRun(work);
-        if (!accepted)
-            return nullptr;
-        return std::make_unique<Handle>(m_manager, m_run, [kind, id, remove, manager = m_manager](Run &run) {
-            run.registrations[kind].remove(id);
-            remove(run);
-            if (kind == "shuffle") emit manager->shuffleCatalogueChanged();
-        });
-    }
-    void secret(const QString &operation, const QString &key, const QString &value, IExtensionBackend::Completion done) {
-        onRun([manager = m_manager, dataDirectory = m_dataDirectory, operation, key, value,
-               done](const std::shared_ptr<Run> &run) {
-            if (key.isEmpty() || key.size() > 200) {
-                done(failure("Invalid secret key"));
-                return;
-            }
-            const auto keysFile = QDir(dataDirectory).filePath("secret-keys.json");
-            if (operation != "delete") {
-                run->secretKeys.insert(key);
-                writeJsonFile(keysFile, QStringList(run->secretKeys.cbegin(), run->secretKeys.cend()));
-            }
-            if (!value.isEmpty())
-                manager->m_secrets.insert(value);
-            extensionSecret({{"extensionId", run->id}, {"key", key}, {"operation", operation}, {"value", value}},
-                            [manager, run, keysFile, operation, key, done](Result<QVariantMap> result) {
-                                if (operation == "delete") {
-                                    run->secretKeys.remove(key);
-                                    writeJsonFile(keysFile, QStringList(run->secretKeys.cbegin(), run->secretKeys.cend()));
-                                }
-                                if (result && !result.value().value("value").toString().isEmpty())
-                                    manager->m_secrets.insert(result.value().value("value").toString());
-                                done(std::move(result));
-                            });
-        });
-    }
-
-    PluginManager *m_manager;
-    std::weak_ptr<Run> m_run;
-    const QString m_id, m_version, m_directory, m_dataDirectory;
-    mutable QMutex m_mutex;
-    QVariantMap m_config;
-    std::atomic<quint64> m_nextSubscription{1'000'000};
-};
-
-template <class F> bool PluginManager::guarded(const QString &id, F &&call) {
-    crashguard::Scope scope(id);
-    QString error;
-    try {
-        call();
-        return true;
-    } catch (const std::exception &exception) {
-        error = QStringLiteral("Unhandled exception: %1").arg(QString::fromLocal8Bit(exception.what()));
-    } catch (...) {
-        error = QStringLiteral("Unhandled exception");
-    }
-    // Fault from the event loop; the caller may still be iterating the run's registrations.
-    post([this, id, error] { fault(id, error); });
-    return false;
-}
 
 PluginManager::PluginManager(QObject *parent) : IExtensionBackend(parent), m_registry(m_packages.registryPath()) {
     m_audio = std::make_unique<AudioProxy>(
@@ -440,11 +56,11 @@ QList<ShuffleStrategyDescriptor> PluginManager::shuffleStrategies() const {
     QList<ShuffleStrategyDescriptor> result;
     for (const auto &owner : m_order) {
         const auto run = m_runs.value(owner);
-        if (!run || run->state != "running") continue;
+        if (!run || run->state != ExtensionState::Running) continue;
         for (auto it = run->shuffle.cbegin(); it != run->shuffle.cend(); ++it) {
             if (!it->failed)
                 result.append({owner + '/' + it.key(),
-                               run->registrations.value("shuffle").value(it.key()).value("name").toString(),
+                               run->registrations.descriptor("shuffle", it.key()).value("name").toString(),
                                it->generation});
         }
     }
@@ -457,26 +73,17 @@ Result<sdk::ShuffleSelection> PluginManager::selectShuffle(const QString &id, qu
     const auto owner = id.section('/', 0, 0);
     const auto local = id.section('/', 1);
     const auto run = m_runs.value(owner);
-    if (!run || run->state != "running")
+    if (!run || run->state != ExtensionState::Running)
         return failure("Shuffle extension unavailable: " + owner, ErrorCode::Unavailable);
     const auto found = run->shuffle.constFind(local);
     if (found == run->shuffle.cend() || found->generation != generation || found->failed)
         return failure("Shuffle registration unavailable: " + id, ErrorCode::Unavailable);
     auto *provider = found->provider;
     Result<sdk::ShuffleSelection> result = failure("Shuffle selection failed");
-    {
-        crashguard::Scope scope(owner);
-        try {
-            result = provider->select(request);
-        } catch (const std::exception &exception) {
-            result = failure(QStringLiteral("Unhandled shuffle exception: %1")
-                                 .arg(QString::fromLocal8Bit(exception.what())));
-        } catch (...) {
-            result = failure("Unhandled shuffle exception");
-        }
-    }
+    if (const auto error = runAttributed(owner, [&] { result = provider->select(request); }))
+        result = failure(QString(*error).replace("Unhandled exception", "Unhandled shuffle exception"));
     const auto live = run->shuffle.constFind(local);
-    if (run->state != "running" || live == run->shuffle.cend() || live->generation != generation)
+    if (run->state != ExtensionState::Running || live == run->shuffle.cend() || live->generation != generation)
         return failure("Shuffle registration changed during selection", ErrorCode::Unavailable);
     if (result) {
         const int selected = result.value().queueId;
@@ -502,27 +109,13 @@ void PluginManager::post(std::function<void()> work) {
 }
 Result<void> PluginManager::addRegistration(const std::shared_ptr<Run> &run, const QString &kind, const QString &id,
                                             QVariantMap descriptor) {
-    if (run->state == "stopping")
+    if (run->state == ExtensionState::Stopping)
         return failure("Extension is stopping");
-    if (!registrationKinds.contains(kind) || !validExtensionId(id))
-        return failure(QStringLiteral("Invalid registration: %1/%2").arg(kind, id));
-    bool contributed = false;
-    for (const auto &item : m_entries.value(run->id).manifest.contributes.value(kind).toList())
-        contributed = contributed || item.toMap().value("id").toString() == id;
-    if (contributed || run->registrations.value(kind).contains(id))
-        return failure(QStringLiteral("Duplicate registration: %1/%2").arg(kind, id));
-    if (sourceKinds.contains(kind))
-        if (auto source = containedFile(run->directory, descriptor.value("source").toString()); !source)
-            return source.error();
-    if (kind == "themes")
-        if (auto valid = themes::validate(descriptor, run->directory); !valid)
-            return valid.error();
-    descriptor.insert("id", run->id + "/" + id);
-    descriptor.insert("localId", id);
-    descriptor.insert("extensionId", run->id);
-    run->registrations[kind].insert(id, descriptor);
-    notifyChanged();
-    return {};
+    const auto added = run->registrations.add(kind, id, std::move(descriptor), run->id, run->directory,
+                                               m_entries.value(run->id).manifest.contributes);
+    if (added)
+        notifyChanged();
+    return added;
 }
 void PluginManager::notifyChanged() {
     if (m_closing || m_changePending)
@@ -565,9 +158,9 @@ QVariantMap PluginManager::publicEntry(const QString &id) const {
     const auto run = m_runs.value(id);
     auto contributions = entry.manifest.contributes;
     if (run)
-        for (const auto &kind : uiKinds) {
+        for (const auto &kind : RegistrationScope::uiKinds()) {
             auto list = contributions.value(kind).toList();
-            for (const auto &item : run->registrations.value(kind))
+            for (const auto &item : run->registrations.list(kind))
                 list.append(item);
             contributions.insert(kind, list);
         }
@@ -587,12 +180,12 @@ QVariantMap PluginManager::publicEntry(const QString &id) const {
         }
         it.value() = list;
     }
-    const bool running = run && run->state == "running";
+    const bool running = run && run->state == ExtensionState::Running;
     QVariantMap registrations;
     if (running)
-        for (const auto &kind : registrationKinds) {
+        for (const auto &kind : RegistrationScope::kinds()) {
             QVariantList list;
-            for (const auto &item : run->registrations.value(kind))
+            for (const auto &item : run->registrations.list(kind))
                 list.append(item);
             registrations.insert(kind, list);
         }
@@ -604,7 +197,7 @@ QVariantMap PluginManager::publicEntry(const QString &id) const {
             {"development", entry.development},
             {"trusted", entry.trusted},
             {"enabled", entry.enabled},
-            {"state", run ? run->state : entry.state},
+            {"state", toString(run ? run->state : entry.state)},
             {"error", redact(entry.error)},
             {"generation", run ? run->generation : 0},
             {"nativeModules", entry.manifest.nativeModules},
@@ -635,13 +228,13 @@ void PluginManager::load() {
         Entry entry;
         static_cast<ExtensionRecord &>(entry) = std::move(record);
         entry.error = entry.failure;
-        entry.state = entry.error.isEmpty() ? "disabled" : "failed";
+        entry.state = entry.error.isEmpty() ? ExtensionState::Disabled : ExtensionState::Failed;
         auto manifest = readManifest(entry.directory);
         if (manifest && manifest.value().id == entry.id)
             entry.manifest = manifest.value();
         else {
             entry.manifest = ExtensionManifest::placeholder(entry.id);
-            entry.state = "failed";
+            entry.state = ExtensionState::Failed;
             entry.error = manifest ? QStringLiteral("Installed extension ID changed") : manifest.error().message;
         }
         const auto id = entry.id;
@@ -659,7 +252,7 @@ Result<void> PluginManager::save() {
             !m_developmentDirectories.contains(entry.previous->directory))
             m_developmentDirectories.append(entry.previous->directory);
         auto record = static_cast<const ExtensionRecord &>(entry);
-        record.failure = entry.state == "failed" ? redact(entry.error) : QString();
+        record.failure = entry.state == ExtensionState::Failed ? redact(entry.error) : QString();
         state.entries.append(std::move(record));
     }
     state.extra = m_registryExtra;
@@ -705,7 +298,7 @@ void PluginManager::start(HostCall hostCall) {
     if (m_entries.contains(crashed)) {
         auto &entry = m_entries[crashed];
         entry.enabled = false;
-        entry.state = "failed";
+        entry.state = ExtensionState::Failed;
         entry.error = "The backend crashed while this extension was running; it has been disabled";
         if (auto saved = save(); !saved)
             reportError("Cannot persist crashed extension state: " + saved.error().message);
@@ -740,14 +333,14 @@ void PluginManager::startup(int, QStringList order, Done finished) {
     sequence(
         order,
         [this](const QString &id, Done next) {
-            if (!m_entries.contains(id) || !m_entries[id].enabled || m_entries[id].state == "failed") {
+            if (!m_entries.contains(id) || !m_entries[id].enabled || m_entries[id].state == ExtensionState::Failed) {
                 next({});
                 return;
             }
             const auto block = [this, id](const QString &message) {
                 auto &entry = m_entries[id];
-                if (entry.state != "failed")
-                    entry.state = "blocked";
+                if (entry.state != ExtensionState::Failed)
+                    entry.state = ExtensionState::Blocked;
                 entry.error = message;
                 notifyChanged();
             };
@@ -758,7 +351,7 @@ void PluginManager::startup(int, QStringList order, Done finished) {
                 return;
             }
             for (const auto &dependency : dependencies.value())
-                if (!m_entries[dependency].enabled || m_entries[dependency].state == "failed") {
+                if (!m_entries[dependency].enabled || m_entries[dependency].state == ExtensionState::Failed) {
                     block("Dependency is disabled or failed; enable it manually");
                     next({});
                     return;
@@ -783,50 +376,17 @@ void PluginManager::shutdown() {
         done(failure("Extension runtime stopped"));
 }
 
+DependencyNodes PluginManager::dependencyNodes() const {
+    DependencyNodes nodes;
+    for (auto it = m_entries.cbegin(); it != m_entries.cend(); ++it)
+        nodes.insert(it.key(), {it->manifest.version, it->manifest.dependencies});
+    return nodes;
+}
 Result<QStringList> PluginManager::dependencyOrder(const QString &id) const {
-    QStringList result, visiting;
-    std::function<Result<void>(const QString &)> visit = [&](const QString &current) -> Result<void> {
-        if (visiting.contains(current))
-            return failure("Dependency cycle: " + (visiting + QStringList{current}).join(" → "));
-        if (result.contains(current))
-            return {};
-        if (!m_entries.contains(current))
-            return failure("Missing extension: " + current);
-        visiting.append(current);
-        const auto dependencies = m_entries[current].manifest.dependencies;
-        for (auto it = dependencies.cbegin(); it != dependencies.cend(); ++it) {
-            const auto range = it.value();
-            if (!m_entries.contains(it.key()) ||
-                !semver::satisfies(m_entries[it.key()].manifest.version, range))
-                return failure(QStringLiteral("Dependency %1 must satisfy %2").arg(it.key(), range));
-            if (auto nested = visit(it.key()); !nested)
-                return nested;
-        }
-        visiting.removeLast();
-        result.append(current);
-        return {};
-    };
-    if (auto visited = visit(id); !visited)
-        return visited.error();
-    return result;
+    return nekotune::dependencyOrder(id, dependencyNodes());
 }
 QStringList PluginManager::dependents(const QString &id) const {
-    QStringList found{id};
-    qsizetype size;
-    do {
-        size = found.size();
-        for (const auto &candidate : m_order) {
-            if (found.contains(candidate))
-                continue;
-            const auto dependencies = m_entries[candidate].manifest.dependencies;
-            for (const auto &dependency : found)
-                if (dependencies.contains(dependency)) {
-                    found.append(candidate);
-                    break;
-                }
-        }
-    } while (size != found.size());
-    return found;
+    return dependentsOf(id, m_order, dependencyNodes());
 }
 
 void PluginManager::enable(const QString &id, bool trusted, Done done) {
@@ -933,49 +493,6 @@ void PluginManager::startChain(QStringList order, int index, Done done) {
         startChain(order, index + 1, done);
     });
 }
-Result<QString> PluginManager::loadablePath(const Entry &entry) {
-    if (!entry.development)
-        return entry.manifest.library;
-    // Never map a development build in place: rebuilding it would corrupt the running image (and
-    // Windows locks loaded DLLs), and a path that is already loaded cannot be loaded again. The
-    // whole library directory is staged so sibling dependencies still resolve ($ORIGIN on Linux,
-    // the DLL directory on Windows). Each distinct build gets its own copy.
-    const QFileInfo library(entry.manifest.library);
-    const QDir source = library.absoluteDir();
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    QStringList files;
-    QDirIterator items(source.path(), QDir::Files | QDir::NoSymLinks, QDirIterator::Subdirectories);
-    while (items.hasNext())
-        files.append(source.relativeFilePath(items.next()));
-    files.sort();
-    if (files.size() > 256)
-        return failure("Extension library directory has too many files");
-    for (const auto &relative : std::as_const(files)) {
-        QFile file(source.filePath(relative));
-        if (!file.open(QIODevice::ReadOnly))
-            return failure("Cannot read extension library: " + file.errorString(), ErrorCode::Io);
-        hash.addData(relative.toUtf8());
-        hash.addData(&file);
-    }
-    const QDir runtime(m_packages.runtimeDirectory());
-    runtime.mkpath(".");
-    const auto target = runtime.filePath(entry.manifest.id + "-" + QString::fromLatin1(hash.result().toHex().left(16)));
-    const auto staged = QDir(target).filePath(library.fileName());
-    if (QFileInfo::exists(staged))
-        return staged;
-    const auto temporary = target + "." + QUuid::createUuid().toString(QUuid::WithoutBraces) + ".tmp";
-    bool copied = QDir().mkpath(temporary);
-    for (const auto &relative : std::as_const(files)) {
-        const auto destination = QDir(temporary).filePath(relative);
-        copied = copied && QDir().mkpath(QFileInfo(destination).absolutePath()) &&
-                 QFile::copy(source.filePath(relative), destination);
-    }
-    if (!copied || !QDir().rename(temporary, target)) {
-        QDir(temporary).removeRecursively();
-        return failure("Cannot stage development library", ErrorCode::Io);
-    }
-    return staged;
-}
 void PluginManager::startOne(const QString &id, Done done) {
     auto &entry = m_entries[id];
     if (entry.manifest.needsTrustToRun() && !entry.trusted) {
@@ -983,14 +500,14 @@ void PluginManager::startOne(const QString &id, Done done) {
         return;
     }
     if (const auto existing = m_runs.value(id)) {
-        if (existing->state == "running")
+        if (existing->state == ExtensionState::Running)
             done({});
         else
             existing->waiters.append(std::move(done));
         return;
     }
     if (!entry.manifest.unavailable.isEmpty()) {
-        entry.state = "failed";
+        entry.state = ExtensionState::Failed;
         entry.error = entry.manifest.unavailable;
         entry.enabled = false;
         notifyChanged();
@@ -1004,16 +521,14 @@ void PluginManager::startOne(const QString &id, Done done) {
     QDir().mkpath(m_packages.dataDirectory(id));
     QFile::setPermissions(m_packages.dataDirectory(id), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     entry.error.clear();
-    entry.state = "starting";
+    entry.state = ExtensionState::Starting;
     auto run = std::make_shared<Run>();
     run->id = id;
     run->directory = entry.directory;
     run->generation = ++m_generation;
-    for (const auto &kind : registrationKinds)
-        run->registrations.insert(kind, {});
     m_runs.insert(id, run);
     if (entry.manifest.library.isEmpty()) {
-        run->state = "running";
+        run->state = ExtensionState::Running;
         if (entry.development)
             watchDevelopment(run);
         notifyChanged();
@@ -1021,62 +536,52 @@ void PluginManager::startOne(const QString &id, Done done) {
         return;
     }
     run->waiters.append(std::move(done));
-    const auto path = loadablePath(entry);
+    const auto path = m_loader.loadablePath(entry.manifest, entry.development);
     if (!path) {
         activated(run, path.error());
         return;
     }
-    auto *loader = m_loaders.value(path.value());
+    const auto loader = m_loader.loader(path.value());
     if (!loader) {
-        loader = new QPluginLoader(path.value(), this);
-        m_loaders.insert(path.value(), loader);
-    }
-    // metaData() reads the ELF/PE section without mapping the library or running its code.
-    const auto iid = loader->metaData().value("IID").toString();
-    if (iid != QStringLiteral(NEKOTUNE_EXTENSION_IID)) {
-        activated(run, failure(iid.isEmpty() ? QStringLiteral("Library is not a Qt plugin: ") + loader->errorString()
-                                             : QStringLiteral("Unsupported extension interface %1").arg(iid)));
+        activated(run, loader.error());
         return;
     }
     // Once mapped, the package directory must survive until exit (Windows also locks the DLL).
     m_retainedDirectories.insert(entry.directory);
     bool loaded = false;
-#ifdef Q_OS_WIN
-    // Windows does not search a DLL's own directory for its dependencies. SetDllDirectory is
-    // process-wide, so keep it only for this load on the backend thread.
-    SetDllDirectoryW(reinterpret_cast<LPCWSTR>(QDir::toNativeSeparators(QFileInfo(path.value()).absolutePath()).utf16()));
-    const auto restoreSearchPath = qScopeGuard([] { SetDllDirectoryW(nullptr); });
-#endif
-    if (!guarded(id, [&] { loaded = loader->load(); }))
-        return;
-    auto *plugin = loaded ? qobject_cast<sdk::IExtensionPlugin *>(loader->instance()) : nullptr;
+    {
+        const NativeLoader::SearchPath searchPath(path.value());
+        if (!guarded(id, [&] { loaded = loader.value()->load(); }))
+            return;
+    }
+    const auto plugin = NativeLoader::instance(loader.value(), loaded);
     if (!plugin) {
-        activated(run, failure(loaded ? QStringLiteral("Library does not implement IExtensionPlugin")
-                                       : loader->errorString()));
+        activated(run, plugin.error());
         return;
     }
     const auto data = m_packages.dataDirectory(id);
     run->storage = readJsonFile(QDir(data).filePath("storage.json"), QVariantMap{}).toMap();
     for (const auto &key : readJsonFile(QDir(data).filePath("secret-keys.json"), QVariantList{}).toStringList())
         run->secretKeys.insert(key);
-    run->plugin = plugin;
-    run->context = std::make_unique<Context>(this, run, entry, data, readConfig(id));
+    run->plugin = plugin.value();
+    run->context = std::make_unique<HostContext>(this, run, entry.manifest.id, entry.manifest.version,
+                                                entry.directory, data, readConfig(id));
     std::weak_ptr<Run> weak = run;
     run->startTimer = std::make_unique<QTimer>();
     run->startTimer->setSingleShot(true);
     connect(run->startTimer.get(), &QTimer::timeout, this, [this, weak] {
-        if (const auto alive = weak.lock(); alive && alive->state == "starting")
+        if (const auto alive = weak.lock(); alive && alive->state == ExtensionState::Starting)
             activated(alive, failure("Activation timed out"));
     });
-    run->startTimer->start(activationTimeout);
+    run->startTimer->start(timeouts::activation);
     notifyChanged();
     QPointer<PluginManager> guard(this);
     guarded(id, [&] {
-        plugin->activate(*run->context, [guard, weak](Result<void> result) {
+        plugin.value()->activate(*run->context, [guard, weak](Result<void> result) {
             if (!guard)
                 return;
             guard->post([guard, weak, result] {
-                if (const auto alive = weak.lock(); alive && guard && alive->state == "starting")
+                if (const auto alive = weak.lock(); alive && guard && alive->state == ExtensionState::Starting)
                     guard->activated(alive, result);
             });
         });
@@ -1087,7 +592,7 @@ void PluginManager::activated(const std::shared_ptr<Run> &run, Result<void> resu
         run->startTimer->stop();
     const auto waiters = std::exchange(run->waiters, {});
     if (result) {
-        run->state = "running";
+        run->state = ExtensionState::Running;
         emit shuffleCatalogueChanged();
         if (m_entries.value(run->id).development)
             watchDevelopment(run);
@@ -1098,7 +603,7 @@ void PluginManager::activated(const std::shared_ptr<Run> &run, Result<void> resu
         stop(run->id);
         if (m_entries.contains(run->id)) {
             auto &entry = m_entries[run->id];
-            entry.state = "failed";
+            entry.state = ExtensionState::Failed;
             entry.error = message;
             entry.enabled = false;
         }
@@ -1109,13 +614,12 @@ void PluginManager::activated(const std::shared_ptr<Run> &run, Result<void> resu
 }
 void PluginManager::stop(const QString &id) {
     const auto run = m_runs.value(id);
-    if (!run || run->state == "stopping")
+    if (!run || run->state == ExtensionState::Stopping)
         return;
-    run->state = "stopping";
+    run->state = ExtensionState::Stopping;
     emit shuffleCatalogueChanged();
     m_audio->revoke(id);
     run->startTimer.reset();
-    run->debounce.reset();
     run->watcher.reset();
     run->pcm.clear();
     if (run->plugin)
@@ -1128,22 +632,20 @@ void PluginManager::stop(const QString &id) {
     run->lyrics.clear();
     run->shuffle.clear();
     run->subscriptions.clear();
-    for (auto &kind : run->registrations)
-        kind.clear();
-    for (const auto &call : std::exchange(run->calls, {}))
-        finishCall(call, failure("Extension stopped"));
+    run->registrations.clear();
+    run->calls.failAll("Extension stopped");
     for (const auto &waiter : std::exchange(run->waiters, {}))
         waiter(failure("Extension stopped"));
     m_runs.remove(id);
     if (m_entries.contains(id))
-        m_entries[id].state = "disabled";
+        m_entries[id].state = ExtensionState::Disabled;
     notifyChanged();
 }
 void PluginManager::fault(const QString &id, const QString &message) {
     const auto run = m_runs.value(id);
-    if (!run || run->state == "stopping" || !m_entries.contains(id))
+    if (!run || run->state == ExtensionState::Stopping || !m_entries.contains(id))
         return;
-    if (run->state == "starting") {
+    if (run->state == ExtensionState::Starting) {
         activated(run, failure(message));
         return;
     }
@@ -1151,13 +653,13 @@ void PluginManager::fault(const QString &id, const QString &message) {
     stop(id);
     auto &entry = m_entries[id];
     entry.error = message;
-    entry.state = "failed";
+    entry.state = ExtensionState::Failed;
     entry.enabled = false;
     auto others = dependents(id);
     for (auto it = others.crbegin(); it != others.crend(); ++it)
         if (*it != id) {
             stop(*it);
-            m_entries[*it].state = "blocked";
+            m_entries[*it].state = ExtensionState::Blocked;
             m_entries[*it].error = "Dependency unavailable: " + id;
         }
     if (auto saved = save(); !saved)
@@ -1169,7 +671,7 @@ void PluginManager::disable(const QString &id) {
     for (auto it = affected.crbegin(); it != affected.crend(); ++it) {
         stop(*it);
         if (*it != id) {
-            m_entries[*it].state = "blocked";
+            m_entries[*it].state = ExtensionState::Blocked;
             m_entries[*it].error = "Dependency disabled: " + id;
         }
     }
@@ -1478,7 +980,7 @@ Result<QVariantMap> PluginManager::exportTheme(const QVariantMap &params) {
             theme = value.toMap();
     if (theme.isEmpty())
         if (const auto run = m_runs.value(owner))
-            theme = run->registrations.value("themes").value(local);
+            theme = run->registrations.descriptor("themes", local);
     if (theme.isEmpty())
         return failure("Theme is unavailable for export");
     if (auto manifest = readManifest(entry.directory); !manifest)
@@ -1505,25 +1007,9 @@ Result<QVariantMap> PluginManager::setConfig(const QString &id, const QVariant &
     return QVariantMap{{"config", config}};
 }
 
-PluginManager::Completion PluginManager::pending(const std::shared_ptr<Run> &run, Completion done, int timeoutMs) {
-    run->calls.removeIf([](const auto &call) { return call->fired.load(); });
-    auto call = std::make_shared<PendingCall>();
-    call->done = std::move(done);
-    call->timer = new QTimer(this);
-    call->timer->setSingleShot(true);
-    connect(call->timer, &QTimer::timeout, this, [call] { finishCall(call, failure("Extension request timed out")); });
-    call->timer->start(timeoutMs);
-    run->calls.append(call);
-    QPointer<PluginManager> guard(this);
-    return [guard, call](Result<QVariantMap> result) {
-        if (!guard || call->fired.load())
-            return;
-        guard->post([call, result] { finishCall(call, result); });
-    };
-}
 void PluginManager::invoke(const QString &id, QString service, const QVariantMap &params, Completion done) {
     const auto run = m_runs.value(id);
-    if (!run || run->state != "running") {
+    if (!run || run->state != ExtensionState::Running) {
         done(failure("Extension is not running"));
         return;
     }
@@ -1538,7 +1024,7 @@ void PluginManager::invoke(const QString &id, QString service, const QVariantMap
         done(failure("Unknown service/command: " + service));
         return;
     }
-    const auto reply = pending(run, std::move(done), callTimeout);
+    const auto reply = run->calls.add(this, std::move(done), timeouts::call);
     guarded(id, [&] { handler(params, reply); });
 }
 void PluginManager::providerCall(const QVariantMap &params, Completion done) {
@@ -1547,7 +1033,7 @@ void PluginManager::providerCall(const QVariantMap &params, Completion done) {
     const auto id = source.left(slash), local = source.mid(slash + 1);
     const auto kind = params.value("kind").toString();
     const auto run = slash > 0 ? m_runs.value(id) : nullptr;
-    if (!run || run->state != "running" || !run->registrations.value(kind).contains(local)) {
+    if (!run || run->state != ExtensionState::Running || !run->registrations.contains(kind, local)) {
         done(failure("Source is unavailable"));
         return;
     }
@@ -1559,7 +1045,7 @@ void PluginManager::providerCall(const QVariantMap &params, Completion done) {
             done(failure("Unsupported provider operation: " + operation));
             return;
         }
-        const auto reply = pending(run, std::move(done), callTimeout);
+        const auto reply = run->calls.add(this, std::move(done), timeouts::call);
         guarded(id, [&] {
             if (operation == "search")
                 provider->search(arguments, reply);
@@ -1573,8 +1059,8 @@ void PluginManager::providerCall(const QVariantMap &params, Completion done) {
         done(failure("Unsupported provider operation: " + operation));
         return;
     }
-    const int timeout = operation == "download" ? 610'000 : operation == "downloaded" ? 120'000 : callTimeout;
-    const auto reply = pending(run, std::move(done), timeout);
+    const int timeout = operation == "download" ? timeouts::download : operation == "downloaded" ? timeouts::downloaded : timeouts::call;
+    const auto reply = run->calls.add(this, std::move(done), timeout);
     const auto trackId = arguments.value("id").toString();
     guarded(id, [&] {
         if (operation == "search")
@@ -1646,7 +1132,7 @@ void PluginManager::deliver(const std::shared_ptr<Run> &run, const QVariantMap &
 }
 void PluginManager::broadcast(const QVariantMap &event) {
     for (const auto &run : QList(m_runs.cbegin(), m_runs.cend()))
-        if (run->state == "running")
+        if (run->state == ExtensionState::Running)
             deliver(run, event);
 }
 void PluginManager::publish(const QVariantMap &event) {
@@ -1654,20 +1140,9 @@ void PluginManager::publish(const QVariantMap &event) {
         broadcast(event);
 }
 void PluginManager::watchDevelopment(const std::shared_ptr<Run> &run) {
-    // QFileSystemWatcher is not recursive and reports content changes only for watched files.
-    QStringList paths{run->directory};
-    QDirIterator items(run->directory, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDirIterator::Subdirectories);
-    while (items.hasNext() && paths.size() < 1024) {
-        const auto path = items.next();
-        if (!path.contains("/node_modules/") && !path.endsWith(".tmp"))
-            paths.append(path);
-    }
-    run->watcher = std::make_unique<QFileSystemWatcher>(paths);
-    run->debounce = std::make_unique<QTimer>();
-    run->debounce->setSingleShot(true);
-    run->debounce->setInterval(350);
+    run->watcher = std::make_unique<DevWatcher>(run->directory);
     const auto id = run->id;
-    connect(run->debounce.get(), &QTimer::timeout, this, [this, id] {
+    connect(run->watcher.get(), &DevWatcher::changed, this, [this, id] {
         enqueue(
             [this, id](Completion done) {
                 reload(id, [done](Result<void> result) {
@@ -1679,9 +1154,6 @@ void PluginManager::watchDevelopment(const std::shared_ptr<Run> &run) {
                     recordLog(id, "error", result.error().message);
             });
     });
-    auto *debounce = run->debounce.get();
-    connect(run->watcher.get(), &QFileSystemWatcher::directoryChanged, debounce, qOverload<>(&QTimer::start));
-    connect(run->watcher.get(), &QFileSystemWatcher::fileChanged, debounce, qOverload<>(&QTimer::start));
 }
 
 void PluginManager::request(const QString &method, const QVariantMap &params, Completion done) {
@@ -1727,7 +1199,7 @@ void PluginManager::request(const QString &method, const QVariantMap &params, Co
                 if (guard)
                     emit guard->eventReady({{"event", "music.download"},
                                             {"task", task},
-                                            {"state", "running"},
+                                            {"state", toString(ExtensionState::Running)},
                                             {"received", received},
                                             {"total", total}});
             },
@@ -1765,7 +1237,7 @@ void PluginManager::request(const QString &method, const QVariantMap &params, Co
                         // Enabling a dependency may unblock extensions that were waiting for it.
                         QStringList blocked;
                         for (const auto &other : std::as_const(m_order))
-                            if (m_entries[other].enabled && m_entries[other].state == "blocked")
+                            if (m_entries[other].enabled && m_entries[other].state == ExtensionState::Blocked)
                                 blocked.append(other);
                         sequence(
                             blocked, [this](const QString &other, Done next) { enable(other, false, next); }, false,

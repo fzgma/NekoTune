@@ -1,7 +1,10 @@
 #include "app_paths.h"
 #include "application/playback/shuffle_strategy_service.h"
 #include "application/playback/playback_order_service.h"
-#include "infrastructure/extensions/crash_guard.h"
+#include "infrastructure/extensions/runtime/crash_guard.h"
+#include "infrastructure/extensions/runtime/call_guard.h"
+#include "infrastructure/extensions/runtime/dependency_graph.h"
+#include "infrastructure/extensions/runtime/extension_state.h"
 #include "infrastructure/extensions/package/extension_manifest.h"
 #include "infrastructure/extensions/package/extension_registry.h"
 #include "infrastructure/extensions/package/package_store.h"
@@ -112,6 +115,51 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(!semver::validRange("^banana"));
         QVERIFY(!semver::parse("1.2"));
         QVERIFY(!semver::parse("01.2.3"));
+    }
+
+    void dependencyGraph() {
+        const DependencyNodes nodes{{"a", {"1.0.0", {}}},
+                                    {"b", {"1.2.0", {{"a", "^1.0.0"}}}},
+                                    {"c", {"1.0.0", {{"b", "^1.0.0"}}}},
+                                    {"d", {"1.0.0", {{"a", "^2.0.0"}}}},
+                                    {"x", {"1.0.0", {{"y", "*"}}}},
+                                    {"y", {"1.0.0", {{"x", "*"}}}}};
+        QCOMPARE(dependencyOrder("c", nodes).value(), (QStringList{"a", "b", "c"}));
+        QVERIFY(dependencyOrder("d", nodes).error().message.contains("must satisfy ^2.0.0"));
+        QVERIFY(dependencyOrder("x", nodes).error().message.contains("Dependency cycle"));
+        QVERIFY(dependencyOrder("missing", nodes).error().message.contains("Missing extension"));
+        QCOMPARE(dependentsOf("a", {"a", "b", "c", "d"}, nodes), (QStringList{"a", "b", "c", "d"}));
+    }
+    void extensionStateStrings() {
+        QCOMPARE(toString(ExtensionState::Disabled), "disabled");
+        QCOMPARE(toString(ExtensionState::Blocked), "blocked");
+        QCOMPARE(toString(ExtensionState::Starting), "starting");
+        QCOMPARE(toString(ExtensionState::Running), "running");
+        QCOMPARE(toString(ExtensionState::Stopping), "stopping");
+        QCOMPARE(toString(ExtensionState::Failed), "failed");
+    }
+    void pendingCallsCompleteOnce() {
+        QObject owner;
+        PendingCalls calls;
+        int completed = 0;
+        QString error;
+        auto reply = calls.add(&owner, [&](Result<QVariantMap> result) {
+            ++completed;
+            error = result ? QString() : result.error().message;
+        }, 50);
+        reply(QVariantMap{});
+        reply(QVariantMap{});
+        QCOMPARE(completed, 1);
+        QVERIFY(error.isEmpty());
+
+        auto timed = calls.add(&owner, [&](Result<QVariantMap> result) { error = result.error().message; }, 20);
+        QTRY_COMPARE(error, "Extension request timed out");
+        timed(QVariantMap{});
+
+        error.clear();
+        auto stopped = calls.add(&owner, [&](Result<QVariantMap> result) { error = result.error().message; }, 10'000);
+        calls.failAll("Extension stopped");
+        QCOMPARE(error, "Extension stopped");
     }
 
     void registryKeepsUnknownKeys() {

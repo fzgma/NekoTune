@@ -1,4 +1,4 @@
-#include "infrastructure/extensions/crash_guard.h"
+#include "infrastructure/extensions/runtime/crash_guard.h"
 #include <QDir>
 #include <QFile>
 #include <atomic>
