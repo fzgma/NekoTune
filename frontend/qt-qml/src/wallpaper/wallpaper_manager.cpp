@@ -246,20 +246,25 @@ int WallpaperManager::runningCount() const {
 }
 
 bool WallpaperManager::setOption(const QString &key, const QVariant &value) {
-    if (m_stopping)
+    return setOptions({{key, value}});
+}
+
+bool WallpaperManager::setOptions(const QVariantMap &values) {
+    if (m_stopping || values.isEmpty())
         return false;
-    if (!valid(key, value) || (key == "spectrum" && value.toBool())) {
-        m_error = key == "spectrum" ? "wallpaper_spectrum_unavailable" : "wallpaper_invalid_setting";
-        emit changed();
-        return false;
-    }
+    for (auto it = values.cbegin(); it != values.cend(); ++it)
+        if (!valid(it.key(), it.value()) || (it.key() == "spectrum" && it.value().toBool())) {
+            m_error = it.key() == "spectrum" ? "wallpaper_spectrum_unavailable" : "wallpaper_invalid_setting";
+            emit changed();
+            return false;
+        }
     // Always allow immediate shutdown, even when settings storage is unavailable.
-    if (key == "enabled" && !value.toBool()) {
+    if (values.contains("enabled") && !values.value("enabled").toBool()) {
         m_requested = false;
         reconcile();
     }
     auto next = m_settings;
-    next[key] = value;
+    next.insert(values);
     if (!nekotune::AppPaths::saveSetting("wallpaper", QJsonObject::fromVariantMap(next))) {
         m_error = "wallpaper_save_failed";
         emit changed();
@@ -267,9 +272,9 @@ bool WallpaperManager::setOption(const QString &key, const QVariant &value) {
     }
     m_settings = next;
     m_error.clear();
-    if (key == "enabled")
-        m_requested = value.toBool();
-    if (key == "enabled" || key == "target" || key == "screenId") {
+    if (values.contains("enabled"))
+        m_requested = values.value("enabled").toBool();
+    if (values.contains("enabled") || values.contains("target") || values.contains("screenId")) {
         for (auto &[screen, output] : m_outputs) {
             if (!output.window) {
                 output.state = "idle";

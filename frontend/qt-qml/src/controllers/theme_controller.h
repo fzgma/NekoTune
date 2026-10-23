@@ -65,6 +65,7 @@ public:
   Q_INVOKABLE void selectTheme(const QString &id, bool trusted = false);
   Q_INVOKABLE void selectAppearance(const QString &id, bool trusted = false);
   Q_INVOKABLE void selectLayout(const QString &id, bool trusted = false);
+  Q_INVOKABLE void selectWallpaper(const QString &id, bool trusted = false);
   Q_INVOKABLE void resetAppearance();
   Q_INVOKABLE void resetLayout();
   Q_INVOKABLE void importTheme(const QString &path, bool replace = false);
@@ -77,8 +78,10 @@ public:
   Q_INVOKABLE void presentWindow(QQuickWindow *window);
 signals:
   void changed();
-  // target is "theme", "appearance" or "layout" so the dialog can retry the same action.
+  // target is "theme", "appearance", "layout" or "wallpaper" so the dialog can retry the same action.
   void trustRequested(const QString &id, const QString &target);
+  // The wallpaper source is usable; the caller stores it in the wallpaper settings.
+  void wallpaperReady(const QString &id);
   void replaceRequested(const QString &path, const QString &themeId);
 
 private:

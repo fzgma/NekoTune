@@ -477,6 +477,7 @@
   "theme_offline": "Theme management is unavailable while disconnected.",
   "theme_unavailable": "The selected theme is unavailable. A built-in theme is active; your selection is retained.",
   "theme_layout_unavailable": "The selected layout is unavailable. Using the built-in layout; your choice is kept.",
+  "theme_wallpaper_unavailable": "This theme does not provide a wallpaper",
   "theme_legacy_light": "This legacy theme only provides a dark palette. Light mode uses the built-in palette.",
   "theme_save_failed": "Could not save appearance settings. Your previous selection is retained.",
   "theme_imported": "Theme imported. Select its card to apply it.",

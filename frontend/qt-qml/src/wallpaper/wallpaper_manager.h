@@ -91,6 +91,8 @@ class WallpaperManager final : public QObject {
     bool transparentOverlaySupported() const;
     QVariantMap audioAnalysis() const;
     Q_INVOKABLE bool setOption(const QString &key, const QVariant &value);
+    // Validates every key first and saves them together; one invalid value rejects the whole call.
+    Q_INVOKABLE bool setOptions(const QVariantMap &values);
     Q_INVOKABLE void retry();
     void shutdown();
   signals:

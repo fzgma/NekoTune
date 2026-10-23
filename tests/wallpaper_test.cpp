@@ -104,7 +104,7 @@ class WallpaperTest final : public QObject {
                   {"themes", QJsonArray{QJsonObject{
                       {"id", id}, {"schemaVersion", 1},
                       {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
-                      {"ui", QJsonObject{{"wallpaper", source}}}}}}}}}});
+                      {"wallpaper", source}}}}}}}});
     }
     ExtensionView *themeView() {
         return window() ? window()->findChild<ExtensionView *>("wallpaperThemeSlotTheme") : nullptr;
@@ -224,6 +224,25 @@ class WallpaperTest final : public QObject {
         QCOMPARE(m_manager->error(), QString("wallpaper_save_failed"));
         QVERIFY(!m_manager->setOption("enabled", false));
         QVERIFY(!window());
+        QVERIFY(!m_manager->requestedEnabled());
+    }
+    void setOptionsIsAtomic() {
+        setup();
+        QVERIFY(m_manager->setOptions({{"style", "theme"}, {"themeWallpaper", "pkg/wall"}}));
+        QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
+        QCOMPARE(m_manager->settings().value("themeWallpaper").toString(), QString("pkg/wall"));
+
+        // One invalid value rejects the whole call and keeps the saved values.
+        QVERIFY(!m_manager->setOptions({{"style", "lyrics"}, {"themeWallpaper", 1}}));
+        QCOMPARE(m_manager->error(), QString("wallpaper_invalid_setting"));
+        QVERIFY(!m_manager->setOptions({{"style", "lyrics"}, {"unknown", true}}));
+        QVERIFY(!m_manager->setOptions({}));
+        QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
+
+        m_manager.reset();
+        setup();
+        QCOMPARE(m_manager->settings().value("style").toString(), QString("theme"));
+        QCOMPARE(m_manager->settings().value("themeWallpaper").toString(), QString("pkg/wall"));
         QVERIFY(!m_manager->requestedEnabled());
     }
     void restoreIsSeparateFromSavedIntentAndSafeMode() {
@@ -605,7 +624,7 @@ class WallpaperTest final : public QObject {
                       {"themes", QJsonArray{QJsonObject{
                           {"id", "test.wallpaper/default"}, {"schemaVersion", 1},
                           {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
-                          {"ui", QJsonObject{{"wallpaper", "Wallpaper.qml"}}}}}}}}}});
+                          {"wallpaper", "Wallpaper.qml"}}}}}}}});
         };
         publish("running", true);
         QTRY_VERIFY(m_controllers->theme->wallpaperSlots().contains("test.wallpaper/default"));

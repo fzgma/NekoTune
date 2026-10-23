@@ -237,16 +237,14 @@ void ThemeController::rebuild() {
                                 ? m_layout
                                 : m_active;
     if (codeAllowed(wallpaper))
-      add(wallpaper, "wallpaper",
-          wallpaper.value("ui").toMap().value("wallpaper"));
+      add(wallpaper, "wallpaper", wallpaper.value("wallpaper"));
   }
   // Every usable wallpaper, keyed by theme ID, for an explicit wallpaper source.
   m_wallpaperSlots.clear();
   if (!safeMode())
     for (const auto &value : std::as_const(m_items)) {
       const auto item = value.toMap();
-      const auto source =
-          item.value("ui").toMap().value("wallpaper").toString();
+      const auto source = item.value("wallpaper").toString();
       if (source.isEmpty() || !item.value("available").toBool() ||
           !codeAllowed(item))
         continue;
@@ -380,6 +378,22 @@ void ThemeController::selectLayout(const QString &id, bool trusted) {
                        [this, id] { selectLayout(id); }))
     return;
   applySelection(selectedId(), id);
+}
+void ThemeController::selectWallpaper(const QString &id, bool trusted) {
+  if (busy() || safeMode())
+    return;
+  const auto theme = find(id);
+  if (!theme.value("hasWallpaper").toBool()) {
+    m_error = "theme_wallpaper_unavailable";
+    emit changed();
+    return;
+  }
+  if (!ensureAvailable(theme, trusted, "wallpaper",
+                       [this, id] { selectWallpaper(id); }))
+    return;
+  m_error.clear();
+  emit changed();
+  emit wallpaperReady(id);
 }
 void ThemeController::resetAppearance() {
   if (busy())

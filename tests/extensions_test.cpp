@@ -1428,7 +1428,7 @@ class ExtensionsTest final : public QObject {
           {"tokens", QJsonObject{{"accentPrimary", "#123456"}}},
           {"variants", QJsonObject{{"light", QJsonObject{}},
                                     {"dark", QJsonObject{}}}},
-          {"ui", QJsonObject{{"wallpaper", "Wallpaper.qml"}}}};
+          {"wallpaper", "Wallpaper.qml"}};
       const QJsonObject manifest{
           {"id", "test.wallpaper"}, {"name", "Wallpaper only"},
           {"version", "1.0.0"}, {"apiVersion", 1}, {"type", "theme"},
@@ -1473,6 +1473,25 @@ class ExtensionsTest final : public QObject {
       QVERIFY(entry.value("hasCode").toBool());
       QVERIFY(!entry.value("trusted").toBool());
       QCOMPARE(trust.size(), 0);
+      // Picking the package as a wallpaper is a code action and asks for trust.
+      QSignalSpy ready(app.theme, &ThemeController::wallpaperReady);
+      const auto selected = app.theme->selectedId();
+      app.theme->selectWallpaper("builtin/yozakura");
+      QCOMPARE(app.theme->error(), QString("theme_wallpaper_unavailable"));
+      app.theme->selectWallpaper("test.wallpaper/default");
+      QCOMPARE(trust.size(), 1);
+      QCOMPARE(trust.at(0).at(0).toString(), QString("test.wallpaper/default"));
+      QCOMPARE(trust.at(0).at(1).toString(), QString("wallpaper"));
+      QCOMPARE(ready.size(), 0);
+      app.theme->selectWallpaper("test.wallpaper/default", true);
+      QTRY_COMPARE(ready.size(), 1);
+      QCOMPARE(ready.at(0).at(0).toString(), QString("test.wallpaper/default"));
+      QTRY_VERIFY(app.theme->wallpaperSlots().contains("test.wallpaper/default"));
+      QVERIFY(app.extensions->items().first().toMap().value("trusted").toBool());
+      // Wallpaper choices never touch the palette or layout selections.
+      QCOMPARE(app.theme->selectedId(), selected);
+      QCOMPARE(app.theme->layoutSelectedId(), QString());
+      QCOMPARE(trust.size(), 1);
       peer.socket.abort();
       runtime.stop();
     }
@@ -1525,7 +1544,7 @@ class ExtensionsTest final : public QObject {
       const QJsonObject withWallpaper{
           {"id", "wall"}, {"title", "Wall"}, {"schemaVersion", 1},
           {"variants", variants("#0000AA")},
-          {"ui", QJsonObject{{"wallpaper", "Wallpaper.qml"}}}};
+          {"wallpaper", "Wallpaper.qml"}};
       const QJsonObject manifest{
           {"id", "test.trust"}, {"name", "Trust test"}, {"version", "1.0.0"},
           {"apiVersion", 1}, {"type", "theme"},
@@ -1618,6 +1637,14 @@ class ExtensionsTest final : public QObject {
       QTRY_COMPARE(app.theme->activeLayoutId(), QString("test.trust/default"));
       QTRY_VERIFY(trustPlayer());
       QTRY_VERIFY(app.theme->uiSlots().contains("wallpaper"));
+      // Once the package is trusted, picking its wallpaper needs no prompt.
+      QSignalSpy ready(app.theme, &ThemeController::wallpaperReady);
+      trust.clear();
+      idle();
+      app.theme->selectWallpaper("test.trust/wall");
+      QCOMPARE(trust.size(), 0);
+      QCOMPARE(ready.size(), 1);
+      QVERIFY(app.theme->wallpaperSlots().contains("test.trust/wall"));
       QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
       window->close();
       peer.socket.abort();

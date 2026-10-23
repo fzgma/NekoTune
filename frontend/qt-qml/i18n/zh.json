@@ -477,6 +477,7 @@
   "theme_offline": "后端未连接，主题管理暂不可用。",
   "theme_unavailable": "选中的主题暂不可用，正在使用内置主题；原选择已保留。",
   "theme_layout_unavailable": "选中的界面暂不可用，正在使用内置界面；原选择已保留。",
+  "theme_wallpaper_unavailable": "这个主题没有提供壁纸",
   "theme_legacy_light": "此旧版主题仅提供深色配色，浅色模式使用内置配色。",
   "theme_save_failed": "无法保存外观设置，已保留原选择。",
   "theme_imported": "主题已导入，点击卡片即可应用。",
