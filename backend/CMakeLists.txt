@@ -1,5 +1,7 @@
 add_library(nekotune_domain STATIC
     domain/extensions/extension_backend.h
+    domain/extensions/music_source_catalog.h
+    domain/extensions/lyrics_source_catalog.h
     domain/library/file_inspector.h
     domain/lyrics/krc_parser.cpp
     domain/lyrics/lrc_parser.cpp
@@ -30,8 +32,11 @@ add_library(nekotune_providers STATIC
 target_link_libraries(nekotune_providers PUBLIC nekotune_domain nekotune_paths Qt6::Network)
 
 add_library(nekotune_infrastructure STATIC
-    infrastructure/extensions/audio_proxy.cpp
-    infrastructure/extensions/extension_lyrics_provider.cpp
+    infrastructure/extensions/capabilities/audio_proxy.cpp
+    infrastructure/extensions/capabilities/extension_lyrics_provider.cpp
+    infrastructure/extensions/capabilities/music_sources.cpp
+    infrastructure/extensions/capabilities/lyrics_sources.cpp
+    infrastructure/extensions/capabilities/shuffle_strategies.cpp
     infrastructure/extensions/extension_secrets.cpp
     infrastructure/extensions/host_gateway.cpp
     infrastructure/extensions/package/extension_manifest.cpp

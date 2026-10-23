@@ -53,6 +53,15 @@ Result<QVariantMap> call(PluginManager &manager, const QString &method, const QV
         return failure("Test request timed out: " + method);
     return *result;
 }
+template <class T, class Start> Result<T> wait(Start start, int timeout = 10'000) {
+    std::optional<Result<T>> result;
+    start([&](Result<T> value) { result = std::move(value); });
+    QElapsedTimer timer;
+    timer.start();
+    while (!result && timer.elapsed() < timeout)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    return result ? *result : Result<T>(failure("Test request timed out"));
+}
 QVariantMap entry(const PluginManager &manager, const QString &id) {
     for (const auto &value : manager.snapshot().value("extensions").toList())
         if (value.toMap().value("id") == id)
@@ -289,7 +298,7 @@ class NativeExtensionsTest final : public QObject {
         auto manager = startManager();
         install(*manager, QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.shuffle"));
         enable(*manager, "test.shuffle");
-        auto catalogue = manager->shuffleStrategies();
+        auto catalogue = manager->shuffle().strategies();
         QCOMPARE(catalogue.size(), 1);
         QCOMPARE(catalogue.first().id, "test.shuffle/test");
         const auto generation = catalogue.first().generation;
@@ -297,28 +306,28 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(validation);
         for (const auto &value : validation.value()) QVERIFY(!value.toBool());
         sdk::ShuffleRequest request{{{11, 7, "Title", "Artist"}, {12, 7, "Duplicate", "Artist"}}, 11, 42, {}};
-        const auto first = manager->selectShuffle("test.shuffle/test", generation, request);
+        const auto first = manager->shuffle().select("test.shuffle/test", generation, request);
         QVERIFY(first);
         QCOMPARE(first.value().queueId, 11);
         QCOMPARE(first.value().state.value("step").toInt(), 1);
-        QCOMPARE(manager->selectShuffle("test.shuffle/test", generation, request).value().queueId, 11);
+        QCOMPARE(manager->shuffle().select("test.shuffle/test", generation, request).value().queueId, 11);
         request.state = first.value().state;
-        QCOMPARE(manager->selectShuffle("test.shuffle/test", generation, request).value().queueId, 12);
+        QCOMPARE(manager->shuffle().select("test.shuffle/test", generation, request).value().queueId, 12);
         QVERIFY(call(*manager, "extensions.call", {{"id", "test.shuffle"}, {"service", "release"}}));
-        QVERIFY(manager->shuffleStrategies().isEmpty());
-        QVERIFY(!manager->selectShuffle("test.shuffle/test", generation, request));
+        QVERIFY(manager->shuffle().strategies().isEmpty());
+        QVERIFY(!manager->shuffle().select("test.shuffle/test", generation, request));
         QVERIFY(call(*manager, "extensions.call", {{"id", "test.shuffle"}, {"service", "register"}}));
-        catalogue = manager->shuffleStrategies();
+        catalogue = manager->shuffle().strategies();
         QCOMPARE(catalogue.size(), 1);
         QVERIFY(catalogue.first().generation > generation);
-        QVERIFY(!manager->selectShuffle("test.shuffle/test", generation, request));
+        QVERIFY(!manager->shuffle().select("test.shuffle/test", generation, request));
         const auto beforeReload = catalogue.first().generation;
         QVERIFY(call(*manager, "extensions.reload", {{"id", "test.shuffle"}}));
-        QCOMPARE(manager->shuffleStrategies().size(), 1);
-        QVERIFY(manager->shuffleStrategies().first().generation > beforeReload);
-        QVERIFY(!manager->selectShuffle("test.shuffle/test", beforeReload, request));
+        QCOMPARE(manager->shuffle().strategies().size(), 1);
+        QVERIFY(manager->shuffle().strategies().first().generation > beforeReload);
+        QVERIFY(!manager->shuffle().select("test.shuffle/test", beforeReload, request));
         QVERIFY(call(*manager, "extensions.disable", {{"id", "test.shuffle"}}));
-        QVERIFY(manager->shuffleStrategies().isEmpty());
+        QVERIFY(manager->shuffle().strategies().isEmpty());
     }
     void sdk20BinaryContextRemainsCompatible() {
         auto manager = startManager();
@@ -344,21 +353,21 @@ class NativeExtensionsTest final : public QObject {
         enable(*manager, "test.shuffle");
         ShuffleStrategyService service("test.shuffle/test");
         auto sync = [&] {
-            service.setCatalogue(manager->shuffleStrategies(),
+            service.setCatalogue(manager->shuffle().strategies(),
                 [&](const QString &id, quint64 generation, const sdk::ShuffleRequest &request) {
-                    return manager->selectShuffle(id, generation, request);
+                    return manager->shuffle().select(id, generation, request);
                 });
         };
-        connect(manager.get(), &PluginManager::shuffleCatalogueChanged, &service, sync);
+        connect(&manager->shuffle(), &ShuffleStrategies::catalogueChanged, &service, sync);
         sync();
         QCOMPARE(service.effective(), "test.shuffle/test");
-        const auto generation = manager->shuffleStrategies().first().generation;
+        const auto generation = manager->shuffle().strategies().first().generation;
         PlaybackOrderService order(service.createStrategy(), PlaybackMode::Shuffle);
         PlayerQueue queue;
         queue.add("/first.wav", {1, "hash"}); queue.add("/second.wav", {1, "hash"});
         queue.setCurrentIndex(0); order.reset(queue);
         QCOMPARE(order.propose(queue, PlaybackAdvance::Next).queueId, 2); // Immediate safe fallback.
-        QVERIFY(manager->shuffleStrategies().isEmpty());
+        QVERIFY(manager->shuffle().strategies().isEmpty());
         QTRY_COMPARE(service.effective(), "shuffle_bag");
         QCOMPARE(service.preferred(), "test.shuffle/test");
         QCOMPARE(entry(*manager, "test.shuffle").value("state").toString(), "running");
@@ -370,25 +379,25 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(logged);
         QVERIFY(call(*manager, "extensions.call", {{"id", "test.shuffle"}, {"service", "register"}}));
         QCOMPARE(service.effective(), "test.shuffle/test");
-        QVERIFY(manager->shuffleStrategies().first().generation > generation);
+        QVERIFY(manager->shuffle().strategies().first().generation > generation);
     }
 
     void artistShuffleExample() {
         auto manager = startManager();
         install(*manager, examples + "/example.shuffle");
         enable(*manager, "example.shuffle");
-        const auto generation = manager->shuffleStrategies().first().generation;
+        const auto generation = manager->shuffle().strategies().first().generation;
         sdk::ShuffleRequest request{{{11, 1, "One", "Artist A"}, {12, 2, "Two", "artist a"},
                                      {13, 3, "Three", "Artist B"}}, 11, 42, {}};
         for (quint32 seed = 0; seed < 20; ++seed) {
             request.seed = seed;
-            const auto chosen = manager->selectShuffle("example.shuffle/artist", generation, request);
+            const auto chosen = manager->shuffle().select("example.shuffle/artist", generation, request);
             QVERIFY(chosen); QCOMPARE(chosen.value().queueId, 13);
         }
         request.queue.removeLast();
-        QCOMPARE(manager->selectShuffle("example.shuffle/artist", generation, request).value().queueId, 12);
+        QCOMPARE(manager->shuffle().select("example.shuffle/artist", generation, request).value().queueId, 12);
         request.queue.removeLast();
-        QCOMPARE(manager->selectShuffle("example.shuffle/artist", generation, request).value().queueId, 11);
+        QCOMPARE(manager->shuffle().select("example.shuffle/artist", generation, request).value().queueId, 11);
     }
 
     void lyricsAndAutomationExamples() {
@@ -398,9 +407,9 @@ class NativeExtensionsTest final : public QObject {
         enable(*manager, "example.lyrics");
         enable(*manager, "example.automation");
 
-        const auto lyrics = call(*manager, "extensions.provider_call",
-                                 {{"source", "example.lyrics/demo"}, {"kind", "lyrics"}, {"operation", "search"},
-                                  {"params", QVariantMap{{"title", "Song"}}}});
+        const auto lyrics = wait<QVariantMap>([&](auto done) {
+            manager->lyricsSources().search("example.lyrics/demo", {{"title", "Song"}}, done);
+        });
         QVERIFY2(lyrics, qPrintable(errorOf(lyrics)));
         const auto candidate = lyrics.value().value("candidates").toList().value(0).toMap();
         QCOMPARE(candidate.value("title").toString(), "Song");
@@ -489,17 +498,21 @@ class NativeExtensionsTest final : public QObject {
             return false;
         }());
 
-        const auto search = call(*manager, "extensions.provider_call",
-                                 {{"source", "test.faulty/tones"}, {"kind", "music"}, {"operation", "search"},
-                                  {"params", QVariantMap{{"query", "A"}}}});
-        QVERIFY2(search, qPrintable(errorOf(search)));
-        QCOMPARE(search.value().value("tracks").toList().value(0).toMap().value("title").toString(), "Tone A");
-        QCOMPARE(search.value().value("tracks").toList().value(0).toMap().value("duration_ms").toInt(), 8000);
-        QCOMPARE(search.value().value("cursor").toString(), "next");
-        const auto audio = call(*manager, "extensions.resolve_audio", {{"source", "test.faulty/tones"}, {"id", "one"}});
-        QVERIFY2(audio, qPrintable(errorOf(audio)));
-        QVERIFY(QUrl(audio.value().value("url").toString()).toLocalFile().endsWith("/data/test.faulty/tone.wav"));
-        QVERIFY(!call(*manager, "extensions.resolve_audio", {{"source", "test.faulty/tones"}, {"id", "outside"}}));
+        const auto search = wait<sdk::SearchPage>([&](auto done) {
+            manager->musicSources().search("test.faulty/tones", "A", {}, done);
+        });
+        QVERIFY2(search, qPrintable(search ? QString() : search.error().message));
+        QCOMPARE(search.value().tracks.value(0).title, "Tone A");
+        QCOMPARE(search.value().tracks.value(0).durationMs, 8000);
+        QCOMPARE(search.value().cursor, "next");
+        const auto audio = wait<IMusicSourceCatalog::Playback>([&](auto done) {
+            manager->musicSources().resolvePlayback("test.faulty/tones", "one", done);
+        });
+        QVERIFY2(audio, qPrintable(audio ? QString() : audio.error().message));
+        QVERIFY(audio.value().url.toLocalFile().endsWith("/data/test.faulty/tone.wav"));
+        QVERIFY(!wait<IMusicSourceCatalog::Playback>([&](auto done) {
+            manager->musicSources().resolvePlayback("test.faulty/tones", "outside", done);
+        }));
         const auto music = entry(*manager, "test.faulty").value("registrations").toMap().value("music").toList();
         QCOMPARE(music.value(0).toMap().value("name").toString(), "Tones");
     }
@@ -521,7 +534,6 @@ class NativeExtensionsTest final : public QObject {
         QTest::newRow("config") << "extensions.set_config" << false;
         QTest::newRow("select") << "extensions.select" << false;
         QTest::newRow("export-theme") << "extensions.export_theme" << false;
-        QTest::newRow("internal") << "extensions.provider_call" << false;
         QTest::newRow("unknown-extension") << "extensions.future_method" << false;
         QTest::newRow("appearance") << "appearance.select" << false;
         QTest::newRow("appearance-read") << "appearance.get" << false;
@@ -995,11 +1007,13 @@ class NativeExtensionsTest final : public QObject {
         auto manager = startManager();
         install(*manager, examples + "/example.test-source");
         enable(*manager, "example.test-source");
-        const auto leased = call(*manager, "extensions.resolve_audio", {{"source", "example.test-source/tones"}, {"id", "two"}});
-        QVERIFY2(leased, qPrintable(errorOf(leased)));
-        const QUrl url(leased.value().value("url").toString());
+        const auto leased = wait<IMusicSourceCatalog::Playback>([&](auto done) {
+            manager->musicSources().resolvePlayback("example.test-source/tones", "two", done);
+        });
+        QVERIFY2(leased, qPrintable(leased ? QString() : leased.error().message));
+        const QUrl url = leased.value().url;
         QCOMPARE(url.host(), "127.0.0.1");
-        QCOMPARE(leased.value().value("extension").toString(), "wav");
+        QCOMPARE(leased.value().extension, "wav");
         QNetworkAccessManager network;
         QNetworkRequest request(url);
         request.setRawHeader("Range", "bytes=0-11");
@@ -1009,17 +1023,17 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(reply->rawHeader("Content-Range"), "bytes 0-11/352844");
         const auto prefix = reply->readAll();
         QVERIFY(prefix.startsWith("RIFF") && prefix.endsWith("WAVE"));
-        QVERIFY(call(*manager, "extensions.release_audio", {{"url", url.toString()}}));
+        manager->musicSources().release(url);
         reply.reset(network.get(QNetworkRequest(url)));
         QTRY_VERIFY_WITH_TIMEOUT(reply->isFinished(), 10'000);
         QCOMPARE(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(), 404);
 
-        QSignalSpy events(manager.get(), &IExtensionBackend::eventReady);
         const auto base = m_home->filePath("download");
-        const auto downloaded = call(*manager, "extensions.download_audio",
-                                     {{"source", "example.test-source/tones"}, {"id", "one"}, {"base", base}, {"task", "t1"}});
-        QVERIFY2(downloaded, qPrintable(errorOf(downloaded)));
-        QCOMPARE(downloaded.value().value("path").toString(), base + ".wav");
+        const auto downloaded = wait<QString>([&](auto done) {
+            manager->musicSources().download("example.test-source/tones", "one", base, "t1", {}, done);
+        });
+        QVERIFY2(downloaded, qPrintable(downloaded ? QString() : downloaded.error().message));
+        QCOMPARE(downloaded.value(), base + ".wav");
         QCOMPARE(QFileInfo(base + ".wav").size(), 352844);
         QVERIFY(QDir(m_home->path()).entryList({"download.partial-*"}).isEmpty());
     }

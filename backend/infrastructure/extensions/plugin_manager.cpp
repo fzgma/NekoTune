@@ -1,5 +1,4 @@
 #include "infrastructure/extensions/plugin_manager.h"
-#include "infrastructure/extensions/audio_proxy.h"
 #include "infrastructure/extensions/runtime/call_guard.h"
 #include "infrastructure/extensions/runtime/extension_runtime.h"
 #include "infrastructure/extensions/runtime/host_context.h"
@@ -40,65 +39,16 @@ void sequence(QStringList items, std::function<void(const QString &, Done)> step
 }
 } // namespace
 
-PluginManager::PluginManager(QObject *parent) : IExtensionBackend(parent), m_registry(m_packages.registryPath()) {
-    m_audio = std::make_unique<AudioProxy>(
-        [this](const QString &source, const QString &id, const QString &purpose, Completion done) {
-            providerCall({{"source", source},
-                          {"kind", "music"},
-                          {"operation", purpose == "download" ? "download" : "resolve"},
-                          {"params", QVariantMap{{"id", id}, {"purpose", purpose}}}},
-                         std::move(done));
-        });
-}
+PluginManager::PluginManager(QObject *parent) : IExtensionBackend(parent), m_registry(m_packages.registryPath()) {}
 PluginManager::~PluginManager() { shutdown(); }
 
-QList<ShuffleStrategyDescriptor> PluginManager::shuffleStrategies() const {
-    QList<ShuffleStrategyDescriptor> result;
-    for (const auto &owner : m_order) {
-        const auto run = m_runs.value(owner);
-        if (!run || run->state != ExtensionState::Running) continue;
-        for (auto it = run->shuffle.cbegin(); it != run->shuffle.cend(); ++it) {
-            if (!it->failed)
-                result.append({owner + '/' + it.key(),
-                               run->registrations.descriptor("shuffle", it.key()).value("name").toString(),
-                               it->generation});
-        }
-    }
-    return result;
+bool PluginManager::running(const QString &id) const {
+    const auto run = m_runs.value(id);
+    return run && run->state == ExtensionState::Running;
 }
-
-Result<sdk::ShuffleSelection> PluginManager::selectShuffle(const QString &id, quint64 generation,
-                                                          const sdk::ShuffleRequest &request) {
-    if (request.queue.isEmpty()) return failure("Queue is empty");
-    const auto owner = id.section('/', 0, 0);
-    const auto local = id.section('/', 1);
-    const auto run = m_runs.value(owner);
-    if (!run || run->state != ExtensionState::Running)
-        return failure("Shuffle extension unavailable: " + owner, ErrorCode::Unavailable);
-    const auto found = run->shuffle.constFind(local);
-    if (found == run->shuffle.cend() || found->generation != generation || found->failed)
-        return failure("Shuffle registration unavailable: " + id, ErrorCode::Unavailable);
-    auto *provider = found->provider;
-    Result<sdk::ShuffleSelection> result = failure("Shuffle selection failed");
-    if (const auto error = runAttributed(owner, [&] { result = provider->select(request); }))
-        result = failure(QString(*error).replace("Unhandled exception", "Unhandled shuffle exception"));
-    const auto live = run->shuffle.constFind(local);
-    if (run->state != ExtensionState::Running || live == run->shuffle.cend() || live->generation != generation)
-        return failure("Shuffle registration changed during selection", ErrorCode::Unavailable);
-    if (result) {
-        const int selected = result.value().queueId;
-        const bool exists = std::any_of(request.queue.cbegin(), request.queue.cend(),
-                                        [selected](const auto &track) { return track.queueId == selected && selected > 0; });
-        if (!exists) result = failure("Shuffle strategy selected an unavailable queue item");
-    }
-    if (!result) {
-        // Re-find after foreign code; registration disposal may have invalidated the iterator.
-        auto current = run->shuffle.find(local);
-        if (current != run->shuffle.end() && current->generation == generation) current->failed = true;
-        recordLog(owner, "error", "Shuffle strategy " + id + ": " + result.error().message);
-        notifyChanged();
-    }
-    return result;
+PendingCalls *PluginManager::pendingCalls(const QString &id) {
+    const auto run = m_runs.value(id);
+    return run && run->state == ExtensionState::Running ? &run->calls : nullptr;
 }
 
 void PluginManager::post(std::function<void()> work) {
@@ -125,7 +75,9 @@ void PluginManager::notifyChanged() {
         m_changePending = false;
         if (m_closing)
             return;
-        emit shuffleCatalogueChanged();
+        m_music.notifyChanged();
+        m_lyrics.notifyChanged();
+        emit m_shuffle.catalogueChanged();
         emit changed();
         auto event = snapshot();
         event.insert("event", "extensions.changed");
@@ -368,7 +320,7 @@ void PluginManager::shutdown() {
     if (m_closing)
         return;
     m_closing = true;
-    m_audio->close();
+    m_music.close();
     for (auto it = m_order.crbegin(); it != m_order.crend(); ++it)
         stop(*it);
     const auto mutations = std::exchange(m_mutations, {});
@@ -593,7 +545,7 @@ void PluginManager::activated(const std::shared_ptr<Run> &run, Result<void> resu
     const auto waiters = std::exchange(run->waiters, {});
     if (result) {
         run->state = ExtensionState::Running;
-        emit shuffleCatalogueChanged();
+        emit m_shuffle.catalogueChanged();
         if (m_entries.value(run->id).development)
             watchDevelopment(run);
         notifyChanged();
@@ -617,8 +569,6 @@ void PluginManager::stop(const QString &id) {
     if (!run || run->state == ExtensionState::Stopping)
         return;
     run->state = ExtensionState::Stopping;
-    emit shuffleCatalogueChanged();
-    m_audio->revoke(id);
     run->startTimer.reset();
     run->watcher.reset();
     run->pcm.clear();
@@ -628,9 +578,9 @@ void PluginManager::stop(const QString &id) {
     // anything else can reach them.
     run->services.clear();
     run->commands.clear();
-    run->music.clear();
-    run->lyrics.clear();
-    run->shuffle.clear();
+    m_music.removeExtension(id);
+    m_lyrics.removeExtension(id);
+    m_shuffle.removeExtension(id);
     run->subscriptions.clear();
     run->registrations.clear();
     run->calls.failAll("Extension stopped");
@@ -1027,100 +977,6 @@ void PluginManager::invoke(const QString &id, QString service, const QVariantMap
     const auto reply = run->calls.add(this, std::move(done), timeouts::call);
     guarded(id, [&] { handler(params, reply); });
 }
-void PluginManager::providerCall(const QVariantMap &params, Completion done) {
-    const auto source = params.value("source").toString();
-    const auto slash = source.indexOf('/');
-    const auto id = source.left(slash), local = source.mid(slash + 1);
-    const auto kind = params.value("kind").toString();
-    const auto run = slash > 0 ? m_runs.value(id) : nullptr;
-    if (!run || run->state != ExtensionState::Running || !run->registrations.contains(kind, local)) {
-        done(failure("Source is unavailable"));
-        return;
-    }
-    const auto operation = params.value("operation").toString();
-    const auto arguments = params.value("params").toMap();
-    if (kind == "lyrics") {
-        auto *provider = run->lyrics.value(local);
-        if (operation != "search" && operation != "resolve") {
-            done(failure("Unsupported provider operation: " + operation));
-            return;
-        }
-        const auto reply = run->calls.add(this, std::move(done), timeouts::call);
-        guarded(id, [&] {
-            if (operation == "search")
-                provider->search(arguments, reply);
-            else
-                provider->resolve(arguments, reply);
-        });
-        return;
-    }
-    auto *provider = run->music.value(local);
-    if (!provider || !QStringList{"search", "track", "resolve", "download", "downloaded"}.contains(operation)) {
-        done(failure("Unsupported provider operation: " + operation));
-        return;
-    }
-    const int timeout = operation == "download" ? timeouts::download : operation == "downloaded" ? timeouts::downloaded : timeouts::call;
-    const auto reply = run->calls.add(this, std::move(done), timeout);
-    const auto trackId = arguments.value("id").toString();
-    guarded(id, [&] {
-        if (operation == "search")
-            provider->search(arguments.value("query").toString(), arguments.value("cursor").toString(),
-                             [reply](Result<sdk::SearchPage> page) {
-                                 if (!page) {
-                                     reply(page.error());
-                                     return;
-                                 }
-                                 QVariantList tracks;
-                                 for (const auto &track : page.value().tracks)
-                                     tracks.append(track.toParams());
-                                 QVariantMap result{{"tracks", tracks}};
-                                 if (!page.value().cursor.isEmpty())
-                                     result.insert("cursor", page.value().cursor);
-                                 reply(result);
-                             });
-        else if (operation == "track")
-            provider->track(trackId, [reply](Result<sdk::Track> track) {
-                reply(track ? Result<QVariantMap>(track.value().toParams()) : Result<QVariantMap>(track.error()));
-            });
-        else if (operation == "downloaded")
-            provider->downloaded(trackId, arguments.value("path").toString(), arguments.value("song_id").toInt(),
-                                 arguments.value("existing").toBool(), reply);
-        else
-            provider->resolve(trackId, operation == "download" ? QStringLiteral("download") : arguments.value("purpose", "play").toString(),
-                              [reply](Result<sdk::ResolvedAudio> audio) {
-                                  reply(audio ? Result<QVariantMap>(audio.value().toParams())
-                                              : Result<QVariantMap>(audio.error()));
-                              });
-    });
-}
-void PluginManager::resolveAudio(const QVariantMap &params, Completion done) {
-    const auto source = params.value("source").toString();
-    const auto id = params.value("id").toString();
-    const auto data = QFileInfo(m_packages.dataDirectory(source.section('/', 0, 0))).canonicalFilePath();
-    QPointer<PluginManager> guard(this);
-    providerCall({{"source", source}, {"kind", "music"}, {"operation", "resolve"}, {"params", QVariantMap{{"id", id}, {"purpose", "play"}}}},
-                 [guard, source, id, data, done](Result<QVariantMap> result) {
-                     if (!guard)
-                         return;
-                     if (!result) {
-                         done(result);
-                         return;
-                     }
-                     const QUrl url(result.value().value("url").toString());
-                     if (!url.isLocalFile()) {
-                         guard->m_audio->lease(source, id, result.value(), done);
-                         return;
-                     }
-                     // Prepared local files play directly but must stay inside the extension's data.
-                     const auto file = QFileInfo(url.toLocalFile()).canonicalFilePath();
-                     if (data.isEmpty() || file.isEmpty() || !file.startsWith(data + "/") || !QFileInfo(file).isFile()) {
-                         done(failure("Extension audio files must be inside the extension data directory"));
-                         return;
-                     }
-                     done(QVariantMap{{"url", QUrl::fromLocalFile(file).toString()}});
-                 });
-}
-
 void PluginManager::deliver(const std::shared_ptr<Run> &run, const QVariantMap &event) {
     const auto name = event.value("event").toString();
     // Copy first: handlers may subscribe or dispose while running.
@@ -1178,36 +1034,6 @@ void PluginManager::request(const QString &method, const QVariantMap &params, Co
             done(QVariantMap{{"config", readConfig(id)}});
     } else if (method == "extensions.call")
         invoke(id, params.value("service").toString(), params.value("params").toMap(), std::move(done));
-    else if (method == "extensions.provider_call")
-        providerCall(params, std::move(done));
-    else if (method == "extensions.resolve_audio")
-        resolveAudio(params, std::move(done));
-    else if (method == "extensions.release_audio") {
-        m_audio->release(params.value("url").toString());
-        done(QVariantMap{});
-    } else if (method == "extensions.cancel_download") {
-        m_audio->cancelDownload(params.value("task").toString());
-        done(QVariantMap{});
-    } else if (method == "extensions.download_audio") {
-        const auto source = params.value("source").toString();
-        const auto task = params.value("task").toString();
-        QPointer<PluginManager> guard(this);
-        m_audio->download(
-            source, params.value("id").toString(), params.value("base").toString(), task,
-            m_packages.dataDirectory(source.section('/', 0, 0)),
-            [guard, task](qint64 received, qint64 total) {
-                if (guard)
-                    emit guard->eventReady({{"event", "music.download"},
-                                            {"task", task},
-                                            {"state", toString(ExtensionState::Running)},
-                                            {"received", received},
-                                            {"total", total}});
-            },
-            std::move(done));
-    }
-    else if (method == "extensions.download_completed")
-        providerCall({{"source", params.value("source")}, {"kind", "music"}, {"operation", "downloaded"}, {"params", params}},
-                     std::move(done));
     else
         enqueue(
             [this, method, params, id](Completion finish) {

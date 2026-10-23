@@ -13,15 +13,6 @@ class ExtensionService final : public QObject {
     void request(const QString &method, const QVariantMap &params, IExtensionBackend::Completion done) {
         m_backend.request(method, params, std::move(done));
     }
-    QVariantList sources(const QString &kind) const {
-        QVariantList result;
-        for (const auto &value : snapshot().value("extensions").toList()) {
-            const auto entry = value.toMap();
-            if (entry.value("state").toString() == "running")
-                result.append(entry.value("registrations").toMap().value(kind).toList());
-        }
-        return result;
-    }
   signals:
     void changed();
     void eventReady(const QVariantMap &event);

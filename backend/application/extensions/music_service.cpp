@@ -2,11 +2,11 @@
 #include <QPointer>
 #include <QUuid>
 namespace nekotune {
-MusicService::MusicService(ExtensionService &extensions, LibraryService &library, IFileInspector &imports,
+MusicService::MusicService(IMusicSourceCatalog &sources, LibraryService &library, IFileInspector &imports,
                            CommandScheduler &commands, Reserve reserve)
-    : m_extensions(extensions), m_library(library), m_imports(imports), m_commands(commands),
+    : m_sources(sources), m_library(library), m_imports(imports), m_commands(commands),
       m_reserve(std::move(reserve)) {
-    connect(&extensions, &ExtensionService::changed, this, &MusicService::sourcesChanged);
+    connect(&sources, &IMusicSourceCatalog::sourcesChanged, this, &MusicService::sourcesChanged);
 }
 bool MusicService::available(const QString &source) const {
     for (const auto &item : sources())
@@ -15,30 +15,38 @@ bool MusicService::available(const QString &source) const {
     return false;
 }
 void MusicService::resolve(const SongMetadata &song, ISourceResolver::Completion done) {
-    m_extensions.request("extensions.resolve_audio",
-                         {{"source", song.providerId}, {"id", song.providerTrackId}},
-                         [done](Result<QVariantMap> result) {
-                             if (!result)
-                                 done(result.error());
-                             else
-                                 done(QUrl(result.value().value("url").toString()));
-                         });
+    m_sources.resolvePlayback(song.providerId, song.providerTrackId, [done](Result<IMusicSourceCatalog::Playback> result) {
+        if (!result)
+            done(result.error());
+        else
+            done(result.value().url);
+    });
 }
 void MusicService::release(const QUrl &url) {
     if (!url.isEmpty())
-        m_extensions.request("extensions.release_audio", {{"url", url.toString()}}, [](auto) {});
+        m_sources.release(url);
 }
 void MusicService::search(const QString &source, const QVariantMap &params,
                           IExtensionBackend::Completion done) {
-    m_extensions.request("extensions.provider_call",
-                         {{"source", source}, {"kind", "music"}, {"operation", "search"}, {"params", params}},
-                         std::move(done));
+    m_sources.search(source, params.value("query").toString(), params.value("cursor").toString(),
+                     [done](Result<sdk::SearchPage> page) {
+        if (!page) {
+            done(page.error());
+            return;
+        }
+        QVariantList tracks;
+        for (const auto &track : page.value().tracks)
+            tracks.append(track.toParams());
+        QVariantMap result{{"tracks", tracks}};
+        if (!page.value().cursor.isEmpty())
+            result.insert("cursor", page.value().cursor);
+        done(result);
+    });
 }
 void MusicService::track(const QString &source, const QString &id, IExtensionBackend::Completion done) {
-    m_extensions.request(
-        "extensions.provider_call",
-        {{"source", source}, {"kind", "music"}, {"operation", "track"}, {"params", QVariantMap{{"id", id}}}},
-        std::move(done));
+    m_sources.track(source, id, [done](Result<sdk::Track> track) {
+        done(track ? Result<QVariantMap>(track.value().toParams()) : Result<QVariantMap>(track.error()));
+    });
 }
 void MusicService::cancelDownload(const QString &task, IExtensionBackend::Completion done) {
     if (!m_downloads.contains(task)) {
@@ -46,8 +54,10 @@ void MusicService::cancelDownload(const QString &task, IExtensionBackend::Comple
         return;
     }
     m_cancelled.insert(task);
-    m_extensions.request("extensions.cancel_download", {{"task", task}}, std::move(done));
+    m_sources.cancelDownload(task);
+    done(QVariantMap{});
 }
+
 QString MusicService::download(const QString &source, const SongMetadata &song) {
     const auto task = QUuid::createUuid().toString(QUuid::WithoutBraces);
     QPointer<MusicService> guard(this);
@@ -85,10 +95,14 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                 report("failed", base.error().message);
                 return;
             }
-            m_extensions.request(
-                "extensions.download_audio",
-                {{"source", source}, {"id", song.providerTrackId}, {"base", base.value()}, {"task", task}},
-                [guard, song, source, report, task](Result<QVariantMap> result) {
+            m_sources.download(
+                source, song.providerTrackId, base.value(), task,
+                [guard, task](qint64 received, qint64 total) {
+                    if (guard)
+                        emit guard->taskChanged({{"event", "music.download"}, {"task", task}, {"state", "running"},
+                                                 {"received", received}, {"total", total}});
+                },
+                [guard, song, source, report, task](Result<QString> result) {
                     if (!guard)
                         return;
                     if (guard->m_cancelled.contains(task)) {
@@ -99,7 +113,7 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                         report("failed", result.error().message);
                         return;
                     }
-                    const auto path = result.value().value("path").toString();
+                    const auto path = result.value();
                     guard->m_commands.submit(
                         [guard, song, source, path, report, task](CommandScheduler::Done done) {
                             if (!guard) {
@@ -143,13 +157,8 @@ QString MusicService::download(const QString &source, const SongMetadata &song) 
                                     report("cancelled", {}, songId, {{"path", importedPath}});
                                     return;
                                 }
-                                guard->m_extensions.request(
-                                    "extensions.download_completed",
-                                    {{"source", source},
-                                     {"id", song.providerTrackId},
-                                     {"path", path},
-                                     {"song_id", songId},
-                                     {"existing", existing}},
+                                guard->m_sources.downloaded(
+                                    source, song.providerTrackId, path, songId, existing,
                                     [guard, report, songId, importedPath, path,
                                      hash = file.value().hash](Result<QVariantMap> assets) {
                                         QVariantMap details =

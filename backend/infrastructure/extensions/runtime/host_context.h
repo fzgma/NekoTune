@@ -2,6 +2,7 @@
 #include "infrastructure/extensions/runtime/extension_runtime.h"
 #include <nekotune/sdk/extension_context.h>
 #include <nekotune/sdk/pcm_provider.h>
+#include <nekotune/sdk/shuffle_provider.h>
 #include <QMutex>
 #include <atomic>
 

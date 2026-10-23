@@ -3,7 +3,6 @@
 #include "infrastructure/extensions/runtime/extension_state.h"
 #include "infrastructure/extensions/runtime/registration_scope.h"
 #include <nekotune/sdk/extension_plugin.h>
-#include <nekotune/sdk/shuffle_provider.h>
 #include "infrastructure/extensions/runtime/dev_watcher.h"
 #include <QSet>
 #include <QTimer>
@@ -23,14 +22,6 @@ struct ExtensionRuntime {
     RegistrationScope registrations;
     // Function objects and providers below belong to the plugin; stop() drops them all.
     QHash<QString, sdk::Handler> services, commands;
-    QHash<QString, sdk::IMusicProvider *> music;
-    QHash<QString, sdk::ILyricsProvider *> lyrics;
-    struct Shuffle {
-        sdk::IShuffleProvider *provider = nullptr;
-        quint64 generation = 0;
-        bool failed = false;
-    };
-    QMap<QString, Shuffle> shuffle;
     std::map<quint64, sdk::RegistrationPtr> pcm;
     std::map<quint64, std::pair<QString, sdk::EventHandler>> subscriptions;
     quint64 nextSubscription = 1;

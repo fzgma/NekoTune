@@ -114,8 +114,11 @@ sdk::RegistrationPtr HostContext::registerMusicProvider(const QString &id, sdk::
     if (!provider)
         return nullptr;
     return add(
-        "music", id, descriptor, [id, provider](Run &run) { run.music.insert(id, provider); },
-        [id](Run &run) { run.music.remove(id); });
+        "music", id, descriptor,
+        [id, provider, manager = m_manager](Run &run) {
+            manager->m_music.add(run.id, id, provider, run.registrations.descriptor("music", id));
+        },
+        [id, manager = m_manager](Run &run) { manager->m_music.remove(run.id, id); });
 }
 
 sdk::RegistrationPtr HostContext::registerLyricsProvider(const QString &id, sdk::ILyricsProvider *provider,
@@ -123,8 +126,11 @@ sdk::RegistrationPtr HostContext::registerLyricsProvider(const QString &id, sdk:
     if (!provider)
         return nullptr;
     return add(
-        "lyrics", id, descriptor, [id, provider](Run &run) { run.lyrics.insert(id, provider); },
-        [id](Run &run) { run.lyrics.remove(id); });
+        "lyrics", id, descriptor,
+        [id, provider, manager = m_manager](Run &run) {
+            manager->m_lyrics.add(run.id, id, provider, run.registrations.descriptor("lyrics", id));
+        },
+        [id, manager = m_manager](Run &run) { manager->m_lyrics.remove(run.id, id); });
 }
 
 sdk::RegistrationPtr HostContext::on(const QString &event, sdk::EventHandler handler) {
@@ -187,9 +193,9 @@ sdk::RegistrationPtr HostContext::registerShuffleStrategy(const QString &id, sdk
     return add(
         "shuffle", id, descriptor,
         [id, provider, manager = m_manager](Run &run) {
-            run.shuffle.insert(id, {provider, ++manager->m_generation, false});
+            manager->m_shuffle.add(run.id, id, provider, run.registrations.descriptor("shuffle", id).value("name").toString());
         },
-        [id](Run &run) { run.shuffle.remove(id); });
+        [id, manager = m_manager](Run &run) { manager->m_shuffle.remove(run.id, id); });
 }
 
 void HostContext::publish(const QString &event, const sdk::Params &data) {
@@ -297,8 +303,6 @@ sdk::RegistrationPtr HostContext::add(const QString &kind, const QString &id, co
         const auto added = manager->addRegistration(run, kind, id, descriptor);
         if (added) {
             install(*run);
-            if (kind == "shuffle")
-                emit manager->shuffleCatalogueChanged();
         } else
             manager->recordLog(run->id, "error", added.error().message);
         return bool(added);
@@ -313,11 +317,9 @@ sdk::RegistrationPtr HostContext::add(const QString &kind, const QString &id, co
         onRun(work);
     if (!accepted)
         return nullptr;
-    return std::make_unique<HostRegistration>(m_manager, m_run, [kind, id, remove, manager = m_manager](Run &run) {
+    return std::make_unique<HostRegistration>(m_manager, m_run, [kind, id, remove](Run &run) {
         run.registrations.remove(kind, id);
         remove(run);
-        if (kind == "shuffle")
-            emit manager->shuffleCatalogueChanged();
     });
 }
 
