@@ -16,6 +16,6 @@ QVariantMap resolveThemeTokens(const QVariantMap &catalog, const QVariantMap &th
 /// True when the theme replaces any part of the main window: shell, bottomPlayer, background or pages.
 /// Wallpaper alone does not count as a layout.
 bool providesLayout(const QVariantMap &theme);
-/// True when the theme declares ui.wallpaper.
+/// True when the theme declares a top-level wallpaper entry.
 bool providesWallpaper(const QVariantMap &theme);
 } // namespace nekotune::themes

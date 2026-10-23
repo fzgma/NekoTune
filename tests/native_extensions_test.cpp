@@ -521,17 +521,47 @@ class NativeExtensionsTest final : public QObject {
 
     void themeUiCapabilities() {
         QVERIFY(!themes::providesLayout({}));
-        QVERIFY(!themes::providesLayout({{"ui", QVariantMap{{"wallpaper", "Wallpaper.qml"}}}}));
+        QVERIFY(!themes::providesLayout({{"wallpaper", "Wallpaper.qml"}}));
         QVERIFY(!themes::providesLayout({{"ui", QVariantMap{{"pages", QVariantMap{}}}}}));
         for (const auto *key : {"shell", "bottomPlayer", "background"}) {
             QVERIFY(!themes::providesLayout({{"ui", QVariantMap{{QLatin1String(key), ""}}}}));
             QVERIFY(themes::providesLayout({{"ui", QVariantMap{{QLatin1String(key), "View.qml"}}}}));
         }
         QVERIFY(themes::providesLayout({{"ui", QVariantMap{{"pages", QVariantMap{{"home", "Home.qml"}}}}}}));
-        QVERIFY(themes::providesWallpaper({{"ui", QVariantMap{{"wallpaper", "Wallpaper.qml"}}}}));
+        QVERIFY(themes::providesWallpaper({{"wallpaper", "Wallpaper.qml"}}));
         QVERIFY(!themes::providesWallpaper({}));
-        QVERIFY(!themes::providesWallpaper({{"ui", QVariantMap{{"wallpaper", ""}}}}));
-        QVERIFY(!themes::providesWallpaper({{"ui", QVariantMap{{"shell", "Shell.qml"}}}}));
+        QVERIFY(!themes::providesWallpaper({{"wallpaper", ""}}));
+        QVERIFY(!themes::providesWallpaper({{"ui", QVariantMap{{"wallpaper", "Wallpaper.qml"}}}}));
+    }
+
+    void themeWallpaperField() {
+        const QDir folder(m_home->filePath("wallpaper-field"));
+        QVERIFY(QDir().mkpath(folder.path()));
+        QFile file(folder.filePath("Wallpaper.qml"));
+        QVERIFY(file.open(QIODevice::WriteOnly) && file.write("import QtQuick\nItem {}\n") > 0);
+        file.close();
+        const QVariantMap variants{{"light", QVariantMap{}}, {"dark", QVariantMap{}}};
+        auto theme = [&](const QVariantMap &extra) {
+            QVariantMap value{{"id", "default"}, {"schemaVersion", 1}, {"variants", variants}};
+            value.insert(extra);
+            return value;
+        };
+        auto message = [&](const QVariantMap &value) {
+            const auto result = themes::validate(value, folder.path(), true);
+            return result ? QString() : result.error().message;
+        };
+
+        QCOMPARE(message(theme({{"wallpaper", "Wallpaper.qml"}})), QString());
+        QCOMPARE(message(theme({{"ui", QVariantMap{{"wallpaper", "Wallpaper.qml"}}}})),
+                 QString("Theme wallpaper moved from ui.wallpaper to wallpaper"));
+        // Legacy themes only pass the non-strict path (ordinary extensions), so check it there.
+        const auto legacy = themes::validate({{"id", "legacy"}, {"wallpaper", "Wallpaper.qml"}}, folder.path(), false);
+        QVERIFY(!legacy);
+        QCOMPARE(legacy.error().message, QString("Theme wallpaper requires schemaVersion 1"));
+        for (const auto &invalid : {QVariant(""), QVariant(1), QVariant("Wallpaper.js")})
+            QCOMPARE(message(theme({{"wallpaper", invalid}})), QString("Theme wallpaper source must be QML"));
+        QVERIFY(!message(theme({{"wallpaper", "Missing.qml"}})).isEmpty());
+        QVERIFY(!message(theme({{"wallpaper", "../Wallpaper.qml"}})).isEmpty());
     }
 
     void themeLayoutSelection() {
@@ -551,11 +581,13 @@ class NativeExtensionsTest final : public QObject {
                 value.insert("ui", ui);
             return value;
         };
+        auto wall = theme("wall", {});
+        wall.insert("wallpaper", "Wallpaper.qml");
         const QJsonObject manifest{
             {"id", "test.layout"}, {"name", "Layout test"}, {"version", "1.0.0"}, {"apiVersion", 1}, {"type", "theme"},
             {"contributes", QJsonObject{{"themes", QJsonArray{theme("palette", {}),
                                                               theme("layout", {{"bottomPlayer", "Player.qml"}}),
-                                                              theme("wall", {{"wallpaper", "Wallpaper.qml"}})}}}}};
+                                                              wall}}}}};
         QVERIFY(write("extension.json", QJsonDocument(manifest).toJson()));
         install(*manager, folder.path());
         enable(*manager, "test.layout");

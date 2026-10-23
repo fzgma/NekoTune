@@ -14,7 +14,7 @@ namespace nekotune::themes {
 namespace {
 const QStringList modes{"light", "dark"};
 const QStringList pageIds{"home", "library", "queue", "lyrics", "settings", "extensions", "music_sources", "lyrics_debug"};
-const QStringList uiSlots{"background", "shell", "bottomPlayer", "wallpaper"};
+const QStringList uiSlots{"background", "shell", "bottomPlayer"};
 bool isObject(const QVariant &value) { return value.typeId() == QMetaType::QVariantMap; }
 bool isNumber(const QVariant &value) {
     switch (value.typeId()) {
@@ -185,6 +185,8 @@ Result<void> validate(const QVariantMap &theme, const QString &directory, bool s
         if (!modern || !isObject(theme.value("ui")))
             return failure("QML themes require schemaVersion 1");
         const auto ui = theme.value("ui").toMap();
+        if (ui.contains("wallpaper"))
+            return failure("Theme wallpaper moved from ui.wallpaper to wallpaper");
         QVariantList sources;
         for (auto it = ui.cbegin(); it != ui.cend(); ++it)
             if (it.key() != "pages" && !uiSlots.contains(it.key()))
@@ -207,6 +209,15 @@ Result<void> validate(const QVariantMap &theme, const QString &directory, bool s
             if (auto file = themeFile(directory, source.toString()); !file)
                 return file.error();
         }
+    }
+    if (theme.contains("wallpaper")) {
+        if (!modern)
+            return failure("Theme wallpaper requires schemaVersion 1");
+        const auto wallpaper = theme.value("wallpaper");
+        if (wallpaper.typeId() != QMetaType::QString || !wallpaper.toString().endsWith(".qml"))
+            return failure("Theme wallpaper source must be QML");
+        if (auto file = themeFile(directory, wallpaper.toString()); !file)
+            return file.error();
     }
     qint64 pixels = 0;
     for (const auto &image : images) {
@@ -329,6 +340,7 @@ Result<QVariantMap> exportTheme(const QVariantMap &theme, const QString &directo
         return failure("Theme archive exceeds 20 MiB");
     if (auto saved = writer.save(destination); !saved)
         return saved.error();
-    return QVariantMap{{"path", destination}, {"includesQml", full && theme.contains("ui")}};
+    return QVariantMap{{"path", destination},
+                       {"includesQml", full && (theme.contains("ui") || theme.contains("wallpaper"))}};
 }
 } // namespace nekotune::themes

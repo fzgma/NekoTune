@@ -26,10 +26,10 @@
             }
           }
         },
+        "wallpaper": "Wallpaper.qml",
         "ui": {
           "background": "Background.qml",
-          "bottomPlayer": "Player.qml",
-          "wallpaper": "Wallpaper.qml"
+          "bottomPlayer": "Player.qml"
         }
       }
     ]

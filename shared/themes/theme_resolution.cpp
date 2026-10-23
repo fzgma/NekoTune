@@ -53,6 +53,6 @@ bool providesLayout(const QVariantMap &theme) {
 }
 
 bool providesWallpaper(const QVariantMap &theme) {
-    return !theme.value("ui").toMap().value("wallpaper").toString().isEmpty();
+    return !theme.value("wallpaper").toString().isEmpty();
 }
 } // namespace nekotune::themes
