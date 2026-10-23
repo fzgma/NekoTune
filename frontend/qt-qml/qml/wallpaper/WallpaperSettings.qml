@@ -9,6 +9,7 @@ Rectangle {
     required property var manager
     required property var translator
     property var themeController: null
+    property string pendingWallpaperId: ""
     readonly property var preferences: manager ? manager.settings : ({})
     readonly property var outputs: manager ? manager.outputs : []
     readonly property var styles: ["classic", "vinyl", "lyrics", "theme"]
@@ -18,12 +19,15 @@ Rectangle {
         : themeSource !== "" ? (((themeController.wallpaperSlots || {})[themeSource] || {}).source ? "" : "source-missing")
         : !((themeController.uiSlots || {}).wallpaper || {}).source ? "missing" : ""
     readonly property var themeSources: {
-        const slots = themeController ? themeController.wallpaperSlots || {} : {}
         const list = [{id: "", label: t("wallpaper_theme_follow")}]
-        for (const id of Object.keys(slots))
-            list.push({id: id, label: label(slots[id].title) || id})
-        if (themeSource !== "" && !slots[themeSource])
-            list.push({id: themeSource, label: t("wallpaper_theme_source_unavailable")})
+        for (const item of themeController ? themeController.items || [] : []) {
+            if (!item.hasWallpaper)
+                continue
+            list.push({id: item.id, label: (label(item.title) || item.id)
+                + (item.hasCode && !item.trusted ? " · " + t("wallpaper_gallery_needs_trust") : "")})
+        }
+        if (themeSource !== "" && !list.some(item => item.id === themeSource))
+            list.push({id: themeSource, label: t("wallpaper_theme_source_unavailable"), missing: true})
         return list
     }
     function t(key) { return translator.text(key, translator.language) }
@@ -101,10 +105,23 @@ Rectangle {
             objectName: "wallpaperThemeSource"
             Layout.fillWidth: true
             visible: root.preferences.style === "theme" && root.themeController !== null
+            enabled: root.themeController !== null && root.themeController.connected
+                && !root.themeController.busy && !root.themeController.safeMode
             model: root.themeSources
             textRole: "label"; valueRole: "id"
             currentIndex: Math.max(0, model.findIndex(item => item.id === root.themeSource))
-            onActivated: root.manager.setOption("themeWallpaper", currentValue)
+            onActivated: index => {
+                const entry = model[index]
+                root.pendingWallpaperId = ""
+                if (entry.id === "")
+                    root.manager.setOption("themeWallpaper", "")
+                else if (!entry.missing) {
+                    root.pendingWallpaperId = entry.id
+                    root.themeController.selectWallpaper(entry.id)
+                }
+                // Authorization can be cancelled; display the saved source until it succeeds.
+                currentIndex = Qt.binding(() => Math.max(0, model.findIndex(item => item.id === root.themeSource)))
+            }
         }
         Label {
             objectName: "wallpaperThemeHint"
@@ -206,5 +223,32 @@ Rectangle {
             color: Theme.textMuted; font.pixelSize: Theme.fontCaption
             wrapMode: Text.Wrap; textFormat: Text.PlainText
         }
+    }
+    Connections {
+        target: root.themeController
+        enabled: root.visible
+        function onTrustRequested(id, target) {
+            if (target === "wallpaper" && id === root.pendingWallpaperId)
+                trustDialog.open()
+        }
+        function onWallpaperReady(id) {
+            if (id !== root.pendingWallpaperId)
+                return
+            root.pendingWallpaperId = ""
+            root.manager.setOption("themeWallpaper", id)
+        }
+    }
+    Dialog {
+        id: trustDialog
+        objectName: "wallpaperTrustDialog"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(500, parent ? parent.width - 40 : 500)
+        implicitHeight: 360
+        title: root.t("extension_trust_title")
+        modal: true; standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label { text: root.t("theme_trust_body"); color: Theme.textPrimary; wrapMode: Text.WordWrap }
+        onAccepted: root.themeController.selectWallpaper(root.pendingWallpaperId, true)
+        onRejected: root.pendingWallpaperId = ""
     }
 }

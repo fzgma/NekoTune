@@ -36,8 +36,28 @@ Item {
     QtObject {
         id: mockTheme
         property bool safeMode: false
+        property bool connected: true
+        property bool busy: false
+        property bool autoReady: true
+        property var items: []
+        property var calls: []
         property var uiSlots: ({})
         property var wallpaperSlots: ({})
+        signal trustRequested(string id, string target)
+        signal wallpaperReady(string id)
+        function selectWallpaper(id, trusted) {
+            calls = calls.concat([{id: id, trusted: Boolean(trusted)}])
+            const item = items.find(entry => entry.id === id)
+            if (item && item.hasCode && !item.trusted && !trusted) {
+                trustRequested(id, "wallpaper")
+                return
+            }
+            if (autoReady) {
+                items = items.map(entry => entry.id === id ? Object.assign({}, entry, {trusted: true}) : entry)
+                wallpaperSlots = Object.assign({}, wallpaperSlots, {[id]: {source: "file:///pkg/Wallpaper.qml"}})
+                wallpaperReady(id)
+            }
+        }
     }
     QtObject {
         id: mockControllers
@@ -99,8 +119,14 @@ Item {
         mockManager.settings = {style: "classic", autoRestore: false, target: "primary", updateHz: 30, intensity: 0.35}
         mockManager.outputs = [{id: "edid", name: "DP-1", selected: true, state: "unavailable", error: "wallpaper_qpa_unavailable"}]
         mockTheme.safeMode = false
+        mockTheme.connected = true
+        mockTheme.busy = false
+        mockTheme.autoReady = true
+        mockTheme.items = []
+        mockTheme.calls = []
         mockTheme.uiSlots = ({})
         mockTheme.wallpaperSlots = ({})
+        testTranslator.language = "en"
         mockWallpaper.playing = true
         mockWallpaper.updating = true
         mockPreferences.lyrics = true
@@ -294,6 +320,7 @@ Item {
 
         mockManager.settings = Object.assign({}, mockManager.settings, {style: "theme"})
         mockTheme.wallpaperSlots = {"pkg/wall": {source: "file:///pkg/Wallpaper.qml", title: {en: "Wall", zh: "壁纸"}}}
+        mockTheme.items = [{id: "pkg/wall", title: {en: "Wall", zh: "壁纸"}, hasWallpaper: true}]
         verify(picker.visible)
         compare(picker.count, 2)
         compare(picker.currentIndex, 0)
@@ -305,10 +332,12 @@ Item {
         verify(!hint.visible)
 
         mockTheme.wallpaperSlots = ({})
+        mockTheme.items = []
         compare(picker.count, 2)
         compare(hint.text, "wallpaper_theme_source_missing")
 
         mockTheme.wallpaperSlots = {"pkg/wall": {source: "file:///pkg/Wallpaper.qml", title: "Wall"}}
+        mockTheme.items = [{id: "pkg/wall", title: "Wall", hasWallpaper: true}]
         compare(picker.currentIndex, 1)
         verify(!hint.visible)
         mockTheme.safeMode = true
@@ -321,6 +350,7 @@ Item {
         testTranslator.language = data.language
         mockManager.settings = Object.assign({}, mockManager.settings, {style: "theme", themeWallpaper: "pkg/wall"})
         mockTheme.wallpaperSlots = {"pkg/wall": {source: "file:///pkg/Wallpaper.qml", title: {en: "Wall", zh: "壁纸"}}}
+        mockTheme.items = [{id: "pkg/wall", title: {en: "Wall", zh: "壁纸"}, hasWallpaper: true}]
         const panel = createTemporaryObject(panelComponent, testCase,
             {width: 360, translator: testTranslator, themeController: mockTheme})
         verify(panel)
@@ -332,6 +362,7 @@ Item {
         if (screenshot) grabImage(panel).save(screenshot)
 
         mockTheme.wallpaperSlots = ({})
+        mockTheme.items = []
         compare(picker.displayText, testTranslator.text("wallpaper_theme_source_unavailable", data.language))
         compare(findChild(panel, "wallpaperThemeHint").text,
             testTranslator.text("wallpaper_theme_source_missing", data.language))
@@ -339,6 +370,86 @@ Item {
         screenshot = testFixtures.screenshotPath("wallpaper-source-missing-" + data.language)
         if (screenshot) grabImage(panel).save(screenshot)
         testTranslator.language = "en"
+    }
+    function test_untrustedWallpaperCanBeSelected_data() {
+        return [{tag: "zh", language: "zh"}, {tag: "en", language: "en"}]
+    }
+    function test_untrustedWallpaperCanBeSelected(data) {
+        testTranslator.language = data.language
+        mockManager.settings = Object.assign({}, mockManager.settings, {style: "theme", themeWallpaper: ""})
+        mockTheme.items = [
+            {id: "pkg/palette", title: "Palette", hasWallpaper: false},
+            {id: "pkg/wall", title: "Lumen", hasWallpaper: true, hasCode: true, trusted: false}
+        ]
+        const panel = createTemporaryObject(panelComponent, testCase,
+            {width: 600, translator: testTranslator, themeController: mockTheme})
+        const picker = findChild(panel, "wallpaperThemeSource")
+        const dialog = findChild(panel, "wallpaperTrustDialog")
+        compare(picker.count, 2)
+        compare(picker.model[1].label, "Lumen · " + testTranslator.text("wallpaper_gallery_needs_trust", data.language))
+        compare(Object.keys(mockTheme.wallpaperSlots).length, 0)
+        const screenshot = testFixtures.screenshotPath("wallpaper-untrusted-source-" + data.language)
+        if (screenshot) {
+            picker.popup.open()
+            tryCompare(picker.popup, "opened", true)
+            waitForRendering(testCase)
+            grabImage(testCase).save(screenshot)
+            picker.popup.close()
+        }
+
+        picker.forceActiveFocus()
+        keyClick(Qt.Key_Down)
+        tryCompare(dialog, "visible", true)
+        compare(mockTheme.calls, [{id: "pkg/wall", trusted: false}])
+        compare(mockManager.settings.themeWallpaper, "")
+        compare(picker.currentIndex, 0)
+        dialog.reject()
+        compare(mockManager.settings.themeWallpaper, "")
+        compare(picker.currentIndex, 0)
+
+        picker.forceActiveFocus()
+        keyClick(Qt.Key_Down)
+        tryCompare(dialog, "visible", true)
+        dialog.accept()
+        compare(mockTheme.calls[2], {id: "pkg/wall", trusted: true})
+        compare(mockManager.settings.themeWallpaper, "pkg/wall")
+        compare(picker.currentIndex, 1)
+        compare(picker.displayText, "Lumen")
+        verify(!mockManager.requestedEnabled)
+    }
+    function test_wallpaperSelectionWaitsForReady() {
+        mockManager.settings = Object.assign({}, mockManager.settings, {style: "theme", themeWallpaper: ""})
+        mockTheme.items = [{id: "pkg/wall", title: "Wall", hasWallpaper: true, trusted: true}]
+        mockTheme.autoReady = false
+        const panel = createTemporaryObject(panelComponent, testCase, {width: 360, themeController: mockTheme})
+        const picker = findChild(panel, "wallpaperThemeSource")
+        picker.forceActiveFocus()
+        keyClick(Qt.Key_Down)
+        compare(mockManager.settings.themeWallpaper, "")
+        mockTheme.wallpaperReady("pkg/other")
+        compare(mockManager.settings.themeWallpaper, "")
+        mockTheme.wallpaperReady("pkg/wall")
+        compare(mockManager.settings.themeWallpaper, "pkg/wall")
+        compare(picker.currentIndex, 1)
+        picker.forceActiveFocus()
+        keyClick(Qt.Key_Up)
+        compare(mockManager.settings.themeWallpaper, "")
+        mockTheme.wallpaperReady("pkg/wall")
+        compare(mockManager.settings.themeWallpaper, "")
+    }
+    function test_wallpaperSourceRequiresAvailableController() {
+        mockManager.settings = Object.assign({}, mockManager.settings, {style: "theme"})
+        const panel = createTemporaryObject(panelComponent, testCase, {width: 360, themeController: mockTheme})
+        const picker = findChild(panel, "wallpaperThemeSource")
+        verify(picker.enabled)
+        mockTheme.safeMode = true
+        verify(!picker.enabled)
+        mockTheme.safeMode = false
+        mockTheme.connected = false
+        verify(!picker.enabled)
+        mockTheme.connected = true
+        mockTheme.busy = true
+        verify(!picker.enabled)
     }
     }
 }
