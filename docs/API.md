@@ -572,11 +572,11 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 - 状态：`items`、`selectedId`、`activeId`、`layoutSelectedId`、`activeLayoutId`、`layoutUnavailable`、`mode`、`isDark`、`reducedMotion`、`tokens`、`background`、`uiSlots`、`wallpaperSlots`、`busy/error/notice` 等；`items` 每项有 `hasLayout`、`hasWallpaper`。`wallpaperSlots` 以主题贡献 ID 为键，仅包含可用且允许加载的壁纸入口。
 - 选择：`selectAppearance(id, trusted = false)`、`selectLayout(id, trusted = false)`；`selectTheme` 对含界面的主题同时设置配色和界面，对不含界面的主题只设置配色。`resetAppearance`、`resetLayout` 分别重置；`reset` 重置配色、界面与深色模式，不重置壁纸偏好。
 - 管理：`importTheme/updateTheme/reloadTheme/exportTheme/removeTheme` 走既有扩展管理接口；`setMode` 保存本地 `theme_mode`，`setReducedMotion(bool)` 保存布尔设置 `reduced_motion`（默认 `false`），主题不能覆盖它。
-- 信号：`trustRequested(id, target)`，`target` 为 `theme`、`appearance` 或 `layout`，授权后应重试同一操作。主题包的 `selectAppearance` 不请求代码授权；普通扩展仍须先授权。
+- 信号：`trustRequested(id, target)`，`target` 为 `theme`、`appearance`、`layout` 或 `wallpaper`，授权后应重试同一操作。主题包的 `selectAppearance` 不请求代码授权；普通扩展仍须先授权。
 
 QML 的 `Theme` 兼容原变量名，并提供 `isDark` 与用户设置的 `reducedMotion`。格式与示例见 [主题制作](themes.md)。
 
-主题可声明 `ui.wallpaper` QML `Item`。用户选择 `wallpaper.style: "theme"` 后加载；`wallpaper.themeWallpaper` 是字符串，空字符串（默认）使用 `uiSlots.wallpaper`，先取界面选择、再取外观选择的壁纸；指定主题贡献 ID 则使用 `wallpaperSlots` 中该来源。入口使用 `ExtensionApi.wallpaper` 的只读播放、歌词、设置及屏幕上下文；无入口或加载失败回退经典卡片并保留选择。`themeStatus` 包括 `loading/active/missing/source-missing/error/safe-mode`，其中 `source-missing` 表示指定来源不可用，恢复后自动接回。它不新增后端 IPC，详见 [主题音乐壁纸](themes.md#主题音乐壁纸) 与 [壁纸状态](wallpaper.md)。
+主题可声明顶层 `wallpaper` QML `Item`。用户选择 `wallpaper.style: "theme"` 后加载；`wallpaper.themeWallpaper` 是字符串，空字符串（默认）使用 `uiSlots.wallpaper`，先取界面选择、再取外观选择的壁纸；指定主题贡献 ID 则使用 `wallpaperSlots` 中该来源。入口使用 `ExtensionApi.wallpaper` 的只读播放、歌词、设置及屏幕上下文；无入口或加载失败回退经典卡片并保留选择。`themeStatus` 包括 `loading/active/missing/source-missing/error/safe-mode`，其中 `source-missing` 表示指定来源不可用，恢复后自动接回。它不新增后端 IPC，详见 [主题音乐壁纸](themes.md#主题音乐壁纸) 与 [壁纸状态](wallpaper.md)。`ui.wallpaper` 已废弃，校验时报错。前端 `ThemeController.selectWallpaper(id, trusted)` 校验并在需要时请求授权，成功后发出 `wallpaperReady(id)`；它不修改 `extensions.select` 的选择，也没有新增 IPC 方法。
 
 
 ## 听歌历史与统计

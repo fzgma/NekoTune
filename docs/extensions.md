@@ -296,7 +296,7 @@ Item {
 | `pages` | `id,title,source,group`；group 默认 `primary`，也可为 `utility` |
 | `settings` | `id,title,source`；显示在「设置 → 扩展设置」，点击进入子页面，不占用主侧栏；默认 Shell 可通过 `ExtensionApi.window.navigate("<extensionId>/<id>")` 打开 |
 | `slots` | `id,title,source,slot`；slot 为 `shell`、`bottomPlayer` 或 `page:<内置页面ID>` |
-| `themes` | `id,title,tokens`，可带 `schemaVersion:1`、`variants.light/dark`、`author` 与 `ui`；支持配色、背景、QML 界面及可选 `ui.wallpaper` 音乐壁纸，详见 [主题制作](themes.md) |
+| `themes` | `id,title,tokens`，可带 `schemaVersion:1`、`variants.light/dark`、`author`、`ui` 与 `wallpaper`；支持配色、背景、QML 界面及可选 `wallpaper` 音乐壁纸，详见 [主题制作](themes.md) |
 | `menus` | `id,title,context,command`；context 为 `song` 或 `playlist`，命令收到歌曲或歌单上下文 |
 | `toolbars` | `id,title,source,height`；插入默认 Shell 顶部工具栏 |
 

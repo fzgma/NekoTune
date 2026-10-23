@@ -66,9 +66,9 @@ cmake -DOUTPUT=/tmp/my-theme.nktheme.zip -P /path/to/NekoTune/sdk/cmake/NekoTune
           }
         }
       },
+      "wallpaper": "Wallpaper.qml",
       "ui": {
         "background": "Background.qml",
-        "wallpaper": "Wallpaper.qml",
         "bottomPlayer": "Player.qml",
         "pages": {"home": "Home.qml"}
       }
@@ -77,7 +77,7 @@ cmake -DOUTPUT=/tmp/my-theme.nktheme.zip -P /path/to/NekoTune/sdk/cmake/NekoTune
 }
 ```
 
-`ui`、`tokens` 和 `background` 可省略；使用示例中的入口和图片时须提供对应文件。每个新主题必须有 `light` 与 `dark`，未覆盖的值继承对应明暗的基础主题。覆盖顺序是基础值、公共 `tokens`、变体 `tokens`。
+`ui`、`wallpaper`、`tokens` 和 `background` 可省略；使用示例中的入口和图片时须提供对应文件。每个新主题必须有 `light` 与 `dark`，未覆盖的值继承对应明暗的基础主题。覆盖顺序是基础值、公共 `tokens`、变体 `tokens`。
 
 完整变量、类型、默认值和范围以 [`shared/themes/catalog.json`](../shared/themes/catalog.json) 为准。每个变量的 `group` 指明它归外观（`appearance`）、界面（`layout`）、共享（`shared`）还是宿主（`host`）；外观主题中的 `layout` 组变量只在搭配内置界面或它自己的界面时生效。`host` 组的 `reducedMotion` 由用户设置决定，主题中的值会被忽略。共享变量在另一界面贡献提供对应值时由界面覆盖。颜色写为 `#RRGGBB` 或 Qt 的 `#AARRGGBB`；数值必须有限且在范围内，整数变量不接受小数。字体名称引用系统字体，缺失时使用系统回退，不携带字体文件。旧版仅有 `tokens` 的扩展主题继续兼容，浅色模式使用内置浅色并提示。
 
@@ -87,7 +87,7 @@ cmake -DOUTPUT=/tmp/my-theme.nktheme.zip -P /path/to/NekoTune/sdk/cmake/NekoTune
 
 ## QML 界面
 
-`ui` 可包含 `background`、`shell`、`bottomPlayer`、`wallpaper` 与 `pages`。页面键为内置页面 ID：`home`、`library`、`queue`、`lyrics`、`settings`、`extensions`、`music_sources`、`lyrics_debug`。入口为包内相对路径，根对象必须继承 `Item`。
+`ui` 可包含 `background`、`shell`、`bottomPlayer` 与 `pages`；壁纸入口写在与 `ui` 同级的 `wallpaper` 字段（见[主题音乐壁纸](#主题音乐壁纸)）。页面键为内置页面 ID：`home`、`library`、`queue`、`lyrics`、`settings`、`extensions`、`music_sources`、`lyrics_debug`。入口为包内相对路径，根对象必须继承 `Item`。
 
 ```qml
 import QtQuick
@@ -112,11 +112,13 @@ Rectangle {
 
 插槽优先级为当前界面选择、独立扩展选择、内置实现。切走界面主题恢复原独立选择；默认 Shell 才会自动放置背景和页面。完整 Shell 负责自己的布局、背景及导航。浏览主题卡片不实例化主题代码，页面入口只在显示时加载。
 
-主题包无需信任即可启用并提供配色；含 QML/JavaScript 的界面或壁纸在首次加载前需要信任，信任后拥有与现有扩展相同的访问能力。信任按包保存；只用配色通过 `selectAppearance` 不需要授权，一键应用含代码主题仍会请求信任。普通扩展附带的主题沿用普通扩展的运行授权要求。主题专用包不加载原生库。独立 QML 引擎不是安全沙箱，也没有独立 GUI 线程；不能依赖它隔离死循环或恶意代码。
+主题包无需信任即可启用并提供配色；含 QML/JavaScript 的界面或壁纸在首次加载前需要信任，信任后拥有与现有扩展相同的访问能力。信任按包保存；只用配色通过 `selectAppearance` 不需要授权，一键应用含代码主题仍会请求信任，在外观页的壁纸分类选用含代码主题的壁纸也会请求信任。普通扩展附带的主题沿用普通扩展的运行授权要求。主题专用包不加载原生库。独立 QML 引擎不是安全沙箱，也没有独立 GUI 线程；不能依赖它隔离死循环或恶意代码。
 
 ## 主题音乐壁纸
 
-每个主题可通过 `ui.wallpaper` 提供一个完整音乐壁纸布局，深浅色共用入口。用户需在「设置 → 动态音乐壁纸 → 壁纸样式」选择「跟随当前主题」并开启壁纸。随后可在“主题壁纸来源”中保持“跟随当前主题”（先取当前界面的壁纸，没有再取当前配色的壁纸），或指定任意已启用且允许加载的主题壁纸；含代码来源须先获得包信任。选择主题不会自动开启壁纸，其他三种内置样式也不会实例化此入口。主题切换、更新和重新加载仅替换窗口内容，原生桌面窗口保持不变；每屏有独立视图实例。
+每个主题可通过顶层字段 `wallpaper` 提供一个完整音乐壁纸布局，值为包内 QML 相对路径，深浅色共用入口，须声明 `schemaVersion: 1`。旧写法 `ui.wallpaper` 已废弃，导入时报错 `Theme wallpaper moved from ui.wallpaper to wallpaper`；把该字段移到与 `ui` 同级即可。
+
+用户可以在「设置 → 外观 → 壁纸」中选择内置样式、“跟随当前主题”（先取当前界面的壁纸，没有再取当前配色的壁纸）或任意主题的壁纸；「设置 → 动态音乐壁纸」中的“壁纸样式”和“主题壁纸来源”是同一份设置。选择未信任的含代码主题壁纸时会先请求授权。两处的选择都不会开启壁纸，开关仍在动态音乐壁纸设置中。其他三种内置样式不会实例化主题壁纸入口。主题切换、更新和重新加载仅替换窗口内容，原生桌面窗口保持不变；每屏有独立视图实例。
 
 完整 Shell 可从 `api.window.wallpaper` 获取宿主壁纸管理器，并复用 `qrc:/qml/wallpaper/WallpaperSettings.qml`，传入 `manager`、`themeController: api.app.theme` 和窗口的 `translator`，在自定义设置页中提供相同的启用、样式及每屏状态控件。
 

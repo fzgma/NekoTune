@@ -32,7 +32,7 @@
 | --- | --- |
 | [产品需求](PRD.md) | 产品定位、目标及早期里程碑；不作为功能完成清单 |
 | [待办](todo/README.md) | 按 feat、bug、perf、ux、chore 分类；包含优先级、状态与验收记录 |
-| [主题壁纸独立分类](phase/README.md) | 分阶段实施方案：顶层 `wallpaper` 字段与外观页壁纸分类（待实施） |
+| [主题壁纸独立分类](phase/README.md) | 分阶段实施方案：顶层 `wallpaper` 字段与外观页壁纸分类（已实施，步骤保留供追溯） |
 | [C++ 原生扩展迁移](native-extensions-plan.md) | 已实施迁移的设计取舍与历史记录，包含迁移前的 Node.js 链路 |
 
 ## 阅读与维护约定

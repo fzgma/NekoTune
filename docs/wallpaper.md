@@ -14,9 +14,9 @@
 
 ## 设置与生命周期
 
-设置页的「动态音乐壁纸」独立组件提供启用、样式、主屏／全部／指定屏、封面背景、模糊、当前／下一行歌词、透明叠加、歌词插值更新频率、装饰强度和启动恢复。
+设置页的「动态音乐壁纸」独立组件提供启用、样式、主屏／全部／指定屏、封面背景、模糊、当前／下一行歌词、透明叠加、歌词插值更新频率、装饰强度和启动恢复。外观页的「壁纸」分类也可以选择样式与主题壁纸来源，与这里读写同一份设置，但不提供开关。
 
-样式保存在 `wallpaper.style`，默认 `classic`，可选 `vinyl`、`lyrics`、`theme`（跟随当前主题）。旧配置缺少该键或值非法时保留经典卡片；非法写入及保存失败不会切换样式。运行时由同一窗口内的 Loader 或主题插槽替换布局，旧布局及动画随之销毁，不重建原生 surface、不新增壁纸专用 IPC 请求。所有输出使用同一份样式设置。`wallpaper.themeWallpaper` 保存主题壁纸来源，默认空字符串（跟随当前主题），只在 `style: "theme"` 时生效；只接受长度不超过 200 的字符串，非法值不会写入。
+样式保存在 `wallpaper.style`，默认 `classic`，可选 `vinyl`、`lyrics`、`theme`（跟随当前主题）。旧配置缺少该键或值非法时保留经典卡片；非法写入及保存失败不会切换样式。运行时由同一窗口内的 Loader 或主题插槽替换布局，旧布局及动画随之销毁，不重建原生 surface、不新增壁纸专用 IPC 请求。所有输出使用同一份样式设置。`wallpaper.themeWallpaper` 保存主题壁纸来源，默认空字符串（跟随当前主题），只在 `style: "theme"` 时生效；只接受长度不超过 200 的字符串，非法值不会写入。外观页通过 `WallpaperManager.setOptions()` 一次写入样式与来源，任一值非法时整体拒绝。
 
 - **经典卡片**：保留原有封面、歌曲信息、进度及紧凑歌词。
 - **黑胶唱片**：封面放在唱片中央，旁边显示歌曲及歌词。竖屏采用上下布局；原生旋转动画由播放状态驱动，强度控制转速，暂停保留当前角度，断线、隐藏、零强度和 reducedMotion 停止动画。它不是节拍检测或频谱。
@@ -24,7 +24,7 @@
 
 三种布局共用 `WallpaperTrackInfo`；新布局分别位于 `VinylWallpaper.qml` 和 `LyricsWallpaper.qml`。封面背景、模糊、透明叠加、歌词开关和 30／60 Hz 插值设置对所有样式一致生效。
 
-「跟随当前主题」使用当前界面选择的 `ui.wallpaper` QML `Item`，没有时使用当前配色选择的入口；在“主题壁纸来源”指定主题后使用该来源的入口。未信任的含代码主题不提供壁纸入口。入口与只读 `ExtensionApi.wallpaper` 上下文见 [主题制作](themes.md#主题音乐壁纸)。公共背景仍由宿主绘制；主题负责遵守公共歌词及动画设置。选主题不会开启壁纸，内置样式不加载主题壁纸。切换、更新和重新加载主题会释放旧内容并载入新内容，每屏独立实例化，原生窗口保持不变。
+「跟随当前主题」使用当前界面选择的顶层 `wallpaper` QML `Item`，没有时使用当前配色选择的入口；在“主题壁纸来源”指定主题后使用该来源的入口。未信任的含代码主题不提供壁纸入口。入口与只读 `ExtensionApi.wallpaper` 上下文见 [主题制作](themes.md#主题音乐壁纸)。公共背景仍由宿主绘制；主题负责遵守公共歌词及动画设置。选主题不会开启壁纸，内置样式不加载主题壁纸。切换、更新和重新加载主题会释放旧内容并载入新内容，每屏独立实例化，原生窗口保持不变。
 
 当前主题无入口、被停用／移除或入口加载失败时，保留 `theme` 样式及 `wallpaper.themeWallpaper` 来源偏好并回退经典卡片，恢复可用后自动接回。`outputs` 的 `themeStatus` 为 `loading`、`active`、`missing`、`source-missing`（指定来源不可用）、`error`、`safe-mode` 或空字符串（内置样式）；`themeError` 提供加载错误详情。设置显示提示；这些内容错误不改变原生输出的 `running` 状态，也不触发平台重试。安全模式不加载自定义壁纸。
 
@@ -159,6 +159,29 @@ uv run --no-project --python 3.12 scripts/ci/smoke_release.py /path/to/extracted
 默认 smoke 的 offscreen 测试不等于原生验收。`--wayland` 在隔离配置启用启动恢复，检查真实壁纸映射，同时检查独立后端和两种输入法插件。Windows 发布继续使用既有 windeployqt 和 UCRT64 DLL 收集；普通 CI 不自动修改 Explorer 桌面进行原生壁纸验收。
 
 ## 验证记录与待验收项
+
+2026-10-23 主题壁纸独立分类（Phase 4）：本次在 Linux、Qt 6.11.2 下重新配置并完成 `NEKOTUNE_ENABLE_WALLPAPER=ON`（`build`，backend=wayland）与 `OFF`（`build/wallpaper-off`，backend=disabled）两套全量构建。两套 offscreen／software CTest 均为 **29/29 通过，0 个目标失败或跳过**，失败列表与 Phase 0 的“无”一致。依赖边界、文档 JSON 示例及 `git diff --check` 通过；旧字段残留仅为废弃说明、阶段手册及两处故意保留的拒绝断言。
+
+两套测试内部各有 7 个可选 QtTest 用例已跳过：`WallpaperTest::externalWallpaper` 的 reference／desktop／portrait／small 四组（未指定外部主题目录）、`WallpaperTest::nativeWallpaper`（未启用原生桌面验收）、`PcmCaptureTest::nativeMutedPlayback`（未启用原生音频验收）、`PcmCaptureTest::nativeSpectrumExtension`（未指定原生频谱扩展目录）。CTest 目标通过不表示这些用例已执行。
+
+本次另用隔离的真实后端与临时配置完成 IPC 导入检查：`examples/extensions/theme-qml` 导入成功，返回顶层 `wallpaper`；将临时副本改回已废弃的旧字段后，导入失败且报错为 `Theme wallpaper moved from ui.wallpaper to wallpaper`。此为 IPC 检查，不等同于真机界面验收。构建有 Vulkan 头文件缺失提示、ON 配置的 Qt Wayland 私有 ABI 警告，以及 OFF 全量编译中既有的 `QFile::open()` 返回值和 `QAudio::UnderrunError` 弃用警告。
+
+本次真机手动操作已跳过：当前会话的 Wayland／XWayland 滚动与焦点输入无法可靠自动操作，未开启原生壁纸，也未执行 Windows／多屏验证。逐项状态如下；自动化覆盖与真机结果分别记录。
+
+| Phase 4 手动检查项 | 本次结果与限制 |
+| --- | --- |
+| 导入新版示例，主题卡片显示 QML／含界面／含壁纸 | 隔离 IPC 导入通过；卡片的真机显示未验证，受桌面输入限制 |
+| 导入仍使用旧壁纸字段的包 | 隔离 IPC 验证拒绝及完整报错通过；真机导入弹窗未验证，受桌面输入限制 |
+| 外观 → 壁纸选择示例，授权后同步样式与来源且开关不变 | 真机未验证，受桌面输入限制；本次 CTest 中扩展信任流程、批量设置及外观页组件测试通过 |
+| 选择黑胶，保留主题来源偏好 | 真机未验证，受桌面输入限制；内置样式路径只写 `style`，未把源码核对当作真机结论 |
+| 开启壁纸后在两处切换，原生窗口不重建 | 真机未验证，本次未启用原生桌面壁纸；offscreen 模拟窗口测试通过不替代 layer 检查 |
+| 停用示例后显示不可用、回退，重新启用后接回 | 真机回退／恢复未验证，本次未启用原生壁纸；卡片标题另有下述手册差异 |
+| `Ctrl+Shift+E` 恢复窗口不显示分类按钮 | 真机未验证，受焦点输入限制；本次不注入壁纸管理器的 QML 测试通过 |
+| 安全模式禁用主题卡片，内置样式可选 | 真机未验证，受桌面输入限制；本次安全模式 QML 与控制器测试通过 |
+
+手册差异：当前 `WallpaperGallery` 对停用但仍登记的主题保留原名称、选中标记和重新选择操作；仅在已保存来源不再出现在主题条目中时追加“已选来源（不可用）”卡片。此行为已由本次临时 QML 探针核对，与阶段手册“停用即显示不可用标题”的预期不同，该项未按手册预期验收通过。本阶段未修改相关源码，后续需确认是否调整提示。
+
+本次本地证据：ON／OFF CTest 日志分别为 `/tmp/nekotune-wallpaper-final.txt`、`/tmp/nekotune-wallpaper-final-off.txt`；构建日志为 `/tmp/nekotune-wallpaper-final-build-on.txt`、`/tmp/nekotune-wallpaper-final-build-off.txt`；IPC 导入结果为 `/tmp/nekotune-wallpaper-final-import.json`，卡片行为探针为 `/tmp/nekotune-wallpaper-final-disabled-source.txt`。以下保留此前验收记录。
 
 2026-10-19 本机：Arch Linux、Qt 6.11.2、LayerShellQt 6.7.4、Niri fork `26.04 (v26.04-115-g42a2e06e)`、awww 0.12.1；单 eDP-1，1920×1080，scale 1，Normal。此版本信息只描述本次环境。
 
