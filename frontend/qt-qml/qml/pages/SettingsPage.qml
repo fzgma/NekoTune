@@ -62,7 +62,10 @@ Item {
             Loader {
                 anchors.fill: parent
                 active: page.appearance && Boolean(page.controllers.theme)
-                sourceComponent: AppearancePanel { controller: page.controllers.theme; translator: page.translator }
+                sourceComponent: AppearancePanel {
+                    controller: page.controllers.theme; translator: page.translator
+                    wallpaper: typeof wallpaperManager !== "undefined" ? wallpaperManager : null
+                }
             }
             ExtensionView {
                 id: extension; anchors.fill: parent

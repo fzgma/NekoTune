@@ -57,6 +57,7 @@
         <file>qml/components/AiSettingsPanel.qml</file>
         <file>qml/components/TextButton.qml</file>
         <file>qml/components/AppearancePanel.qml</file>
+        <file>qml/components/WallpaperGallery.qml</file>
         <file>qml/components/ThemeSlot.qml</file>
         <file>qml/components/ThemeBackground.qml</file>
         <file>qml/components/Theme.qml</file>

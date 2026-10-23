@@ -28,16 +28,21 @@ Item {
             {id: "builtin/yozakura", title: "Yozakura", origin: "builtin", available: true, schemaVersion: 1,
              swatches: ["#000000"], hasLayout: false, hasWallpaper: false},
             {id: "pkg/full", title: "Full", origin: "imported", available: true, schemaVersion: 1, version: "1.0.0",
-             swatches: ["#000000"], ui: {bottomPlayer: "Player.qml"}, hasLayout: true, hasWallpaper: true}
+             swatches: ["#000000"], ui: {bottomPlayer: "Player.qml"}, hasLayout: true, hasWallpaper: true},
+            {id: "pkg/wall", title: "Wall", origin: "imported", available: true, schemaVersion: 1, version: "1.0.0",
+             swatches: ["#000000"], wallpaper: "Wallpaper.qml", hasCode: true, trusted: false,
+             hasLayout: false, hasWallpaper: true}
         ]
         property var calls: []
         signal trustRequested(string id, string target)
+        signal wallpaperReady(string id)
         signal replaceRequested(string path, string themeId)
         function record(value) { calls = calls.concat([value]) }
         function setMode(value) { record("setMode:" + value) }
         function setReducedMotion(value) { record("setReducedMotion:" + value) }
         function selectTheme(id, trusted) { record("selectTheme:" + id + (trusted ? ":trusted" : "")) }
         function selectAppearance(id, trusted) { record("selectAppearance:" + id + (trusted ? ":trusted" : "")) }
+        function selectWallpaper(id, trusted) { record("selectWallpaper:" + id + (trusted ? ":trusted" : "")) }
         function selectLayout(id, trusted) { record("selectLayout:" + id + (trusted ? ":trusted" : "")) }
         function resetAppearance() { record("resetAppearance") }
         function resetLayout() { record("resetLayout") }
@@ -48,20 +53,92 @@ Item {
         function exportTheme(id, path) {}
         function removeTheme(id) {}
     }
+    QtObject {
+        id: mockWallpaper
+        property var settings: ({enabled: false, style: "classic", themeWallpaper: ""})
+        property string error: ""
+        property var calls: []
+        function setOption(key, value) { calls = calls.concat([key + "=" + value]); settings = Object.assign({}, settings, {[key]: value}); return true }
+        function setOptions(values) {
+            calls = calls.concat([JSON.stringify(values)])
+            settings = Object.assign({}, settings, values)
+            return true
+        }
+    }
     Component {
         id: panelComponent
         AppearancePanel { anchors.fill: parent; controller: mockController; translator: mockTranslator }
+    }
+
+    Component {
+        id: wallpaperPanelComponent
+        AppearancePanel { anchors.fill: parent; controller: mockController; translator: mockTranslator; wallpaper: mockWallpaper }
     }
 
     TestCase {
         name: "AppearancePanel"
         when: windowShown
         function init() {
+            mockWallpaper.calls = []
+            mockWallpaper.settings = ({enabled: false, style: "classic", themeWallpaper: ""})
+            mockWallpaper.error = ""
             mockController.calls = []
             mockController.safeMode = false
             mockController.selectedId = "builtin/yozakura"
             mockController.layoutSelectedId = ""
             mockController.layoutUnavailable = false
+        }
+        function test_wallpaperCategoryHiddenWithoutManager() {
+            const panel = createTemporaryObject(panelComponent, testCase)
+            verify(!findChild(panel, "appearanceCategories").visible)
+            verify(findChild(panel, "themeCategory").visible)
+        }
+        function test_wallpaperCategoryChoosesStyleAndSource() {
+            const panel = createTemporaryObject(wallpaperPanelComponent, testCase)
+            verify(findChild(panel, "appearanceCategories").visible)
+            findChild(panel, "appearanceCategory_wallpaper").clicked()
+            verify(!findChild(panel, "themeCategory").visible)
+            tryVerify(() => findChild(panel, "wallpaperCard_classic") !== null)
+            compare(findChild(panel, "wallpaperBadge_classic").text, "wallpaper_gallery_selected")
+            verify(findChild(panel, "wallpaperGalleryOff").visible)
+            // Only themes that provide a wallpaper are listed.
+            verify(findChild(panel, "wallpaperCard_pkg/full") !== null)
+            verify(findChild(panel, "wallpaperCard_pkg/wall") !== null)
+            verify(findChild(panel, "wallpaperCard_builtin/yozakura") === null)
+
+            findChild(panel, "wallpaperCard_vinyl").clicked()
+            findChild(panel, "wallpaperCard_follow").clicked()
+            compare(mockWallpaper.calls, ["style=vinyl", JSON.stringify({style: "theme", themeWallpaper: ""})])
+            compare(findChild(panel, "wallpaperBadge_follow").text, "wallpaper_gallery_selected")
+
+            // Theme sources go through the controller and are saved once it reports ready.
+            findChild(panel, "wallpaperCard_pkg/wall").clicked()
+            compare(mockController.calls, ["selectWallpaper:pkg/wall"])
+            mockController.wallpaperReady("pkg/wall")
+            compare(mockWallpaper.settings.themeWallpaper, "pkg/wall")
+            compare(mockWallpaper.settings.style, "theme")
+            verify(!mockWallpaper.settings.enabled)
+            compare(findChild(panel, "wallpaperBadge_pkg/wall").text, "wallpaper_gallery_selected")
+        }
+        function test_wallpaperCategoryKeepsMissingSourceAndSafeMode() {
+            mockWallpaper.settings = ({enabled: true, style: "theme", themeWallpaper: "pkg/gone"})
+            const panel = createTemporaryObject(wallpaperPanelComponent, testCase)
+            findChild(panel, "appearanceCategory_wallpaper").clicked()
+            tryVerify(() => findChild(panel, "wallpaperCard_pkg/gone") !== null)
+            verify(!findChild(panel, "wallpaperCard_pkg/gone").enabled)
+            compare(findChild(panel, "wallpaperBadge_pkg/gone").text, "wallpaper_gallery_selected")
+            verify(!findChild(panel, "wallpaperGalleryOff").visible)
+            mockController.safeMode = true
+            verify(!findChild(panel, "wallpaperCard_pkg/wall").enabled)
+            verify(findChild(panel, "wallpaperCard_classic").enabled)
+        }
+        function test_trustDialogRetriesWallpaper() {
+            const panel = createTemporaryObject(wallpaperPanelComponent, testCase)
+            const dialog = findChild(panel, "themeTrustDialog")
+            mockController.trustRequested("pkg/wall", "wallpaper")
+            tryVerify(() => dialog.opened)
+            dialog.accept()
+            compare(mockController.calls, ["selectWallpaper:pkg/wall:trusted"])
         }
         function test_layoutButtonsOnlyForLayoutThemes() {
             const panel = createTemporaryObject(panelComponent, testCase)
