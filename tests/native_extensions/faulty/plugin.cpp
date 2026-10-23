@@ -4,12 +4,23 @@
 #include <QObject>
 #include <QTimer>
 #include <QUrl>
+#include <chrono>
+#include <cstdlib>
 #include <stdexcept>
 #include <thread>
 
 using namespace nekotune;
 
 namespace {
+class SlowShuffle final : public sdk::IShuffleProvider {
+  public:
+    int delayMs = 0;
+    Result<sdk::ShuffleSelection> select(const sdk::ShuffleRequest &request) override {
+        std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+        return sdk::ShuffleSelection{request.queue.first().queueId, {}};
+    }
+};
+
 class Tones final : public sdk::IMusicProvider {
   public:
     QString directory;
@@ -55,6 +66,9 @@ class FaultyExtension final : public QObject, public sdk::IExtensionPlugin {
             tone.write("RIFF");
         m_tones.directory = context.info().dataDirectory;
         m_registrations.push_back(context.music().add("tones", &m_tones, {.name = "Tones"}));
+        m_shuffle.delayMs = context.config().get().value("shuffleMs").toInt();
+        if (m_shuffle.delayMs > 0)
+            m_registrations.push_back(context.shuffle().add("slow", &m_shuffle, {.name = "Slow shuffle"}));
         m_registrations.push_back(context.services().add(
             "state", [this](const sdk::Params &, sdk::Reply reply) { reply(sdk::Params{{"activations", m_activations}}); }));
         m_registrations.push_back(context.services().add(
@@ -90,6 +104,16 @@ class FaultyExtension final : public QObject, public sdk::IExtensionPlugin {
         m_registrations.push_back(context.services().add("host", [&context](const sdk::Params &params, sdk::Reply reply) {
             context.host().call(params.value("method").toString(), params.value("params").toMap(), reply);
         }));
+        m_registrations.push_back(context.services().add("crash-thread", [&context](const sdk::Params &, sdk::Reply) {
+            std::thread([&context] {
+                const auto attribution = context.attributeThread();
+                std::abort();
+            }).detach();
+        }));
+        m_registrations.push_back(context.services().add("block", [](const sdk::Params &params, sdk::Reply reply) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(params.value("ms").toInt()));
+            reply(sdk::Params{});
+        }));
         m_registrations.push_back(context.events().on("test.host", [this, &context](const sdk::Params &event) {
             m_events.append(event.value("value").toString());
             context.events().publish("seen", {{"values", m_events}});
@@ -102,6 +126,7 @@ class FaultyExtension final : public QObject, public sdk::IExtensionPlugin {
     }
 
   private:
+    SlowShuffle m_shuffle;
     Tones m_tones;
     std::vector<sdk::RegistrationPtr> m_registrations;
     QStringList m_events;

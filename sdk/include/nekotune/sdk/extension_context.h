@@ -116,6 +116,14 @@ class Logger {
     virtual void write(QtMsgType level, const QString &message) = 0;
 };
 
+/// While alive, a crash on the creating thread is attributed to this extension. Create it at the
+/// start of work on a thread the extension owns (std::thread, QThread, QtConcurrent) and destroy
+/// it on the same thread.
+class ThreadAttribution {
+  public:
+    virtual ~ThreadAttribution() = default;
+};
+
 /// Runtime services for one activation. The context outlives activate() and is invalidated when
 /// deactivate() returns; do not keep references beyond that point.
 ///
@@ -140,5 +148,7 @@ class ExtensionContext {
     virtual Secrets &secrets() = 0;
     virtual Tasks &tasks() = 0;
     virtual Logger &log() = 0;
+    /// Mark the calling thread as running this extension. Host callbacks are already attributed.
+    virtual std::unique_ptr<ThreadAttribution> attributeThread() = 0;
 };
 } // namespace nekotune::sdk

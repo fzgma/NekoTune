@@ -1,6 +1,7 @@
 #pragma once
 #include "domain/extensions/extension_backend.h"
 #include "infrastructure/extensions/runtime/crash_guard.h"
+#include "infrastructure/extensions/runtime/watchdog.h"
 #include <QPointer>
 #include <exception>
 #include <atomic>
@@ -17,17 +18,27 @@ constexpr int download = 610'000;
 constexpr int downloaded = 120'000;
 } // namespace timeouts
 
-/// Run extension code with crash attribution. Returns the error message when it threw.
-template <class F> std::optional<QString> runAttributed(const QString &extensionId, F &&call) {
+struct AttributedOutcome {
+    std::optional<QString> error;
+    qint64 elapsedMs = 0;
+    bool hung = false;
+};
+/// Run extension code with crash attribution, exception capture and backend blocking detection.
+template <class F> AttributedOutcome runAttributed(const QString &extensionId, F &&call) {
+    watchdog::Call monitor(extensionId);
     crashguard::Scope scope(extensionId);
+    AttributedOutcome outcome;
     try {
         call();
-        return std::nullopt;
     } catch (const std::exception &exception) {
-        return QStringLiteral("Unhandled exception: %1").arg(QString::fromLocal8Bit(exception.what()));
+        outcome.error = QStringLiteral("Unhandled exception: %1").arg(QString::fromLocal8Bit(exception.what()));
     } catch (...) {
-        return QStringLiteral("Unhandled exception");
+        outcome.error = QStringLiteral("Unhandled exception");
     }
+    monitor.finish();
+    outcome.elapsedMs = monitor.elapsedMs();
+    outcome.hung = monitor.hung();
+    return outcome;
 }
 
 /// Completions handed to one run's extension code. Each completes at most once, on the owner's

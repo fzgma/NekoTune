@@ -10,8 +10,13 @@ namespace nekotune::crashguard {
 void install(const QString &sentinelPath);
 /// Read and delete the sentinel left by a previous crash; empty when the last run did not crash.
 QString takeSentinel(const QString &sentinelPath);
+/// Write the sentinel outside a crash handler, e.g. when the watchdog detects a hang.
+void writeSentinel(const QString &extensionId);
+/// Remove a sentinel written by writeSentinel() once the hang resolved.
+void clearSentinel();
 
-/// Marks extension code running on the current thread. Scopes nest.
+/// Marks extension code running on the current thread. Scopes nest and must be created and
+/// destroyed on the same thread.
 class Scope {
   public:
     explicit Scope(const QString &extensionId);

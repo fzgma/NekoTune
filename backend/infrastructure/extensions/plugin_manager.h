@@ -15,6 +15,7 @@
 #include "infrastructure/extensions/runtime/call_guard.h"
 #include "infrastructure/extensions/runtime/dependency_graph.h"
 #include "infrastructure/extensions/runtime/native_loader.h"
+#include "infrastructure/extensions/runtime/session_marker.h"
 #include <QHash>
 #include <QSet>
 #include <QStringList>
@@ -28,7 +29,7 @@ struct ExtensionRuntime;
 }
 
 namespace nekotune {
-/// In-process native extension runtime. Loads trusted apiVersion 2 libraries with QPluginLoader
+/// In-process native extension runtime. Loads trusted apiVersion 3 libraries with QPluginLoader
 /// and serves the public extension request/snapshot protocol. Business services use the
 /// capability catalogues directly.
 ///
@@ -109,6 +110,7 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     template <class F> bool guarded(const QString &id, F &&call);
 
     PackageStore m_packages;
+    SessionMarker m_session{m_packages.root() + "/session-active"};
     NativeLoader m_loader{this, m_packages};
     MusicSources m_music{*this};
     LyricsSources m_lyrics{*this};
@@ -137,14 +139,26 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     bool m_closing = false;
     bool m_changePending = false;
     bool m_safeMode = false;
+    QString m_safeModeReason;
 };
 
 template <class F> bool PluginManager::guarded(const QString &id, F &&call) {
-    const auto error = runAttributed(id, std::forward<F>(call));
-    if (!error)
+    const auto outcome = runAttributed(id, std::forward<F>(call));
+    if (outcome.hung) {
+        crashguard::clearSentinel();
+        post([this, id, ms = outcome.elapsedMs] {
+            fault(id, QStringLiteral("Extension blocked the backend for %1 ms").arg(ms));
+        });
+        return false;
+    }
+    if (outcome.elapsedMs > watchdog::Limits{}.warnMs)
+        post([this, id, ms = outcome.elapsedMs] {
+            recordLog(id, "warn", QStringLiteral("Extension call blocked the backend for %1 ms").arg(ms));
+        });
+    if (!outcome.error)
         return true;
     // Fault from the event loop; the caller may still be iterating the run's registrations.
-    post([this, id, message = *error] { fault(id, message); });
+    post([this, id, message = *outcome.error] { fault(id, message); });
     return false;
 }
 

@@ -5,6 +5,7 @@
 #include "infrastructure/extensions/runtime/call_guard.h"
 #include "infrastructure/extensions/runtime/dependency_graph.h"
 #include "infrastructure/extensions/runtime/extension_state.h"
+#include "infrastructure/extensions/runtime/session_marker.h"
 #include "infrastructure/extensions/package/extension_manifest.h"
 #include "infrastructure/extensions/package/extension_registry.h"
 #include "infrastructure/extensions/package/package_store.h"
@@ -28,6 +29,7 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <thread>
 #ifdef Q_OS_UNIX
 #include <csignal>
 #include <sys/wait.h>
@@ -665,6 +667,197 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(crashguard::takeSentinel(path), "outer.extension");
         QVERIFY(crashguard::takeSentinel(path).isEmpty());
 #endif
+    }
+
+    void crashOnExtensionThreadIsAttributed() {
+#ifndef Q_OS_UNIX
+        QSKIP("Crash attribution uses POSIX signals");
+#else
+        const auto path = QDir(AppPaths::extensionsDirectory()).filePath("crash-sentinel");
+        const pid_t child = ::fork();
+        QVERIFY(child >= 0);
+        if (child == 0) {
+            auto manager = startManager();
+            install(*manager, faultyDirectory);
+            enable(*manager, "test.faulty");
+            call(*manager, "extensions.call", {{"id", "test.faulty"}, {"service", "crash-thread"}});
+            ::_exit(1);
+        }
+        int status = 0;
+        QCOMPARE(::waitpid(child, &status, 0), child);
+        QVERIFY(WIFSIGNALED(status));
+        QCOMPARE(WTERMSIG(status), SIGABRT);
+        QCOMPARE(crashguard::takeSentinel(path), "test.faulty");
+#endif
+    }
+
+    void unattributedThreadDoesNotBorrowAttribution() {
+#ifndef Q_OS_UNIX
+        QSKIP("Crash attribution uses POSIX signals");
+#else
+        const auto path = m_home->filePath("sentinel");
+        crashguard::install(path);
+        const pid_t child = ::fork();
+        QVERIFY(child >= 0);
+        if (child == 0) {
+            std::atomic<bool> ready{false};
+            std::thread worker([&] {
+                crashguard::Scope scope("another.thread");
+                ready.store(true);
+                for (;;)
+                    QThread::msleep(1000);
+            });
+            while (!ready.load())
+                std::this_thread::yield();
+            ::raise(SIGSEGV);
+            ::_exit(1);
+        }
+        int status = 0;
+        QCOMPARE(::waitpid(child, &status, 0), child);
+        QVERIFY(!WIFEXITED(status) || WEXITSTATUS(status) != 0);
+        QVERIFY(crashguard::takeSentinel(path).isEmpty());
+#endif
+    }
+
+    void watchdogStopsBlockingExtension() {
+        auto manager = startManager();
+        install(*manager, faultyDirectory);
+        enable(*manager, "test.faulty");
+        // The call still completes after exceeding the production 30 s hang limit.
+        QVERIFY(call(*manager, "extensions.call",
+                     {{"id", "test.faulty"}, {"service", "block"},
+                      {"params", QVariantMap{{"ms", 31'000}}}}, 40'000));
+        QTRY_COMPARE_WITH_TIMEOUT(entry(*manager, "test.faulty").value("state").toString(), "failed", 5'000);
+        QVERIFY(entry(*manager, "test.faulty").value("error").toString().contains("blocked the backend"));
+        QVERIFY(!QFileInfo::exists(QDir(AppPaths::extensionsDirectory()).filePath("crash-sentinel")));
+    }
+
+    void slowCallIsLogged() {
+        auto manager = startManager();
+        install(*manager, faultyDirectory);
+        enable(*manager, "test.faulty");
+        QVERIFY(call(*manager, "extensions.call",
+                     {{"id", "test.faulty"}, {"service", "block"},
+                      {"params", QVariantMap{{"ms", 5'500}}}}));
+        const auto logs = call(*manager, "extensions.logs", {{"id", "test.faulty"}});
+        QVERIFY(logs);
+        bool logged = false;
+        for (const auto &value : logs.value().value("logs").toList()) {
+            const auto log = value.toMap();
+            logged = logged || (log.value("level") == "warn" &&
+                                log.value("message").toString().startsWith("Extension call blocked the backend for"));
+        }
+        QVERIFY(logged);
+        QCOMPARE(entry(*manager, "test.faulty").value("state").toString(), "running");
+    }
+
+    void slowShuffleCalls_data() {
+        QTest::addColumn<int>("delayMs");
+        QTest::addColumn<bool>("hang");
+        QTest::newRow("warn") << 350 << false;
+        QTest::newRow("hang") << 31'000 << true;
+    }
+    void slowShuffleCalls() {
+        QFETCH(int, delayMs);
+        QFETCH(bool, hang);
+        auto manager = startManager();
+        install(*manager, faultyDirectory);
+        QVERIFY(call(*manager, "extensions.set_config",
+                     {{"id", "test.faulty"}, {"config", QVariantMap{{"shuffleMs", delayMs}}}}));
+        enable(*manager, "test.faulty");
+        const auto strategies = manager->shuffle().strategies();
+        QCOMPARE(strategies.size(), 1);
+        sdk::ShuffleRequest request;
+        request.queue.append({.queueId = 1});
+        const auto selected = manager->shuffle().select(strategies.first().id, strategies.first().generation, request);
+        QCOMPARE(bool(selected), !hang);
+        QCOMPARE(entry(*manager, "test.faulty").value("state").toString(), hang ? "failed" : "running");
+        if (hang) {
+            QVERIFY(entry(*manager, "test.faulty").value("error").toString().contains("blocked the backend"));
+            QVERIFY(manager->shuffle().strategies().isEmpty());
+        }
+        const auto logs = call(*manager, "extensions.logs", {{"id", "test.faulty"}});
+        QVERIFY(logs);
+        bool warned = false;
+        for (const auto &value : logs.value().value("logs").toList()) {
+            const auto log = value.toMap();
+            warned = warned || (log.value("level") == "warn" && log.value("message").toString().startsWith(
+                                    "Shuffle strategy test.faulty/slow took"));
+        }
+        QVERIFY(warned);
+        QVERIFY(!QFileInfo::exists(QDir(AppPaths::extensionsDirectory()).filePath("crash-sentinel")));
+    }
+
+    void watchdogKeepsOuterAttribution() {
+        const auto path = m_home->filePath("sentinel");
+        crashguard::install(path);
+        QString hungId;
+        watchdog::start(QThread::currentThread(), {100, 300}, [&](const QString &id) {
+            hungId = id;
+            crashguard::writeSentinel(id);
+        });
+        AttributedOutcome background;
+        std::thread other([&] {
+            background = runAttributed("background", [] { QThread::msleep(1100); });
+        });
+        other.join();
+        const bool backgroundSentinel = QFileInfo::exists(path);
+        AttributedOutcome nested;
+        bool sentinelWritten = false;
+        const auto outer = runAttributed("outer", [&] {
+            nested = runAttributed("inner", [] { QThread::msleep(1100); });
+            QFile file(path);
+            sentinelWritten = file.open(QIODevice::ReadOnly) && file.readAll() == "outer";
+        });
+        watchdog::stop();
+        watchdog::stop();
+        QVERIFY(!background.hung);
+        QVERIFY(!backgroundSentinel);
+        QVERIFY(!nested.hung);
+        QVERIFY(outer.hung);
+        QVERIFY(sentinelWritten);
+        QCOMPARE(hungId, "outer");
+        crashguard::clearSentinel();
+        QVERIFY(!QFileInfo::exists(path));
+    }
+
+    void sessionMarkerCountsUnattributedExits() {
+        const auto path = m_home->filePath("session-active");
+        SessionMarker first(path);
+        QVERIFY(first.begin(false).ended);
+        first.loaded("x.one");
+        first.loaded("x.one");
+        SessionMarker second(path);
+        const auto previous = second.begin(false);
+        QVERIFY(!previous.ended);
+        QCOMPARE(previous.loaded, QStringList{"x.one"});
+        QCOMPARE(previous.unattributed, 1);
+        second.loaded("x.one");
+        SessionMarker third(path);
+        QCOMPARE(third.begin(false).unattributed, 2);
+        third.loaded("x.one");
+        QCOMPARE(SessionMarker(path).begin(true).unattributed, 0);
+        // A session which loaded no extension code breaks the streak, even after an abnormal exit.
+        QCOMPARE(SessionMarker(path).begin(false).unattributed, 0);
+        SessionMarker clean(path);
+        clean.begin(false);
+        clean.end();
+        QVERIFY(!QFileInfo::exists(path));
+        QCOMPARE(SessionMarker(path).begin(false).unattributed, 0);
+    }
+
+    void repeatedUnattributedExitsEnterSafeMode() {
+        const auto marker = QDir(AppPaths::extensionsDirectory()).filePath("session-active");
+        QVERIFY(QDir().mkpath(QFileInfo(marker).absolutePath()));
+        QFile file(marker);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(R"({"loaded":["test.faulty"],"unattributed":1})");
+        file.close();
+        auto manager = startManager();
+        QVERIFY(manager->snapshot().value("safeMode").toBool());
+        QCOMPARE(manager->snapshot().value("safeModeReason").toString(), "repeated_crashes");
+        manager->shutdown();
+        QVERIFY(!QFileInfo::exists(marker));
     }
 
     void safeModeSkipsExtensionCode() {

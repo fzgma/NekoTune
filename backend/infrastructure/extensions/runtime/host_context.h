@@ -29,6 +29,7 @@ class HostContext final : public sdk::ExtensionContext {
     sdk::Secrets &secrets() override { return m_secrets; }
     sdk::Tasks &tasks() override { return m_tasks; }
     sdk::Logger &log() override { return m_log; }
+    std::unique_ptr<sdk::ThreadAttribution> attributeThread() override;
 
   private:
     class HostFacet final : public sdk::Host {

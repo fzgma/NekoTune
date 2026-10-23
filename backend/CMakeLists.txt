@@ -58,6 +58,8 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/extensions/runtime/host_context.cpp
     infrastructure/extensions/runtime/native_loader.cpp
     infrastructure/extensions/runtime/registration_scope.cpp
+    infrastructure/extensions/runtime/session_marker.cpp
+    infrastructure/extensions/runtime/watchdog.cpp
     infrastructure/ai/ai_backend.cpp
     infrastructure/ai/ai_settings.cpp
     infrastructure/credentials/credential_store.cpp

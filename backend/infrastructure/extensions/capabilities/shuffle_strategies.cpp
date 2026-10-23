@@ -48,8 +48,19 @@ Result<sdk::ShuffleSelection> ShuffleStrategies::select(const QString &id, quint
         return failure("Shuffle registration unavailable: " + id, ErrorCode::Unavailable);
     auto *provider = found->provider;
     Result<sdk::ShuffleSelection> result = failure("Shuffle selection failed");
-    if (const auto error = runAttributed(owner, [&] { result = provider->select(request); }))
-        result = failure(QString(*error).replace("Unhandled exception", "Unhandled shuffle exception"));
+    AttributedOutcome outcome;
+    // Catch select exceptions inside the lifecycle guard: only a hang faults the whole extension.
+    const bool completed = m_host.guarded(owner, [&] {
+        outcome = runAttributed(owner, [&] { result = provider->select(request); });
+    });
+    if (outcome.elapsedMs > 200)
+        m_host.recordLog(owner, "warn",
+                         QStringLiteral("Shuffle strategy %1 took %2 ms; select must return quickly")
+                             .arg(id).arg(outcome.elapsedMs));
+    if (!completed)
+        return failure("Shuffle extension unavailable: " + owner, ErrorCode::Unavailable);
+    if (outcome.error)
+        result = failure(QString(*outcome.error).replace("Unhandled exception", "Unhandled shuffle exception"));
     const auto currentStrategies = m_strategies.value(owner);
     const auto live = currentStrategies.constFind(local);
     if (!m_host.running(owner) || live == currentStrategies.cend() || live->generation != generation)

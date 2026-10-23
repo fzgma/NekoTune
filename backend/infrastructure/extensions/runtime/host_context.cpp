@@ -37,6 +37,17 @@ HostContext::HostContext(PluginManager *manager, std::weak_ptr<Run> run, QString
       m_info{std::move(id), std::move(version), std::move(directory), std::move(dataDirectory)},
       m_config(std::move(config)) {}
 
+std::unique_ptr<sdk::ThreadAttribution> HostContext::attributeThread() {
+    class Attribution final : public sdk::ThreadAttribution {
+      public:
+        explicit Attribution(const QString &id) : m_scope(id) {}
+
+      private:
+        crashguard::Scope m_scope;
+    };
+    return std::make_unique<Attribution>(m_info.id);
+}
+
 void HostContext::setConfig(const QVariantMap &config) {
     QMutexLocker lock(&m_mutex);
     m_config = config;

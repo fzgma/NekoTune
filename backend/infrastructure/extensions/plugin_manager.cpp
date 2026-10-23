@@ -152,6 +152,7 @@ QVariantMap PluginManager::snapshot() const {
     return {{"extensions", extensions},
             {"selections", m_selections},
             {"safeMode", m_safeMode},
+            {"safeModeReason", m_safeModeReason},
             {"catalogueReady", m_catalogueReady},
             {"startupComplete", m_startupComplete},
             {"runtimeReady", m_catalogueReady && !m_closing}};
@@ -229,7 +230,15 @@ void PluginManager::start(HostCall hostCall) {
     QDir().mkpath(m_packages.root());
     const auto sentinel = QDir(m_packages.root()).filePath("crash-sentinel");
     const auto crashed = crashguard::takeSentinel(sentinel);
+    const auto previous = m_session.begin(!crashed.isEmpty());
+    if (!m_safeMode && previous.unattributed >= 2) {
+        m_safeMode = true;
+        m_safeModeReason = "repeated_crashes";
+        reportError("Extension code was skipped after repeated crashes that could not be attributed: " +
+                    previous.loaded.join(", "));
+    }
     crashguard::install(sentinel);
+    watchdog::start(thread(), {}, [](const QString &id) { crashguard::writeSentinel(id); });
     // Development copies from the previous process are no longer mapped.
     QDir(m_packages.runtimeDirectory()).removeRecursively();
     load();
@@ -305,6 +314,7 @@ void PluginManager::startup(int, QStringList order, Done finished) {
 void PluginManager::shutdown() {
     if (m_closing)
         return;
+    watchdog::stop();
     m_closing = true;
     m_music.close();
     for (auto it = m_order.crbegin(); it != m_order.crend(); ++it)
@@ -312,6 +322,7 @@ void PluginManager::shutdown() {
     const auto mutations = std::exchange(m_mutations, {});
     for (const auto &[mutation, done] : mutations)
         done(failure("Extension runtime stopped"));
+    m_session.end();
 }
 
 DependencyNodes PluginManager::dependencyNodes() const {
@@ -489,6 +500,7 @@ void PluginManager::startOne(const QString &id, Done done) {
     bool loaded = false;
     {
         const NativeLoader::SearchPath searchPath(path.value());
+        m_session.loaded(id);
         if (!guarded(id, [&] { loaded = loader.value()->load(); }))
             return;
     }
