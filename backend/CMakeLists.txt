@@ -33,13 +33,16 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/extensions/audio_proxy.cpp
     infrastructure/extensions/crash_guard.cpp
     infrastructure/extensions/extension_lyrics_provider.cpp
-    infrastructure/extensions/extension_manifest.cpp
     infrastructure/extensions/extension_secrets.cpp
     infrastructure/extensions/host_gateway.cpp
+    infrastructure/extensions/package/extension_manifest.cpp
+    infrastructure/extensions/package/extension_registry.cpp
+    infrastructure/extensions/package/json_file.cpp
+    infrastructure/extensions/package/package_store.cpp
+    infrastructure/extensions/package/semver.cpp
+    infrastructure/extensions/package/theme_package.cpp
+    infrastructure/extensions/package/zip_archive.cpp
     infrastructure/extensions/plugin_manager.cpp
-    infrastructure/extensions/semver.cpp
-    infrastructure/extensions/theme_package.cpp
-    infrastructure/extensions/zip_archive.cpp
     infrastructure/ai/ai_backend.cpp
     infrastructure/ai/ai_settings.cpp
     infrastructure/credentials/credential_store.cpp

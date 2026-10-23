@@ -1,11 +1,26 @@
 #pragma once
 #include "domain/result.h"
+#include <QMap>
 #include <QVariantMap>
 
 namespace nekotune {
-/// Validated extension.json. data keeps the original JSON for snapshots and contributions.
+/// Validated extension.json.
 struct ExtensionManifest {
-    QVariantMap data;
+    QString id;
+    QString name;
+    QString version;
+    QString description;
+    /// "extension" unless the manifest declares another type; "theme" marks theme packages.
+    QString type = "extension";
+    int apiVersion = 0;
+    bool nativeModules = false;
+    QVariantMap defaultConfig;
+    /// Extension ID → SemVer range.
+    QMap<QString, QString> dependencies;
+    /// Validated contributions keyed by kind; items keep their local IDs.
+    QVariantMap contributes;
+    /// The original JSON, only for re-exporting theme packages.
+    QVariantMap raw;
     /// Theme packages that ship QML/JavaScript still need explicit trust.
     bool themeHasCode = false;
     /// Absolute library path for this platform; empty for UI-only and theme packages.
@@ -13,14 +28,17 @@ struct ExtensionManifest {
     /// Why the package cannot run here (missing platform build, Qt mismatch); empty when runnable.
     QString unavailable;
 
-    QString id() const { return data.value("id").toString(); }
-    QString version() const { return data.value("version").toString(); }
-    bool isTheme() const { return data.value("type").toString() == "theme"; }
+    bool isTheme() const { return type == "theme"; }
     bool needsTrust() const { return !isTheme() || themeHasCode; }
     // Theme packages have no backend code; their QML is gated by the frontend until trusted.
     bool needsTrustToRun() const { return !isTheme(); }
-    QVariantMap dependencies() const { return data.value("dependencies").toMap(); }
-    QVariantMap contributes() const { return data.value("contributes").toMap(); }
+    /// Stand-in for an installed package whose manifest can no longer be read.
+    static ExtensionManifest placeholder(const QString &id) {
+        ExtensionManifest manifest;
+        manifest.id = manifest.name = id;
+        manifest.version = "0.0.0";
+        return manifest;
+    }
 };
 
 bool validExtensionId(const QString &id);

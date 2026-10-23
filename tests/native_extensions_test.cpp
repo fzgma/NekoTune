@@ -2,11 +2,13 @@
 #include "application/playback/shuffle_strategy_service.h"
 #include "application/playback/playback_order_service.h"
 #include "infrastructure/extensions/crash_guard.h"
-#include "infrastructure/extensions/extension_manifest.h"
+#include "infrastructure/extensions/package/extension_manifest.h"
+#include "infrastructure/extensions/package/extension_registry.h"
+#include "infrastructure/extensions/package/package_store.h"
 #include "infrastructure/extensions/plugin_manager.h"
-#include "infrastructure/extensions/semver.h"
-#include "infrastructure/extensions/theme_package.h"
-#include "infrastructure/extensions/zip_archive.h"
+#include "infrastructure/extensions/package/semver.h"
+#include "infrastructure/extensions/package/theme_package.h"
+#include "infrastructure/extensions/package/zip_archive.h"
 #include "themes/theme_resolution.h"
 #include <QDirIterator>
 #include <QNetworkAccessManager>
@@ -112,6 +114,47 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(!semver::parse("01.2.3"));
     }
 
+    void registryKeepsUnknownKeys() {
+        const auto path = QDir(m_home->path()).filePath("registry.json");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(R"({"bundledSeen":["a"],"selections":{"theme":"x/y"},"developmentDirectories":["/dev/x"],)"
+                   R"("entries":[{"id":"x.one","directory":"/p/one","enabled":true,"trusted":true,)"
+                   R"("previous":{"directory":"/p/old","development":false,"enabled":false,"trusted":true}},)"
+                   R"({"id":"x.one","directory":"/p/duplicate"},{"id":"Bad","directory":"/p/bad"},)"
+                   R"({"id":"x.two","directory":"/p/two","failure":"boom"}]})");
+        file.close();
+        const ExtensionRegistry registry(path);
+        auto state = registry.load();
+        QCOMPARE(state.entries.size(), 2);
+        QCOMPARE(state.entries[0].directory, "/p/one");
+        QVERIFY(state.entries[0].previous);
+        QCOMPARE(state.entries[0].previous->directory, "/p/old");
+        QCOMPARE(state.entries[1].failure, "boom");
+        QCOMPARE(state.extra.value("bundledSeen").toStringList(), QStringList{"a"});
+        QVERIFY(registry.save(state));
+        const auto reloaded = registry.load();
+        QCOMPARE(reloaded.extra, state.extra);
+        QCOMPARE(reloaded.selections, state.selections);
+        QCOMPARE(reloaded.entries.size(), 2);
+        QCOMPARE(*registry.storedDirectories(),
+                 (QStringList{"/dev/x", "/p/one", "/p/old", "/p/two", QString()}));
+    }
+    void packageStoreCleansOnlyUnreferenced() {
+        const PackageStore store;
+        const QDir packages(store.packagesDirectory());
+        const QString kept = "x.one-1.0.0-123e4567-e89b-42d3-a456-426614174000";
+        const QString unused = "x.one-0.9.0-123e4567-e89b-42d3-a456-426614174001";
+        const QString staging = ".staging-123e4567-e89b-42d3-a456-426614174002";
+        for (const auto &name : {kept, unused, staging, QStringLiteral("not-a-package")})
+            QVERIFY(packages.mkpath(name));
+        QVERIFY(store.clean({packages.filePath(kept)}).isEmpty());
+        QVERIFY(packages.exists(kept));
+        QVERIFY(packages.exists("not-a-package"));
+        QVERIFY(!packages.exists(unused));
+        QVERIFY(!packages.exists(staging));
+    }
+
     void manifestValidation() {
         QTemporaryDir directory;
         const auto write = [&](const QByteArray &json) {
@@ -133,6 +176,20 @@ class NativeExtensionsTest final : public QObject {
         write(R"({"id":"x.ui","name":"UI","version":"1.0.0","apiVersion":2,)"
               R"("contributes":{"pages":[{"id":"p","source":"../escape.qml"}]}})");
         QVERIFY(!readManifest(directory.path()));
+
+        write(R"({"id":"x.typed","name":"Typed","version":"1.2.3","apiVersion":2,"description":"D",)"
+              R"("nativeModules":true,"config":{"a":1},"dependencies":{"x.base":"^1.0.0"},)"
+              R"("contributes":{"menus":[{"id":"menu","title":"M","context":"song","command":"c"}]}})");
+        manifest = readManifest(directory.path());
+        QVERIFY2(manifest, qPrintable(manifest ? QString() : manifest.error().message));
+        QCOMPARE(manifest.value().id, "x.typed");
+        QCOMPARE(manifest.value().description, "D");
+        QCOMPARE(manifest.value().type, "extension");
+        QVERIFY(manifest.value().nativeModules);
+        QCOMPARE(manifest.value().defaultConfig.value("a").toInt(), 1);
+        QCOMPARE(manifest.value().dependencies.value("x.base"), "^1.0.0");
+        QCOMPARE(manifest.value().contributes.value("menus").toList().size(), 1);
+        QCOMPARE(manifest.value().raw.value("name").toString(), "Typed");
     }
 
     void trustIsRequiredBeforeLoading() {

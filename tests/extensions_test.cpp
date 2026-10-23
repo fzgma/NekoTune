@@ -5,7 +5,7 @@
 #include "controllers/app_controllers.h"
 #include "extensions/extension_view.h"
 #include "i18n.h"
-#include "infrastructure/extensions/extension_manifest.h"
+#include "infrastructure/extensions/package/extension_manifest.h"
 #include "runtime/backend_runtime.h"
 #include "support/store_fixture.h"
 #include <QElapsedTimer>

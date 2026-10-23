@@ -2,7 +2,9 @@
 #include "domain/extensions/extension_backend.h"
 #include "domain/playback/shuffle_strategy_descriptor.h"
 #include <nekotune/sdk/shuffle_provider.h>
-#include "infrastructure/extensions/extension_manifest.h"
+#include "infrastructure/extensions/package/extension_manifest.h"
+#include "infrastructure/extensions/package/extension_registry.h"
+#include "infrastructure/extensions/package/package_store.h"
 #include <QHash>
 #include <QSet>
 #include <QStringList>
@@ -45,12 +47,7 @@ class PluginManager final : public IExtensionBackend {
     class Context;
     class Handle;
     struct Run;
-    struct Entry {
-        QString directory;
-        bool development = false;
-        bool enabled = false;
-        bool trusted = false;
-        QVariantMap previous;
+    struct Entry : ExtensionRecord {
         ExtensionManifest manifest;
         QString state = "disabled";
         QString error;
@@ -58,8 +55,6 @@ class PluginManager final : public IExtensionBackend {
     using Done = std::function<void(Result<void>)>;
     using Mutation = std::function<void(Completion)>;
 
-    QString root() const;
-    QString dataDirectory(const QString &id) const;
     void post(std::function<void()> work);
     void notifyChanged();
     void reportError(const QString &message);
@@ -107,6 +102,8 @@ class PluginManager final : public IExtensionBackend {
     /// when the run stops first.
     Completion pending(const std::shared_ptr<Run> &run, Completion done, int timeoutMs);
 
+    PackageStore m_packages;
+    ExtensionRegistry m_registry;
     QHash<QString, Entry> m_entries;
     QStringList m_order;
     QHash<QString, std::shared_ptr<Run>> m_runs;
@@ -118,7 +115,7 @@ class PluginManager final : public IExtensionBackend {
     QSet<QString> m_nativeActivated, m_retainedDirectories;
     QVariantMap m_selections;
     QStringList m_developmentDirectories;
-    QVariantMap m_extraState;
+    QVariantMap m_registryExtra;
     std::deque<std::pair<Mutation, Completion>> m_mutations;
     IPcmSource *m_pcm = nullptr;
     HostCall m_hostCall;
