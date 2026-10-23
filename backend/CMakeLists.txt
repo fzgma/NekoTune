@@ -1,4 +1,5 @@
 add_library(nekotune_domain STATIC
+    domain/appearance/appearance_backend.h
     domain/extensions/extension_backend.h
     domain/extensions/music_source_catalog.h
     domain/extensions/lyrics_source_catalog.h
@@ -32,7 +33,9 @@ add_library(nekotune_providers STATIC
 target_link_libraries(nekotune_providers PUBLIC nekotune_domain nekotune_paths Qt6::Network)
 
 add_library(nekotune_infrastructure STATIC
+    infrastructure/appearance/appearance_service.cpp
     infrastructure/extensions/capabilities/audio_proxy.cpp
+    infrastructure/extensions/capabilities/contribution_registry.cpp
     infrastructure/extensions/capabilities/extension_lyrics_provider.cpp
     infrastructure/extensions/capabilities/music_sources.cpp
     infrastructure/extensions/capabilities/lyrics_sources.cpp
@@ -126,6 +129,7 @@ target_link_libraries(nekotune_application PUBLIC nekotune_domain)
 add_library(nekotune_ipc STATIC
     ipc/api/history_api.cpp
     ipc/api/extensions_api.cpp
+    ipc/api/appearance_api.cpp
     ipc/api/music_api.cpp
     ipc/ipc_router.cpp
     ipc/ipc_server.cpp

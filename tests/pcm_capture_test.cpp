@@ -174,7 +174,7 @@ class PcmCaptureTest : public QObject {
             analyzer->start([](const QString &, const QVariantMap &, IExtensionBackend::Completion done) {
                 done(QVariantMap{{"state", "playing"}});
             });
-            QTRY_VERIFY(analyzer->snapshot().value("startupComplete").toBool());
+            QTRY_VERIFY(analyzer->snapshot().value("runtime").toMap().value("startupComplete").toBool());
             auto invoke = [&](const QString &method, const QVariantMap &params) -> bool {
                 std::optional<Result<QVariantMap>> reply;
                 analyzer->request(method, params, [&](Result<QVariantMap> value) { reply = value; });
@@ -253,7 +253,7 @@ class PcmCaptureTest : public QObject {
         manager.start([](const QString &, const QVariantMap &, IExtensionBackend::Completion done) {
             done(QVariantMap{{"state", "playing"}});
         });
-        QTRY_VERIFY(manager.snapshot().value("startupComplete").toBool());
+        QTRY_VERIFY(manager.snapshot().value("runtime").toMap().value("startupComplete").toBool());
         auto call = [&](const QString &method, const QVariantMap &params) -> Result<QVariantMap> {
             std::optional<Result<QVariantMap>> reply;
             manager.request(method, params, [&](Result<QVariantMap> value) { reply = value; });

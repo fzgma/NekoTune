@@ -7,6 +7,8 @@
 #include "domain/playback/playback_backend.h"
 #include "infrastructure/ai/ai_backend.h"
 #include "infrastructure/extensions/plugin_manager.h"
+#include "infrastructure/appearance/appearance_service.h"
+#include "app_paths.h"
 #include "infrastructure/library/import_executor.h"
 #include "infrastructure/library/loudness_analysis.h"
 #include "infrastructure/library/music_directory.h"
@@ -75,6 +77,7 @@ class BackendSession final : public QObject {
     LibraryScanner m_scanner;
     IpcServer m_server;
     PluginManager m_extensionBackend;
+    AppearanceService m_appearance{m_extensionBackend.contributions(), AppPaths::extensionsDirectory() + "/appearance.json"};
     ExtensionService m_extensions{m_extensionBackend};
     MusicService m_musicSources;
     LibraryMaintenance m_maintenance;

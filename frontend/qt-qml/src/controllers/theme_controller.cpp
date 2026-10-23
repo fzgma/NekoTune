@@ -149,23 +149,19 @@ void ThemeController::rebuild() {
     item.insert("available", true);
     m_items.append(item);
   }
-  for (const auto &value : m_extensions.items()) {
-    const auto extension = value.toMap();
-    auto themes = extension.value("themes").toList();
-    if (!extension.contains("themes"))
-      themes = extension.value("contributes").toMap().value("themes").toList();
-    for (const auto &theme : themes) {
-      auto item = theme.toMap();
-      item.insert("origin", extension.value("type") == "theme" ? "imported"
-                                                               : "extension");
-      item.insert("available", extension.value("state") == "running");
-      item.insert("extensionId", extension.value("id"));
+  for (const auto &value : m_extensions.themes()) {
+    auto item = value.toMap();
+    for (const auto &extensionValue : m_extensions.items()) {
+      const auto extension = extensionValue.toMap();
+      if (extension.value("id") != item.value("extensionId"))
+        continue;
+      item.insert("origin", extension.value("type") == "theme" ? "imported" : "extension");
       item.insert("version", extension.value("version"));
       item.insert("directory", extension.value("directory"));
-      item.insert("generation", extension.value("generation"));
       item.insert("trusted", extension.value("trusted"));
       item.insert("hasCode", extension.value("hasCode", true));
       m_items.append(item);
+      break;
     }
   }
   for (auto &value : m_items) {
@@ -324,7 +320,7 @@ void ThemeController::applySelection(const QString &appearance,
   // the legacy "layout follows appearance" rule.
   const auto stored =
       appearance == QLatin1String("builtin/yozakura") ? QString() : appearance;
-  request("extensions.select",
+  request("appearance.select",
           {{"selections",
             QVariantMap{{"theme", stored}, {"themeLayout", layout}}}},
           std::move(done));
@@ -440,7 +436,7 @@ void ThemeController::reloadTheme(const QString &id) {
           });
 }
 void ThemeController::exportTheme(const QString &id, const QString &path) {
-  request("extensions.export_theme", {{"contribution", id}, {"path", path}},
+  request("appearance.export_theme", {{"contribution", id}, {"path", path}},
           [this](const QVariantMap &, const QString &error) {
             if (error.isEmpty())
               m_notice = "theme_exported";

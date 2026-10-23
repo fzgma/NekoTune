@@ -109,7 +109,7 @@ Item {
                         model: { const revision = root.client.selections; const items = root.client.items; return root.options(selector.modelData) }
                         textRole: "label"; valueRole: "id"
                         currentIndex: Math.max(0, model.findIndex(item => item.id === (root.client.selections[selector.modelData] || "")))
-                        onActivated: root.manage("select", {slot: selector.modelData, contribution: currentValue})
+                        onActivated: { root.localError = ""; root.client.request("appearance.select", {slot: selector.modelData, contribution: currentValue}) }
                     }
                     Label { visible: root.themeController !== null && Boolean(root.themeController.uiSlots[selector.modelData]); text: root.t("theme_managed_slot"); color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
                 }

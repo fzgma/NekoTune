@@ -4,8 +4,7 @@
 #include "infrastructure/extensions/runtime/host_context.h"
 #include "infrastructure/extensions/runtime/dev_watcher.h"
 #include "infrastructure/extensions/runtime/registration_scope.h"
-#include "infrastructure/extensions/package/theme_package.h"
-#include "themes/theme_resolution.h"
+#include "infrastructure/appearance/appearance_service.h"
 #include <nekotune/sdk/extension_plugin.h>
 #include <QDir>
 #include <QFile>
@@ -91,77 +90,10 @@ void PluginManager::recordLog(const QString &id, const QString &level, const QSt
     m_log.record(id, level, message);
 }
 
-QVariantMap PluginManager::publicEntry(const QString &id) const {
-    const auto &entry = m_entries[id];
-    const auto run = m_runs.value(id);
-    auto contributions = entry.manifest.contributes;
-    if (run)
-        for (const auto &kind : RegistrationScope::uiKinds()) {
-            auto list = contributions.value(kind).toList();
-            for (const auto &item : run->registrations.list(kind))
-                list.append(item);
-            contributions.insert(kind, list);
-        }
-    for (auto it = contributions.begin(); it != contributions.end(); ++it) {
-        if (it.value().typeId() != QMetaType::QVariantList)
-            continue;
-        auto list = it.value().toList();
-        for (auto &value : list) {
-            auto item = value.toMap();
-            if (!item.contains("localId"))
-                item.insert("localId", item.value("id"));
-            item.insert("id", id + "/" + item.value("localId").toString());
-            item.insert("extensionId", id);
-            if (item.contains("source"))
-                item.insert("source", QDir::cleanPath(QDir(entry.directory).filePath(item.value("source").toString())));
-            value = item;
-        }
-        it.value() = list;
-    }
-    const bool running = run && run->state == ExtensionState::Running;
-    QVariantMap registrations;
-    if (running)
-        for (const auto &kind : RegistrationScope::kinds()) {
-            QVariantList list;
-            for (const auto &item : run->registrations.list(kind))
-                list.append(item);
-            registrations.insert(kind, list);
-        }
-    return {{"id", id},
-            {"name", entry.manifest.name},
-            {"version", entry.manifest.version},
-            {"description", entry.manifest.description},
-            {"directory", entry.directory},
-            {"development", entry.development},
-            {"trusted", entry.trusted},
-            {"enabled", entry.enabled},
-            {"state", toString(run ? run->state : entry.state)},
-            {"error", m_vault.redact(entry.error)},
-            {"generation", run ? run->generation : 0},
-            {"nativeModules", entry.manifest.nativeModules},
-            {"type", entry.manifest.type},
-            {"hasCode", entry.manifest.needsTrust()},
-            {"themes", contributions.value("themes", QVariantList{})},
-            {"contributes", running ? contributions : QVariantMap{}},
-            {"registrations", registrations}};
-}
-QVariantMap PluginManager::snapshot() const {
-    QVariantList extensions;
-    for (const auto &id : m_order)
-        extensions.append(publicEntry(id));
-    return {{"extensions", extensions},
-            {"selections", m_selections},
-            {"safeMode", m_safeMode},
-            {"safeModeReason", m_safeModeReason},
-            {"catalogueReady", m_catalogueReady},
-            {"startupComplete", m_startupComplete},
-            {"runtimeReady", m_catalogueReady && !m_closing}};
-}
-
 void PluginManager::load() {
     auto state = m_registry.load();
     m_registryExtra = std::move(state.extra);
-    m_selections = std::move(state.selections);
+    m_legacySelections = std::move(state.selections);
     m_developmentDirectories = std::move(state.developmentDirectories);
     for (auto &record : state.entries) {
         Entry entry;
@@ -195,7 +127,9 @@ Result<void> PluginManager::save() {
         state.entries.append(std::move(record));
     }
     state.extra = m_registryExtra;
-    state.selections = m_selections;
+    // Preserve migration input through unrelated saves if appearance.json could not be written.
+    if (!m_legacySelections.isEmpty())
+        state.extra.insert("selections", m_legacySelections);
     state.developmentDirectories = m_developmentDirectories;
     return m_registry.save(state);
 }
@@ -242,6 +176,14 @@ void PluginManager::start(HostCall hostCall) {
     // Development copies from the previous process are no longer mapped.
     QDir(m_packages.runtimeDirectory()).removeRecursively();
     load();
+    if (m_appearance && !m_legacySelections.isEmpty()) {
+        if (auto migrated = m_appearance->migrate(m_legacySelections); migrated) {
+            m_legacySelections.clear();
+            if (auto saved = save(); !saved)
+                reportError("Cannot persist appearance migration: " + saved.error().message);
+        } else
+            reportError("Cannot migrate appearance selections: " + migrated.error().message);
+    }
     if (m_entries.contains(crashed)) {
         auto &entry = m_entries[crashed];
         entry.enabled = false;
@@ -260,9 +202,7 @@ void PluginManager::start(HostCall hostCall) {
                 return;
             }
             QStringList order;
-            QSet<QString> selectedOwners;
-            for (const auto &value : std::as_const(m_selections))
-                selectedOwners.insert(value.toString().section('/', 0, 0));
+            const auto selectedOwners = m_appearance ? m_appearance->selectedOwners() : QStringList{};
             for (const auto &id : std::as_const(m_order))
                 if (selectedOwners.contains(id))
                     order.append(id);
@@ -801,18 +741,11 @@ void PluginManager::uninstall(const QVariantMap &params, Completion done) {
         done(failure("Extension not found"));
         return;
     }
-    if (m_entries[id].manifest.isTheme()) {
-        const auto previous = m_selections;
-        for (const auto *key : {"theme", "themeLayout"})
-            if (m_selections.value(QLatin1String(key)).toString().startsWith(id + "/"))
-                m_selections.insert(QLatin1String(key), QString());
-        if (m_selections != previous)
-            if (auto saved = save(); !saved) {
-                m_selections = previous;
-                done(saved.error());
-                return;
-            }
-    }
+    if (m_entries[id].manifest.isTheme() && m_appearance)
+        if (auto forgotten = m_appearance->forgetThemePackage(id); !forgotten) {
+            done(forgotten.error());
+            return;
+        }
     disable(id);
     const bool clearData = params.value("clearData").toBool();
     const auto finish = [this, id, clearData, done](Result<void> cleared) {
@@ -837,56 +770,6 @@ void PluginManager::uninstall(const QVariantMap &params, Completion done) {
     else
         finish({});
 }
-Result<void> PluginManager::validateSelection(const QString &slot, const QString &contribution) const {
-    if (contribution.isEmpty())
-        return {};
-    if (slot == "theme")
-        for (const auto &theme : themes::catalog().value("themes").toList())
-            if (theme.toMap().value("id") == contribution)
-                return {};
-    const bool themeSlot = slot == "theme" || slot == "themeLayout";
-    for (const auto &value : snapshot().value("extensions").toList())
-        for (const auto &item : value.toMap().value("contributes").toMap().value(themeSlot ? "themes" : "slots").toList()) {
-            const auto map = item.toMap();
-            if (map.value("id") != contribution)
-                continue;
-            if (slot == "theme" || (slot == "themeLayout" && themes::providesLayout(map)) ||
-                (!themeSlot && map.value("slot") == slot))
-                return {};
-        }
-    return failure("Contribution is unavailable for this slot");
-}
-Result<QVariantMap> PluginManager::select(const QVariantMap &params) {
-    // {selections: {slot: contribution}} updates several slots atomically; {slot, contribution} is the legacy form.
-    QVariantMap changes;
-    if (params.contains("selections")) {
-        if (params.value("selections").typeId() != QMetaType::QVariantMap)
-            return failure("Invalid selection");
-        changes = params.value("selections").toMap();
-    } else if (params.value("slot").typeId() == QMetaType::QString) {
-        changes.insert(params.value("slot").toString(), params.value("contribution"));
-    }
-    if (changes.isEmpty())
-        return failure("Invalid selection");
-    for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
-        if (it.key().isEmpty() || it.value().typeId() != QMetaType::QString)
-            return failure("Invalid selection");
-        // Unchanged entries keep a selection whose package is temporarily disabled.
-        if (m_selections.value(it.key()) == it.value())
-            continue;
-        if (auto valid = validateSelection(it.key(), it.value().toString()); !valid)
-            return valid.error();
-    }
-    const auto previous = m_selections;
-    for (auto it = changes.cbegin(); it != changes.cend(); ++it)
-        m_selections.insert(it.key(), it.value());
-    if (auto saved = save(); !saved) {
-        m_selections = previous;
-        return saved.error();
-    }
-    notifyChanged();
-    return snapshot();
-}
 void PluginManager::cleanUnusedPackages() {
     // References on disk also protect the last committed version if saving a mutation failed.
     const auto stored = m_registry.storedDirectories();
@@ -901,32 +784,6 @@ void PluginManager::cleanUnusedPackages() {
         references << entry.directory << (entry.previous ? entry.previous->directory : QString());
     for (const auto &message : m_packages.clean(references))
         reportError(message);
-}
-Result<QVariantMap> PluginManager::exportTheme(const QVariantMap &params) {
-    const auto id = params.value("contribution").toString().isEmpty() ? QStringLiteral("builtin/yozakura")
-                                                                       : params.value("contribution").toString();
-    const auto destination = params.value("path").toString();
-    for (const auto &theme : themes::catalog().value("themes").toList())
-        if (theme.toMap().value("id") == id)
-            return themes::exportTheme(theme.toMap(), {}, {}, destination);
-    const auto owner = id.section('/', 0, 0), local = id.section('/', 1);
-    if (!m_entries.contains(owner))
-        return failure("Theme is unavailable for export");
-    const auto &entry = m_entries[owner];
-    QVariantMap theme;
-    for (const auto &value : entry.manifest.contributes.value("themes").toList())
-        if (value.toMap().value("id") == local)
-            theme = value.toMap();
-    if (theme.isEmpty())
-        if (const auto run = m_runs.value(owner))
-            theme = run->registrations.descriptor("themes", local);
-    if (theme.isEmpty())
-        return failure("Theme is unavailable for export");
-    if (auto manifest = readManifest(entry.directory); !manifest)
-        return manifest.error();
-    if (auto valid = themes::validate(theme, entry.directory); !valid)
-        return valid.error();
-    return themes::exportTheme(theme, entry.directory, entry.manifest.raw, destination);
 }
 QVariantMap PluginManager::readConfig(const QString &id) const {
     return m_storage.readConfig(id, m_entries.value(id).manifest.defaultConfig);
@@ -998,10 +855,6 @@ void PluginManager::request(const QString &method, const QVariantMap &params, Co
                     uninstall(params, finish);
                 else if (method == "extensions.set_config")
                     finish(setConfig(id, params.value("config")));
-                else if (method == "extensions.select")
-                    finish(select(params));
-                else if (method == "extensions.export_theme")
-                    finish(exportTheme(params));
                 else if (!m_entries.contains(id))
                     finish(failure(method == "extensions.enable" || method == "extensions.disable" ||
                                            method == "extensions.reload"

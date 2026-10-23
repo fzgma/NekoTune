@@ -10,6 +10,7 @@
 #include "infrastructure/extensions/package/extension_registry.h"
 #include "infrastructure/extensions/package/package_store.h"
 #include "infrastructure/extensions/plugin_manager.h"
+#include "infrastructure/appearance/appearance_service.h"
 #include "infrastructure/extensions/package/semver.h"
 #include "infrastructure/extensions/package/theme_package.h"
 #include "infrastructure/extensions/package/zip_archive.h"
@@ -43,7 +44,7 @@ const QString examples = QStringLiteral(NEKOTUNE_EXAMPLE_EXTENSIONS);
 const QString faultyDirectory = QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.faulty");
 const QString dependentDirectory = QStringLiteral(NEKOTUNE_TEST_SOURCES "/dependent");
 
-Result<QVariantMap> call(PluginManager &manager, const QString &method, const QVariantMap &params = {},
+template <class Backend> Result<QVariantMap> call(Backend &manager, const QString &method, const QVariantMap &params = {},
                          int timeout = 10'000) {
     std::optional<Result<QVariantMap>> result;
     manager.request(method, params, [&](Result<QVariantMap> value) { result = std::move(value); });
@@ -70,6 +71,22 @@ QVariantMap entry(const PluginManager &manager, const QString &id) {
             return value.toMap();
     return {};
 }
+QVariantList contributions(const PluginManager &manager, const QString &kind) {
+    return manager.snapshot().value("contributions").toMap().value(kind).toList();
+}
+QVariantList forExtension(const QVariantList &items, const QString &id) {
+    QVariantList result;
+    for (const auto &item : items)
+        if (item.toMap().value("extensionId") == id)
+            result.append(item);
+    return result;
+}
+AppearanceService &appearance(PluginManager &manager) {
+    return *manager.findChild<AppearanceService *>();
+}
+Result<QVariantMap> callAppearance(AppearanceService &service, const QString &method, const QVariantMap &params = {}) {
+    return call(service, method, params);
+}
 QString errorOf(const Result<QVariantMap> &result) { return result ? QString() : result.error().message; }
 } // namespace
 
@@ -78,13 +95,22 @@ class NativeExtensionsTest final : public QObject {
     std::unique_ptr<QTemporaryDir> m_home;
     QList<QPair<QString, QVariantMap>> m_hostCalls;
 
+    std::unique_ptr<AppearanceService> startAppearance(PluginManager &manager) {
+        auto service = std::make_unique<AppearanceService>(manager.contributions(),
+            QDir(AppPaths::extensionsDirectory()).filePath("appearance.json"));
+        manager.setAppearance(service.get());
+        return service;
+    }
     std::unique_ptr<PluginManager> startManager() {
         auto manager = std::make_unique<PluginManager>();
+        auto service = startAppearance(*manager);
+        service->setParent(manager.get());
+        service.release();
         manager->start([this](const QString &method, const QVariantMap &params, IExtensionBackend::Completion done) {
             m_hostCalls.append({method, params});
             done(QVariantMap{});
         });
-        [&] { QTRY_VERIFY(manager->snapshot().value("startupComplete").toBool()); }();
+        [&] { QTRY_VERIFY(manager->snapshot().value("runtime").toMap().value("startupComplete").toBool()); }();
         return manager;
     }
     void install(PluginManager &manager, const QString &directory) {
@@ -194,7 +220,8 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(registry.save(state));
         const auto reloaded = registry.load();
         QCOMPARE(reloaded.extra, state.extra);
-        QCOMPARE(reloaded.selections, state.selections);
+        QCOMPARE(state.selections.value("theme").toString(), "x/y");
+        QVERIFY(reloaded.selections.isEmpty());
         QCOMPARE(reloaded.entries.size(), 2);
         QCOMPARE(*registry.storedDirectories(),
                  (QStringList{"/dev/x", "/p/one", "/p/old", "/p/two", QString()}));
@@ -277,10 +304,15 @@ class NativeExtensionsTest final : public QObject {
         QCOMPARE(staged.size(), 1);
         QVERIFY(!QDir(staged.first().filePath()).entryList(QDir::Files).isEmpty());
         const auto extension = entry(*manager, "example.custom-ui");
-        const auto page = extension.value("contributes").toMap().value("pages").toList().value(0).toMap();
+        const auto page = forExtension(contributions(*manager, "pages"), "example.custom-ui").value(0).toMap();
         QCOMPARE(page.value("id").toString(), "example.custom-ui/hello");
         QVERIFY(QDir::isAbsolutePath(page.value("source").toString()));
-        const auto commands = extension.value("registrations").toMap().value("commands").toList();
+        QCOMPARE(page.value("group").toString(), "primary");
+        QCOMPARE(page.value("generation"), extension.value("generation"));
+        QVERIFY(!extension.contains("contributes"));
+        QVERIFY(!extension.contains("registrations"));
+        QVERIFY(!extension.contains("themes"));
+        const auto commands = forExtension(manager->snapshot().value("commands").toList(), "example.custom-ui");
         QCOMPARE(commands.value(0).toMap().value("id").toString(), "example.custom-ui/inspect-song");
         QCOMPARE(commands.value(0).toMap().value("title").toString(), "Inspect selection");
 
@@ -302,7 +334,7 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(published);
 
         QVERIFY(call(*manager, "extensions.disable", {{"id", "example.custom-ui"}}));
-        QCOMPARE(entry(*manager, "example.custom-ui").value("contributes").toMap(), QVariantMap{});
+        QVERIFY(forExtension(contributions(*manager, "pages"), "example.custom-ui").isEmpty());
         QVERIFY(!call(*manager, "extensions.call", {{"id", "example.custom-ui"}, {"service", "hello"}}));
     }
 
@@ -511,7 +543,7 @@ class NativeExtensionsTest final : public QObject {
 
         QVERIFY(!service("ui", {{"id", "escape"}, {"source", "../../escape.qml"}}).value().value("accepted").toBool());
         QVERIFY(service("ui", {{"id", "runtime"}, {"source", "extension.json"}}).value().value("accepted").toBool());
-        QTRY_COMPARE(entry(*manager, "test.faulty").value("contributes").toMap().value("pages").toList().size(), 1);
+        QTRY_COMPARE(forExtension(contributions(*manager, "pages"), "test.faulty").size(), 1);
 
         QSignalSpy events(manager.get(), &IExtensionBackend::eventReady);
         manager->publish({{"event", "test.host"}, {"value", "a"}});
@@ -540,7 +572,7 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(!wait<IMusicSourceCatalog::Playback>([&](auto done) {
             manager->musicSources().resolvePlayback("test.faulty/tones", "outside", done);
         }));
-        const auto music = entry(*manager, "test.faulty").value("registrations").toMap().value("music").toList();
+        const auto music = forExtension(manager->snapshot().value("sources").toMap().value("music").toList(), "test.faulty");
         QCOMPARE(music.value(0).toMap().value("name").toString(), "Tones");
     }
 
@@ -559,8 +591,8 @@ class NativeExtensionsTest final : public QObject {
         QTest::newRow("reload") << "extensions.reload" << false;
         QTest::newRow("uninstall") << "extensions.uninstall" << false;
         QTest::newRow("config") << "extensions.set_config" << false;
-        QTest::newRow("select") << "extensions.select" << false;
-        QTest::newRow("export-theme") << "extensions.export_theme" << false;
+        QTest::newRow("select") << "appearance.select" << false;
+        QTest::newRow("export-theme") << "appearance.export_theme" << false;
         QTest::newRow("unknown-extension") << "extensions.future_method" << false;
         QTest::newRow("appearance") << "appearance.select" << false;
         QTest::newRow("appearance-read") << "appearance.get" << false;
@@ -854,8 +886,8 @@ class NativeExtensionsTest final : public QObject {
         file.write(R"({"loaded":["test.faulty"],"unattributed":1})");
         file.close();
         auto manager = startManager();
-        QVERIFY(manager->snapshot().value("safeMode").toBool());
-        QCOMPARE(manager->snapshot().value("safeModeReason").toString(), "repeated_crashes");
+        QVERIFY(manager->snapshot().value("runtime").toMap().value("safeMode").toBool());
+        QCOMPARE(manager->snapshot().value("runtime").toMap().value("safeModeReason").toString(), "repeated_crashes");
         manager->shutdown();
         QVERIFY(!QFileInfo::exists(marker));
     }
@@ -868,7 +900,7 @@ class NativeExtensionsTest final : public QObject {
         }
         qputenv("NEKOTUNE_SAFE_MODE", "1");
         auto manager = startManager();
-        QVERIFY(manager->snapshot().value("safeMode").toBool());
+        QVERIFY(manager->snapshot().value("runtime").toMap().value("safeMode").toBool());
         QCOMPARE(entry(*manager, "example.lyrics").value("state").toString(), "disabled");
         QVERIFY(entry(*manager, "example.lyrics").value("enabled").toBool());
         QVERIFY(!call(*manager, "extensions.enable", {{"id", "example.lyrics"}}));
@@ -991,17 +1023,17 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(write("extension.json", QJsonDocument(manifest).toJson()));
         install(*manager, folder.path());
         enable(*manager, "test.layout");
-        const auto selections = [&] { return manager->snapshot().value("selections").toMap(); };
+        const auto selections = [&] { return appearance(*manager).selections(); };
 
         // The legacy single-slot form keeps working and does not create themeLayout.
-        QVERIFY(call(*manager, "extensions.select", {{"slot", "theme"}, {"contribution", "test.layout/palette"}}));
+        QVERIFY(callAppearance(appearance(*manager), "appearance.select", {{"slot", "theme"}, {"contribution", "test.layout/palette"}}));
         QVERIFY(!selections().contains("themeLayout"));
         QVERIFY(call(*manager, "extensions.uninstall", {{"id", "test.layout"}}));
         QVERIFY(!selections().contains("themeLayout"));
         install(*manager, folder.path());
         enable(*manager, "test.layout");
 
-        const auto both = call(*manager, "extensions.select",
+        const auto both = callAppearance(appearance(*manager), "appearance.select",
                                {{"selections", QVariantMap{{"theme", "builtin/ocean"}, {"themeLayout", "test.layout/layout"}}}});
         QVERIFY2(both, qPrintable(errorOf(both)));
         QCOMPARE(selections().value("theme").toString(), "builtin/ocean");
@@ -1009,38 +1041,38 @@ class NativeExtensionsTest final : public QObject {
 
         // Only running themes with layout entries qualify; wallpaper-only themes do not.
         for (const auto *invalid : {"builtin/ocean", "test.layout/palette", "test.layout/wall", "test.layout/missing"})
-            QVERIFY(!call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", QString(invalid)}}));
+            QVERIFY(!callAppearance(appearance(*manager), "appearance.select", {{"slot", "themeLayout"}, {"contribution", QString(invalid)}}));
         QCOMPARE(selections().value("themeLayout").toString(), "test.layout/layout");
 
-        QVERIFY(call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", ""}}));
+        QVERIFY(callAppearance(appearance(*manager), "appearance.select", {{"slot", "themeLayout"}, {"contribution", ""}}));
         QCOMPARE(selections().value("themeLayout").toString(), QString());
 
         // One invalid entry rejects the whole batch.
         const auto beforeInvalid = selections();
-        QVERIFY(!call(*manager, "extensions.select",
+        QVERIFY(!callAppearance(appearance(*manager), "appearance.select",
                       {{"selections", QVariantMap{{"theme", "test.layout/palette"}, {"themeLayout", "builtin/ocean"}}}}));
         QCOMPARE(selections(), beforeInvalid);
-        QVERIFY(!call(*manager, "extensions.select", {{"selections", QVariantMap{}}}));
-        QVERIFY(!call(*manager, "extensions.select", {{"selections", QVariantMap{{"themeLayout", 1}}}}));
-        QVERIFY(!call(*manager, "extensions.select", {{"selections", "theme"}}));
-        QVERIFY(!call(*manager, "extensions.select", {{"selections", QVariantMap{{"", ""}}}}));
-        QVERIFY(!call(*manager, "extensions.select", {{"slot", "themeLayout"}}));
+        QVERIFY(!callAppearance(appearance(*manager), "appearance.select", {{"selections", QVariantMap{}}}));
+        QVERIFY(!callAppearance(appearance(*manager), "appearance.select", {{"selections", QVariantMap{{"themeLayout", 1}}}}));
+        QVERIFY(!callAppearance(appearance(*manager), "appearance.select", {{"selections", "theme"}}));
+        QVERIFY(!callAppearance(appearance(*manager), "appearance.select", {{"selections", QVariantMap{{"", ""}}}}));
+        QVERIFY(!callAppearance(appearance(*manager), "appearance.select", {{"slot", "themeLayout"}}));
         QCOMPARE(selections(), beforeInvalid);
 
         // A failed save rolls back every slot in the batch.
-        const auto registry = QDir(AppPaths::extensionsDirectory()).filePath("registry.json");
-        QVERIFY(QFile::rename(registry, registry + ".saved"));
-        QVERIFY(QDir().mkdir(registry));
-        const auto failed = call(*manager, "extensions.select",
+        const auto appearanceFile = QDir(AppPaths::extensionsDirectory()).filePath("appearance.json");
+        QVERIFY(QFile::rename(appearanceFile, appearanceFile + ".saved"));
+        QVERIFY(QDir().mkdir(appearanceFile));
+        const auto failed = callAppearance(appearance(*manager), "appearance.select",
                                  {{"selections", QVariantMap{{"theme", "test.layout/palette"},
                                                             {"themeLayout", "test.layout/layout"}}}});
         QVERIFY(!failed);
         QCOMPARE(failed.error().code, ErrorCode::Io);
         QCOMPARE(selections(), beforeInvalid);
-        QVERIFY(QDir().rmdir(registry));
-        QVERIFY(QFile::rename(registry + ".saved", registry));
+        QVERIFY(QDir().rmdir(appearanceFile));
+        QVERIFY(QFile::rename(appearanceFile + ".saved", appearanceFile));
 
-        QVERIFY(call(*manager, "extensions.select",
+        QVERIFY(callAppearance(appearance(*manager), "appearance.select",
                      {{"selections", QVariantMap{{"theme", "test.layout/palette"}, {"themeLayout", "test.layout/layout"}}}}));
         manager.reset();
         manager = startManager();
@@ -1049,22 +1081,22 @@ class NativeExtensionsTest final : public QObject {
 
         // A disabled package keeps its selections; unchanged entries are not revalidated.
         QVERIFY(call(*manager, "extensions.disable", {{"id", "test.layout"}}));
-        const auto keep = call(*manager, "extensions.select",
+        const auto keep = callAppearance(appearance(*manager), "appearance.select",
                                {{"selections", QVariantMap{{"theme", "test.layout/palette"}, {"themeLayout", ""}}}});
         QVERIFY2(keep, qPrintable(errorOf(keep)));
         QCOMPARE(selections().value("theme").toString(), "test.layout/palette");
         // Changing to a contribution of the disabled package is still rejected.
-        QVERIFY(!call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", "test.layout/layout"}}));
+        QVERIFY(!callAppearance(appearance(*manager), "appearance.select", {{"slot", "themeLayout"}, {"contribution", "test.layout/layout"}}));
 
         enable(*manager, "test.layout");
-        QVERIFY(call(*manager, "extensions.select", {{"slot", "themeLayout"}, {"contribution", "test.layout/layout"}}));
+        QVERIFY(callAppearance(appearance(*manager), "appearance.select", {{"slot", "themeLayout"}, {"contribution", "test.layout/layout"}}));
         QVERIFY(call(*manager, "extensions.disable", {{"id", "test.layout"}}));
-        QVERIFY(call(*manager, "extensions.select",
+        QVERIFY(callAppearance(appearance(*manager), "appearance.select",
                      {{"selections", QVariantMap{{"theme", "builtin/ocean"}, {"themeLayout", "test.layout/layout"}}}}));
         QCOMPARE(selections().value("theme").toString(), "builtin/ocean");
         QCOMPARE(selections().value("themeLayout").toString(), "test.layout/layout");
         enable(*manager, "test.layout");
-        QVERIFY(call(*manager, "extensions.select", {{"slot", "theme"}, {"contribution", "test.layout/palette"}}));
+        QVERIFY(callAppearance(appearance(*manager), "appearance.select", {{"slot", "theme"}, {"contribution", "test.layout/palette"}}));
 
         // Uninstalling the package resets both nonempty selections to the defaults.
         QVERIFY(call(*manager, "extensions.uninstall", {{"id", "test.layout"}}));
@@ -1169,10 +1201,86 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(!call(*manager, "extensions.enable", {{"id", "example.lyrics"}}));
     }
 
+    void appearanceMigratesFromRegistry() {
+        const auto directory = AppPaths::extensionsDirectory();
+        QVERIFY(QDir().mkpath(directory));
+        QFile registry(QDir(directory).filePath("registry.json"));
+        QVERIFY(registry.open(QIODevice::WriteOnly));
+        registry.write(R"({"selections":{"theme":"builtin/ocean"}})");
+        registry.close();
+        auto manager = startManager();
+        QCOMPARE(appearance(*manager).selections().value("theme").toString(), "builtin/ocean");
+        QFile migrated(QDir(directory).filePath("appearance.json"));
+        QVERIFY(migrated.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(migrated.readAll()).object().value("selections").toObject()
+                     .value("theme").toString(), "builtin/ocean");
+        QVERIFY(registry.open(QIODevice::ReadOnly));
+        QVERIFY(!QJsonDocument::fromJson(registry.readAll()).object().contains("selections"));
+        const auto snapshot = manager->snapshot();
+        QCOMPARE(snapshot.keys(), (QStringList{"commands", "contributions", "extensions", "runtime", "sources", "themes"}));
+        QVERIFY(snapshot.value("runtime").toMap().value("ready").toBool());
+    }
+
+    void appearanceMigrationKeepsExistingChoices() {
+        const auto directory = AppPaths::extensionsDirectory();
+        QVERIFY(QDir().mkpath(directory));
+        QFile registry(QDir(directory).filePath("registry.json"));
+        QVERIFY(registry.open(QIODevice::WriteOnly));
+        registry.write(R"({"selections":{"theme":"builtin/yozakura"}})");
+        registry.close();
+        QFile current(QDir(directory).filePath("appearance.json"));
+        QVERIFY(current.open(QIODevice::WriteOnly));
+        current.write(R"({"selections":{"theme":"builtin/ocean"}})");
+        current.close();
+        auto manager = startManager();
+        QCOMPARE(appearance(*manager).selections().value("theme").toString(), "builtin/ocean");
+        QVERIFY(registry.open(QIODevice::ReadOnly));
+        QVERIFY(!QJsonDocument::fromJson(registry.readAll()).object().contains("selections"));
+    }
+
+    void appearanceMigrationFailureCanRetry() {
+        const auto directory = AppPaths::extensionsDirectory();
+        const auto path = QDir(directory).filePath("appearance.json");
+        QVERIFY(QDir().mkpath(path));
+        QFile registry(QDir(directory).filePath("registry.json"));
+        QVERIFY(registry.open(QIODevice::WriteOnly));
+        registry.write(R"({"selections":{"theme":"builtin/ocean"}})");
+        registry.close();
+        auto manager = startManager();
+        // An unrelated registry save must retain migration input while appearance.json is unwritable.
+        install(*manager, faultyDirectory);
+        QVERIFY(registry.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(registry.readAll()).object().value("selections").toObject()
+                     .value("theme").toString(), "builtin/ocean");
+        registry.close();
+        manager.reset();
+        QVERIFY(QDir().rmdir(path));
+        manager = startManager();
+        QCOMPARE(appearance(*manager).selections().value("theme").toString(), "builtin/ocean");
+        QVERIFY(registry.open(QIODevice::ReadOnly));
+        QVERIFY(!QJsonDocument::fromJson(registry.readAll()).object().contains("selections"));
+    }
+
+    void appearanceEmitsOnlyCommittedChanges() {
+        auto manager = startManager();
+        auto &service = appearance(*manager);
+        QSignalSpy changes(&service, &IAppearanceBackend::eventReady);
+        QVERIFY(callAppearance(service, "appearance.select", {{"slot", "theme"}, {"contribution", "builtin/ocean"}}));
+        QCOMPARE(changes.size(), 1);
+        const auto event = changes.first().first().toMap();
+        QCOMPARE(event.value("event").toString(), "appearance.changed");
+        QCOMPARE(event.value("selections").toMap(), service.selections());
+        QVERIFY(!callAppearance(service, "appearance.select",
+                                {{"selections", QVariantMap{{"theme", "builtin/yozakura"},
+                                                            {"shell", "missing/shell"}}}}));
+        QCOMPARE(changes.size(), 1);
+        QCOMPARE(callAppearance(service, "appearance.get").value().value("selections").toMap(), service.selections());
+    }
+
     void zipPackagesAndThemes() {
         auto manager = startManager();
         const auto exported = m_home->filePath("ocean.zip");
-        const auto builtin = call(*manager, "extensions.export_theme", {{"contribution", "builtin/ocean"}, {"path", exported}});
+        const auto builtin = callAppearance(appearance(*manager), "appearance.export_theme", {{"contribution", "builtin/ocean"}, {"path", exported}});
         QVERIFY2(builtin, qPrintable(errorOf(builtin)));
         const auto installed = call(*manager, "extensions.install", {{"path", exported}, {"themeOnly", true}});
         QVERIFY2(installed, qPrintable(errorOf(installed)));
@@ -1184,9 +1292,9 @@ class NativeExtensionsTest final : public QObject {
         // Data-only themes need no trust decision.
         QVERIFY(call(*manager, "extensions.enable", {{"id", id}}));
         const auto contribution = id + "/theme";
-        QVERIFY(call(*manager, "extensions.select", {{"slot", "theme"}, {"contribution", contribution}}));
+        QVERIFY(callAppearance(appearance(*manager), "appearance.select", {{"slot", "theme"}, {"contribution", contribution}}));
         const auto again = m_home->filePath("again.nktheme.zip");
-        QVERIFY(call(*manager, "extensions.export_theme", {{"contribution", contribution}, {"path", again}}));
+        QVERIFY(callAppearance(appearance(*manager), "appearance.export_theme", {{"contribution", contribution}, {"path", again}}));
         const auto replaced = call(*manager, "extensions.install", {{"path", again}, {"replace", true}, {"expectedId", id}});
         QVERIFY2(replaced, qPrintable(errorOf(replaced)));
         QCOMPARE(entry(*manager, id).value("state").toString(), "running");

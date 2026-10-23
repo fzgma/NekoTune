@@ -13,6 +13,7 @@
 #include "ipc/serialization/serialization.h"
 namespace nekotune {
 class ExtensionService;
+class IAppearanceBackend;
 class MusicService;
 class ListeningHistoryService;
 /// Non-owning service references used by feature route registration.
@@ -38,6 +39,7 @@ struct ApiContext {
     QString configDirectory;
     AiService *ai = nullptr;
     ExtensionService *extensions = nullptr;
+    IAppearanceBackend *appearance = nullptr;
     MusicService *music = nullptr;
     AudioOutputService *audioOutputs = nullptr;
     AudioSettingsService *audioSettings = nullptr;
@@ -58,6 +60,7 @@ void registerLibraryApi(IpcRouter &, ApiContext &);
 void registerLyricsApi(IpcRouter &, ApiContext &);
 void registerAiApi(IpcRouter &, ApiContext &);
 void registerExtensionsApi(IpcRouter &, ApiContext &);
+void registerAppearanceApi(IpcRouter &, ApiContext &);
 void registerMusicApi(IpcRouter &, ApiContext &);
 bool positiveId(const QJsonValue &value);
 Result<int> requiredId(const QJsonObject &params, const QString &key);

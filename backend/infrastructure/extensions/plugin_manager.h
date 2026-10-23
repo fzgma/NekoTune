@@ -1,6 +1,7 @@
 #pragma once
 #include "domain/extensions/extension_backend.h"
 #include "infrastructure/extensions/capabilities/capability_host.h"
+#include "infrastructure/extensions/capabilities/contribution_registry.h"
 #include "infrastructure/extensions/capabilities/music_sources.h"
 #include "infrastructure/extensions/capabilities/lyrics_sources.h"
 #include "infrastructure/extensions/capabilities/shuffle_strategies.h"
@@ -25,6 +26,7 @@
 namespace nekotune {
 class IPcmSource;
 class HostContext;
+class AppearanceService;
 struct ExtensionRuntime;
 }
 
@@ -36,13 +38,14 @@ namespace nekotune {
 /// Everything runs on the owning (backend) thread. Lifecycle mutations are serialized and always
 /// start from the event loop, never from inside an extension callback. Libraries stay mapped until
 /// the process exits: re-enabling reuses the loaded instance and development reloads load a copy.
-class PluginManager final : public IExtensionBackend, private CapabilityHost {
+class PluginManager final : public IExtensionBackend, private CapabilityHost, private ContributionCatalog {
     Q_OBJECT
   public:
     explicit PluginManager(QObject *parent = nullptr);
     ~PluginManager() override;
     void start(HostCall hostCall);
     void setPcmService(IPcmSource *service) { m_pcm = service; }
+    void setAppearance(AppearanceService *appearance) { m_appearance = appearance; }
     void shutdown();
     void request(const QString &method, const QVariantMap &params, Completion done) override;
     QVariantMap snapshot() const override;
@@ -50,6 +53,7 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     IMusicSourceCatalog &musicSources() { return m_music; }
     ILyricsSourceCatalog &lyricsSources() { return m_lyrics; }
     ShuffleStrategies &shuffle() { return m_shuffle; }
+    ContributionCatalog &contributions() { return *this; }
 
   private:
     friend class HostContext;
@@ -76,6 +80,10 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     QString dataDirectory(const QString &id) const override { return m_packages.dataDirectory(id); }
     void recordLog(const QString &id, const QString &level, const QString &message) override;
     QVariantMap publicEntry(const QString &id) const;
+    QVariantList contributionItems(const QString &extensionId, const QString &kind) const;
+    QVariantList contributions(const QString &kind) const override;
+    QVariantList themes() const override;
+    Result<ThemePackage> themePackage(const QString &contributionId) const override;
     void load();
     Result<void> save();
     void enqueue(Mutation mutation, Completion done);
@@ -95,9 +103,6 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     void reload(const QString &id, Done done);
     void install(const QVariantMap &params, Completion done);
     void uninstall(const QVariantMap &params, Completion done);
-    Result<QVariantMap> select(const QVariantMap &params);
-    Result<void> validateSelection(const QString &slot, const QString &contribution) const;
-    Result<QVariantMap> exportTheme(const QVariantMap &params);
     void cleanUnusedPackages();
     Result<QVariantMap> setConfig(const QString &id, const QVariant &config);
     QVariantMap readConfig(const QString &id) const;
@@ -126,11 +131,12 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     /// Extensions whose native QML modules were loaded this session, and every directory holding
     /// code that is mapped into this process; neither may be replaced or deleted before restart.
     QSet<QString> m_nativeActivated, m_retainedDirectories;
-    QVariantMap m_selections;
+    QVariantMap m_legacySelections;
     QStringList m_developmentDirectories;
     QVariantMap m_registryExtra;
     std::deque<std::pair<Mutation, Completion>> m_mutations;
     IPcmSource *m_pcm = nullptr;
+    AppearanceService *m_appearance = nullptr;
     HostCall m_hostCall;
     quint64 m_generation = 0;
     bool m_mutating = false;

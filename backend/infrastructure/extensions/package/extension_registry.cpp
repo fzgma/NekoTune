@@ -54,7 +54,6 @@ Result<void> ExtensionRegistry::save(const RegistryState &state) const {
     }
     auto stored = state.extra;
     stored.insert("entries", entries);
-    stored.insert("selections", state.selections);
     stored.insert("developmentDirectories", state.developmentDirectories);
     return writeJsonFile(m_path, stored);
 }

@@ -87,6 +87,11 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
       m_maintenance(m_database, m_music, m_imports, m_songs, m_playlistRepository, m_library, m_player,
                     m_router) {
     m_extensionBackend.setPcmService(&m_pcm);
+    m_extensionBackend.setAppearance(&m_appearance);
+    m_api.appearance = &m_appearance;
+    connect(&m_appearance, &IAppearanceBackend::eventReady, this, [this](const QVariantMap &event) {
+        m_server.broadcastEvent(QJsonObject::fromVariantMap(event));
+    });
     m_api.shuffleStrategies = &m_shuffleStrategies;
     connect(&m_shuffleStrategies, &ShuffleStrategyService::strategyChanged, this, [this] {
         m_player.setShuffleStrategy(m_shuffleStrategies.createStrategy());
@@ -301,6 +306,7 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     registerLyricsApi(m_router, m_api);
     registerAiApi(m_router, m_api);
     registerExtensionsApi(m_router, m_api);
+    registerAppearanceApi(m_router, m_api);
     registerMusicApi(m_router, m_api);
     auto libraryChanged = [this] {
         m_resourceIds.clear();

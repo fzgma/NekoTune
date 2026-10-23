@@ -25,6 +25,7 @@ struct ExtensionRecord {
 };
 struct RegistryState {
     QList<ExtensionRecord> entries;
+    /// Read only for migrating to appearance.json.
     QVariantMap selections;
     QStringList developmentDirectories;
     /// Unknown keys (bundledSeen, ...) are kept so switching runtimes does not lose state.

@@ -96,15 +96,16 @@ class WallpaperTest final : public QObject {
     void publishTheme(const QString &directory, const QString &source = "Wallpaper.qml",
                       int generation = 1, const QString &state = "running",
                       const QString &id = "test.wallpaper/default") {
+        send({{"event", "appearance.changed"}, {"selections", QJsonObject{{"theme", id}}}});
         send({{"event", "extensions.changed"},
-              {"selections", QJsonObject{{"theme", id}}},
               {"extensions", QJsonArray{QJsonObject{
                   {"id", "test.wallpaper"}, {"type", "theme"}, {"state", state},
-                  {"directory", directory}, {"generation", generation}, {"trusted", true},
-                  {"themes", QJsonArray{QJsonObject{
-                      {"id", id}, {"schemaVersion", 1},
-                      {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
-                      {"wallpaper", source}}}}}}}});
+                  {"directory", directory}, {"generation", generation}, {"trusted", true}}}},
+              {"themes", QJsonArray{QJsonObject{
+                  {"id", id}, {"extensionId", "test.wallpaper"}, {"generation", generation},
+                  {"available", state == "running"}, {"schemaVersion", 1},
+                  {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
+                  {"wallpaper", source}}}}});
     }
     ExtensionView *themeView() {
         return window() ? window()->findChild<ExtensionView *>("wallpaperThemeSlotTheme") : nullptr;
@@ -125,9 +126,11 @@ class WallpaperTest final : public QObject {
                 while (m_peer && m_peer->canReadLine()) {
                     auto message = QJsonDocument::fromJson(m_peer->readLine()).object();
                     m_requests.append(message.value("method").toString());
-                    QJsonObject data = message.value("method") == "extensions.list"
-                        ? QJsonObject{{"catalogueReady", true}, {"startupComplete", true}}
-                        : QJsonObject{};
+                    QJsonObject data;
+                    if (message.value("method") == "extensions.list")
+                        data = {{"runtime", QJsonObject{{"catalogueReady", true}, {"startupComplete", true}}}};
+                    else if (message.value("method") == "appearance.get")
+                        data = {{"selections", QJsonObject{}}};
                     if (message.value("method") == "extensions.call" && message.value("params").toObject().value("id") == "nekotune.spectrum")
                         data = {{"token", "visual-test"}, {"available", true}};
                     m_peer->write(QJsonDocument(QJsonObject{{"id", message.value("id")},
@@ -616,15 +619,16 @@ class WallpaperTest final : public QObject {
         QVERIFY(!example.isEmpty());
         // The wallpaper package is available, but a built-in palette is the current theme.
         auto publish = [&](const QString &state, bool trusted) {
+            send({{"event", "appearance.changed"}, {"selections", QJsonObject{{"theme", "builtin/ocean"}}}});
             send({{"event", "extensions.changed"},
-                  {"selections", QJsonObject{{"theme", "builtin/ocean"}}},
                   {"extensions", QJsonArray{QJsonObject{
                       {"id", "test.wallpaper"}, {"type", "theme"}, {"state", state},
-                      {"directory", QFileInfo(example).absolutePath()}, {"generation", 1}, {"trusted", trusted},
-                      {"themes", QJsonArray{QJsonObject{
-                          {"id", "test.wallpaper/default"}, {"schemaVersion", 1},
-                          {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
-                          {"wallpaper", "Wallpaper.qml"}}}}}}}});
+                      {"directory", QFileInfo(example).absolutePath()}, {"generation", 1}, {"trusted", trusted}}}},
+                  {"themes", QJsonArray{QJsonObject{
+                      {"id", "test.wallpaper/default"}, {"extensionId", "test.wallpaper"},
+                      {"generation", 1}, {"available", state == "running"}, {"schemaVersion", 1},
+                      {"variants", QJsonObject{{"light", QJsonObject{}}, {"dark", QJsonObject{}}}},
+                      {"wallpaper", "Wallpaper.qml"}}}}});
         };
         publish("running", true);
         QTRY_VERIFY(m_controllers->theme->wallpaperSlots().contains("test.wallpaper/default"));
@@ -790,14 +794,14 @@ class WallpaperTest final : public QObject {
         QTRY_VERIFY(animation->property("running").toBool());
         qputenv("NEKOTUNE_SAFE_MODE", "0");
         // A theme cannot reduce motion on the user's behalf.
+        send({{"event", "appearance.changed"}, {"selections", QJsonObject{{"theme", "test/still"}}}});
         send({
             {"event", "extensions.changed"},
-            {"selections", QJsonObject{{"theme", "test/still"}}},
             {"extensions", QJsonArray{QJsonObject{
-                {"id", "test"}, {"state", "running"},
-                {"themes", QJsonArray{QJsonObject{
-                    {"id", "test/still"},
-                    {"tokens", QJsonObject{{"reducedMotion", true}}}}}}}}}});
+                {"id", "test"}, {"state", "running"}}}},
+            {"themes", QJsonArray{QJsonObject{
+                {"id", "test/still"}, {"extensionId", "test"}, {"available", true},
+                {"tokens", QJsonObject{{"reducedMotion", true}}}}}}});
         QTRY_COMPARE(m_controllers->theme->activeId(), QString("test/still"));
         QVERIFY(!m_controllers->theme->tokens().value("reducedMotion").toBool());
         QVERIFY(animation->property("running").toBool());
