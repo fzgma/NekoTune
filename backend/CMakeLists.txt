@@ -35,6 +35,7 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/extensions/extension_lyrics_provider.cpp
     infrastructure/extensions/extension_manifest.cpp
     infrastructure/extensions/extension_secrets.cpp
+    infrastructure/extensions/host_gateway.cpp
     infrastructure/extensions/plugin_manager.cpp
     infrastructure/extensions/semver.cpp
     infrastructure/extensions/theme_package.cpp

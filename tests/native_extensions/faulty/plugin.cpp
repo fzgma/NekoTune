@@ -87,6 +87,9 @@ class FaultyExtension final : public QObject, public sdk::IExtensionPlugin {
             context.publish("ping", {{"value", 1}});
             reply(sdk::Params{});
         }));
+        m_registrations.push_back(context.registerService("host", [&context](const sdk::Params &params, sdk::Reply reply) {
+            context.hostCall(params.value("method").toString(), params.value("params").toMap(), reply);
+        }));
         m_registrations.push_back(context.on("test.host", [this, &context](const sdk::Params &event) {
             m_events.append(event.value("value").toString());
             context.publish("seen", {{"values", m_events}});

@@ -4,6 +4,7 @@
 #include "infrastructure/extensions/audio_proxy.h"
 #include "infrastructure/extensions/crash_guard.h"
 #include "infrastructure/extensions/extension_secrets.h"
+#include "infrastructure/extensions/host_gateway.h"
 #include "infrastructure/extensions/semver.h"
 #include "infrastructure/extensions/theme_package.h"
 #include "infrastructure/extensions/zip_archive.h"
@@ -173,11 +174,11 @@ class PluginManager::Context final : public sdk::IExtensionContext, public sdk::
     void hostCall(const QString &method, const sdk::Params &params, sdk::Reply done) override {
         auto reply = forward(std::move(done));
         onRun([manager = m_manager, method, params, reply](const std::shared_ptr<Run> &run) {
-            // A starting extension holds the mutation queue; queuing behind it would deadlock.
-            static const QRegularExpression lifecycle(R"(^extensions\.(install|enable|disable|reload|uninstall)$)");
-            if (run->state != "running" && lifecycle.match(method).hasMatch())
-                reply(failure("Defer lifecycle mutations until activation has completed"));
-            else if (!manager->m_hostCall)
+            // Also keeps lifecycle mutations out: a starting extension holds the mutation queue.
+            if (const auto allowed = checkHostCall(method); !allowed) {
+                manager->recordLog(run->id, "error", allowed.error().message);
+                reply(allowed.error());
+            } else if (!manager->m_hostCall)
                 reply(failure("Host unavailable"));
             else
                 manager->m_hostCall(method, params, reply);

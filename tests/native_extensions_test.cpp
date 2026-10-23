@@ -20,6 +20,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #ifdef Q_OS_UNIX
@@ -396,6 +397,70 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(!call(*manager, "extensions.resolve_audio", {{"source", "test.faulty/tones"}, {"id", "outside"}}));
         const auto music = entry(*manager, "test.faulty").value("registrations").toMap().value("music").toList();
         QCOMPARE(music.value(0).toMap().value("name").toString(), "Tones");
+    }
+
+    void hostCallGateway_data() {
+        QTest::addColumn<QString>("method");
+        QTest::addColumn<bool>("allowed");
+        QTest::newRow("player") << "player.pause" << true;
+        QTest::newRow("music") << "music.enqueue" << true;
+        QTest::newRow("service") << "extensions.call" << true;
+        QTest::newRow("list") << "extensions.list" << true;
+        QTest::newRow("library-read") << "library.list" << true;
+        QTest::newRow("ai-chat") << "ai.chat" << true;
+        QTest::newRow("enable") << "extensions.enable" << false;
+        QTest::newRow("install") << "extensions.install" << false;
+        QTest::newRow("disable") << "extensions.disable" << false;
+        QTest::newRow("reload") << "extensions.reload" << false;
+        QTest::newRow("uninstall") << "extensions.uninstall" << false;
+        QTest::newRow("config") << "extensions.set_config" << false;
+        QTest::newRow("select") << "extensions.select" << false;
+        QTest::newRow("export-theme") << "extensions.export_theme" << false;
+        QTest::newRow("internal") << "extensions.provider_call" << false;
+        QTest::newRow("unknown-extension") << "extensions.future_method" << false;
+        QTest::newRow("appearance") << "appearance.select" << false;
+        QTest::newRow("appearance-read") << "appearance.get" << false;
+        QTest::newRow("unknown-appearance") << "appearance.future_method" << false;
+        QTest::newRow("restore") << "library.restore" << false;
+        QTest::newRow("restore-preview") << "library.restore_preview" << false;
+        QTest::newRow("remove-rollback") << "library.remove_rollback" << false;
+        QTest::newRow("delete") << "library.delete" << false;
+        QTest::newRow("migrate") << "library.migrate" << false;
+        QTest::newRow("history") << "history.clear" << false;
+        QTest::newRow("ai") << "ai.config.get" << false;
+        QTest::newRow("ai-set") << "ai.config.set" << false;
+        QTest::newRow("ai-clear-key") << "ai.config.clear_key" << false;
+    }
+    void hostCallGateway() {
+        QFETCH(QString, method);
+        QFETCH(bool, allowed);
+        auto manager = startManager();
+        install(*manager, faultyDirectory);
+        enable(*manager, "test.faulty");
+        m_hostCalls.clear();
+        const QVariantMap params{{"id", "test.faulty"}, {"trusted", true}};
+        const auto result = call(*manager, "extensions.call",
+                                 {{"id", "test.faulty"},
+                                  {"service", "host"},
+                                  {"params", QVariantMap{{"method", method}, {"params", params}}}});
+        QCOMPARE(bool(result), allowed);
+        const bool forwarded = std::any_of(m_hostCalls.cbegin(), m_hostCalls.cend(),
+                                           [&](const auto &host) { return host.first == method; });
+        QCOMPARE(forwarded, allowed);
+        QCOMPARE(m_hostCalls.size(), allowed ? 1 : 0);
+        if (allowed) {
+            QCOMPARE(m_hostCalls.first().second, params);
+            return;
+        }
+        const auto message = "Host method is not available to extensions: " + method;
+        QCOMPARE(result.error().code, ErrorCode::InvalidArgument);
+        QCOMPARE(result.error().message, message);
+        const auto logs = call(*manager, "extensions.logs", {{"id", "test.faulty"}});
+        QVERIFY(logs);
+        bool logged = false;
+        for (const auto &log : logs.value().value("logs").toList())
+            logged = logged || (log.toMap().value("level") == "error" && log.toMap().value("message") == message);
+        QVERIFY(logged);
     }
 
     void dependenciesBlockAndRecover() {

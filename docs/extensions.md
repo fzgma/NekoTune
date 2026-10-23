@@ -191,7 +191,7 @@ class MyExtension final : public QObject, public sdk::IExtensionPlugin {
 
 | 能力 | 接口 |
 | --- | --- |
-| 调用宿主业务 | `hostCall(method, params, done)`，方法见 [API](API.md) |
+| 调用宿主业务 | `hostCall(method, params, done)`，方法见 [API](API.md)。扩展管理与授信（`extensions.*`，`extensions.call`、`extensions.list` 除外）、外观选择、曲库删除／迁移／恢复、清空历史与 AI 配置方法会被拒绝 |
 | 事件 | `on(name, handler)`（`*` 订阅全部），`publish(name, data)`；自定义事件以 `extension.<id>.<name>` 广播 |
 | 命令、快捷键 | `registerCommand(id, handler, {title, shortcut})` |
 | 扩展间调用 | `registerService`、`callService(extensionId, service, params, done)` |
