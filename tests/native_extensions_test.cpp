@@ -466,6 +466,24 @@ class NativeExtensionsTest final : public QObject {
         QVERIFY(entry(*manager, "test.faulty").value("error").toString().contains("service exploded"));
     }
 
+    void serviceBusDeliversInOrder() {
+        auto manager = startManager();
+        install(*manager, faultyDirectory);
+        enable(*manager, "test.faulty");
+        QSignalSpy events(manager.get(), &IExtensionBackend::eventReady);
+        for (const auto &value : QStringList{"a", "b", "c"})
+            manager->publish({{"event", "test.host"}, {"value", value}});
+        QTRY_VERIFY([&] {
+            for (const auto &arguments : events) {
+                const auto event = arguments.value(0).toMap();
+                if (event.value("event") == "extension.test.faulty.seen" &&
+                    event.value("data").toMap().value("values").toStringList() == QStringList{"a", "b", "c"})
+                    return true;
+            }
+            return false;
+        }());
+    }
+
     void servicesStorageEventsAndSources() {
         auto manager = startManager();
         install(*manager, faultyDirectory);

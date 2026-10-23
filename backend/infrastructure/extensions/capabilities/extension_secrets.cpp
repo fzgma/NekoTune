@@ -1,8 +1,11 @@
-#include "infrastructure/extensions/extension_secrets.h"
+#include "infrastructure/extensions/capabilities/extension_secrets.h"
 #include "app_paths.h"
 #include "infrastructure/credentials/credential_store.h"
 #include "infrastructure/kugou/kugou_account_session.h"
+#include "infrastructure/extensions/package/json_file.h"
+#include "infrastructure/extensions/package/package_store.h"
 #include <QCryptographicHash>
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -86,5 +89,74 @@ void extensionSecret(const QVariantMap &params, IExtensionBackend::Completion do
             done(QVariantMap{});
     } else
         done(failure("Unknown credential operation"));
+}
+void SecretVault::load(const QString &extensionId) {
+    const auto keys =
+        readJsonFile(QDir(m_packages.dataDirectory(extensionId)).filePath("secret-keys.json"), QVariantList{})
+            .toStringList();
+    m_keys.insert(extensionId, QSet<QString>(keys.cbegin(), keys.cend()));
+}
+void SecretVault::get(const QString &extensionId, const QString &key, Completion done) {
+    request(extensionId, "get", key, {}, std::move(done));
+}
+void SecretVault::set(const QString &extensionId, const QString &key, const QString &value, Completion done) {
+    request(extensionId, "set", key, value, std::move(done));
+}
+void SecretVault::remove(const QString &extensionId, const QString &key, Completion done) {
+    request(extensionId, "delete", key, {}, std::move(done));
+}
+void SecretVault::request(const QString &extensionId, const QString &operation, const QString &key,
+                          const QString &value, Completion done) {
+    if (key.isEmpty() || key.size() > 200) {
+        done(failure("Invalid secret key"));
+        return;
+    }
+    const auto keysFile = QDir(m_packages.dataDirectory(extensionId)).filePath("secret-keys.json");
+    if (operation != "delete") {
+        auto &keys = m_keys[extensionId];
+        keys.insert(key);
+        writeJsonFile(keysFile, QStringList(keys.cbegin(), keys.cend()));
+    }
+    if (!value.isEmpty())
+        m_values.insert(value);
+    extensionSecret({{"extensionId", extensionId}, {"key", key}, {"operation", operation}, {"value", value}},
+                    [this, extensionId, keysFile, operation, key, done](Result<QVariantMap> result) {
+                        if (operation == "delete") {
+                            auto &keys = m_keys[extensionId];
+                            keys.remove(key);
+                            writeJsonFile(keysFile, QStringList(keys.cbegin(), keys.cend()));
+                        }
+                        if (result && !result.value().value("value").toString().isEmpty())
+                            m_values.insert(result.value().value("value").toString());
+                        done(std::move(result));
+                    });
+}
+void SecretVault::clear(const QString &extensionId, std::function<void(Result<void>)> done) {
+    const auto keys =
+        readJsonFile(QDir(m_packages.dataDirectory(extensionId)).filePath("secret-keys.json"), QVariantList{})
+            .toStringList();
+    clearKeys(extensionId, keys, std::move(done));
+}
+void SecretVault::clearKeys(const QString &extensionId, QStringList keys,
+                            std::function<void(Result<void>)> done) {
+    if (keys.isEmpty()) {
+        m_keys.remove(extensionId);
+        done({});
+        return;
+    }
+    const auto key = keys.takeFirst();
+    extensionSecret({{"extensionId", extensionId}, {"key", key}, {"operation", "delete"}},
+                    [this, extensionId, keys, done](Result<QVariantMap> result) {
+                        if (!result)
+                            done(result.error());
+                        else
+                            clearKeys(extensionId, keys, done);
+                    });
+}
+QString SecretVault::redact(QString message) const {
+    for (const auto &secret : m_values)
+        if (!secret.isEmpty())
+            message.replace(secret, "[redacted]");
+    return message;
 }
 } // namespace nekotune

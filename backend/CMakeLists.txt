@@ -37,7 +37,10 @@ add_library(nekotune_infrastructure STATIC
     infrastructure/extensions/capabilities/music_sources.cpp
     infrastructure/extensions/capabilities/lyrics_sources.cpp
     infrastructure/extensions/capabilities/shuffle_strategies.cpp
-    infrastructure/extensions/extension_secrets.cpp
+    infrastructure/extensions/capabilities/service_bus.cpp
+    infrastructure/extensions/capabilities/extension_storage.cpp
+    infrastructure/extensions/capabilities/extension_secrets.cpp
+    infrastructure/extensions/capabilities/extension_log.cpp
     infrastructure/extensions/host_gateway.cpp
     infrastructure/extensions/package/extension_manifest.cpp
     infrastructure/extensions/package/extension_registry.cpp

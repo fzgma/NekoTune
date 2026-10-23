@@ -4,6 +4,10 @@
 #include "infrastructure/extensions/capabilities/music_sources.h"
 #include "infrastructure/extensions/capabilities/lyrics_sources.h"
 #include "infrastructure/extensions/capabilities/shuffle_strategies.h"
+#include "infrastructure/extensions/capabilities/service_bus.h"
+#include "infrastructure/extensions/capabilities/extension_storage.h"
+#include "infrastructure/extensions/capabilities/extension_secrets.h"
+#include "infrastructure/extensions/capabilities/extension_log.h"
 #include "infrastructure/extensions/package/extension_manifest.h"
 #include "infrastructure/extensions/package/extension_registry.h"
 #include "infrastructure/extensions/package/package_store.h"
@@ -25,8 +29,8 @@ struct ExtensionRuntime;
 
 namespace nekotune {
 /// In-process native extension runtime. Loads trusted apiVersion 2 libraries with QPluginLoader
-/// and serves the same request/snapshot protocol the Node supervisor provided, so
-/// ExtensionService, MusicService and the frontend stay unchanged.
+/// and serves the public extension request/snapshot protocol. Business services use the
+/// capability catalogues directly.
 ///
 /// Everything runs on the owning (backend) thread. Lifecycle mutations are serialized and always
 /// start from the event loop, never from inside an extension callback. Libraries stay mapped until
@@ -70,7 +74,6 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     }
     QString dataDirectory(const QString &id) const override { return m_packages.dataDirectory(id); }
     void recordLog(const QString &id, const QString &level, const QString &message) override;
-    QString redact(QString message) const;
     QVariantMap publicEntry(const QString &id) const;
     void load();
     Result<void> save();
@@ -97,11 +100,8 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     void cleanUnusedPackages();
     Result<QVariantMap> setConfig(const QString &id, const QVariant &config);
     QVariantMap readConfig(const QString &id) const;
-    void invoke(const QString &id, QString service, const QVariantMap &params, Completion done);
     Result<void> addRegistration(const std::shared_ptr<Run> &run, const QString &kind, const QString &id,
                                  QVariantMap descriptor);
-    void deliver(const std::shared_ptr<Run> &run, const QVariantMap &event);
-    void broadcast(const QVariantMap &event);
     void reloading(const QStringList &ids, bool active);
     void watchDevelopment(const std::shared_ptr<Run> &run);
 
@@ -113,12 +113,14 @@ class PluginManager final : public IExtensionBackend, private CapabilityHost {
     MusicSources m_music{*this};
     LyricsSources m_lyrics{*this};
     ShuffleStrategies m_shuffle{*this};
+    ServiceBus m_bus{*this};
+    ExtensionStorage m_storage{m_packages};
+    SecretVault m_vault{m_packages};
+    ExtensionLog m_log{m_vault};
     ExtensionRegistry m_registry;
     QHash<QString, Entry> m_entries;
     QStringList m_order;
     QHash<QString, std::shared_ptr<Run>> m_runs;
-    QHash<QString, QList<QVariantMap>> m_logs;
-    QSet<QString> m_secrets;
     /// Extensions whose native QML modules were loaded this session, and every directory holding
     /// code that is mapped into this process; neither may be replaced or deleted before restart.
     QSet<QString> m_nativeActivated, m_retainedDirectories;

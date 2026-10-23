@@ -4,12 +4,9 @@
 #include "infrastructure/extensions/runtime/host_context.h"
 #include "infrastructure/extensions/runtime/dev_watcher.h"
 #include "infrastructure/extensions/runtime/registration_scope.h"
-#include "infrastructure/extensions/extension_secrets.h"
-#include "infrastructure/extensions/package/json_file.h"
 #include "infrastructure/extensions/package/theme_package.h"
 #include "themes/theme_resolution.h"
 #include <nekotune/sdk/extension_plugin.h>
-#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -85,24 +82,13 @@ void PluginManager::notifyChanged() {
     });
 }
 void PluginManager::reportError(const QString &message) {
-    emit eventReady({{"event", "extensions.error"}, {"message", redact(message)}});
+    emit eventReady({{"event", "extensions.error"}, {"message", m_vault.redact(message)}});
 }
 void PluginManager::reloading(const QStringList &ids, bool active) {
     emit eventReady({{"event", "extensions.reloading"}, {"ids", ids}, {"active", active}});
 }
-QString PluginManager::redact(QString message) const {
-    for (const auto &secret : m_secrets)
-        if (!secret.isEmpty())
-            message.replace(secret, "[redacted]");
-    return message;
-}
 void PluginManager::recordLog(const QString &id, const QString &level, const QString &message) {
-    auto &list = m_logs[id];
-    list.append({{"time", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
-                 {"level", level},
-                 {"message", redact(message).left(16'384)}});
-    if (list.size() > 500)
-        list.remove(0, list.size() - 500);
+    m_log.record(id, level, message);
 }
 
 QVariantMap PluginManager::publicEntry(const QString &id) const {
@@ -150,7 +136,7 @@ QVariantMap PluginManager::publicEntry(const QString &id) const {
             {"trusted", entry.trusted},
             {"enabled", entry.enabled},
             {"state", toString(run ? run->state : entry.state)},
-            {"error", redact(entry.error)},
+            {"error", m_vault.redact(entry.error)},
             {"generation", run ? run->generation : 0},
             {"nativeModules", entry.manifest.nativeModules},
             {"type", entry.manifest.type},
@@ -204,7 +190,7 @@ Result<void> PluginManager::save() {
             !m_developmentDirectories.contains(entry.previous->directory))
             m_developmentDirectories.append(entry.previous->directory);
         auto record = static_cast<const ExtensionRecord &>(entry);
-        record.failure = entry.state == ExtensionState::Failed ? redact(entry.error) : QString();
+        record.failure = entry.state == ExtensionState::Failed ? m_vault.redact(entry.error) : QString();
         state.entries.append(std::move(record));
     }
     state.extra = m_registryExtra;
@@ -512,9 +498,8 @@ void PluginManager::startOne(const QString &id, Done done) {
         return;
     }
     const auto data = m_packages.dataDirectory(id);
-    run->storage = readJsonFile(QDir(data).filePath("storage.json"), QVariantMap{}).toMap();
-    for (const auto &key : readJsonFile(QDir(data).filePath("secret-keys.json"), QVariantList{}).toStringList())
-        run->secretKeys.insert(key);
+    m_storage.load(id);
+    m_vault.load(id);
     run->plugin = plugin.value();
     run->context = std::make_unique<HostContext>(this, run, entry.manifest.id, entry.manifest.version,
                                                 entry.directory, data, readConfig(id));
@@ -576,17 +561,16 @@ void PluginManager::stop(const QString &id) {
         guarded(id, [&] { run->plugin->deactivate(); });
     // Every remaining function object or provider pointer belongs to the plugin; drop them before
     // anything else can reach them.
-    run->services.clear();
-    run->commands.clear();
+    m_bus.removeExtension(id);
     m_music.removeExtension(id);
     m_lyrics.removeExtension(id);
     m_shuffle.removeExtension(id);
-    run->subscriptions.clear();
     run->registrations.clear();
     run->calls.failAll("Extension stopped");
     for (const auto &waiter : std::exchange(run->waiters, {}))
         waiter(failure("Extension stopped"));
     m_runs.remove(id);
+    m_storage.unload(id);
     if (m_entries.contains(id))
         m_entries[id].state = ExtensionState::Disabled;
     notifyChanged();
@@ -819,34 +803,27 @@ void PluginManager::uninstall(const QVariantMap &params, Completion done) {
     }
     disable(id);
     const bool clearData = params.value("clearData").toBool();
-    const auto keys = clearData ? readJsonFile(QDir(m_packages.dataDirectory(id)).filePath("secret-keys.json"), QVariantList{}).toStringList()
-                                : QStringList{};
-    sequence(
-        keys,
-        [id](const QString &key, Done next) {
-            extensionSecret({{"extensionId", id}, {"key", key}, {"operation", "delete"}},
-                            [next](Result<QVariantMap> result) {
-                                next(result ? Result<void>() : Result<void>(result.error()));
-                            });
-        },
-        true,
-        [this, id, clearData, done](Result<void> cleared) {
-            if (!cleared) {
-                done(cleared.error());
-                return;
-            }
-            m_entries.remove(id);
-            m_order.removeAll(id);
-            m_logs.remove(id);
-            if (auto saved = save(); !saved) {
-                done(saved.error());
-                return;
-            }
-            if (clearData)
-                QDir(m_packages.dataDirectory(id)).removeRecursively();
-            notifyChanged();
-            done(snapshot());
-        });
+    const auto finish = [this, id, clearData, done](Result<void> cleared) {
+        if (!cleared) {
+            done(cleared.error());
+            return;
+        }
+        m_entries.remove(id);
+        m_order.removeAll(id);
+        m_log.remove(id);
+        if (auto saved = save(); !saved) {
+            done(saved.error());
+            return;
+        }
+        if (clearData)
+            QDir(m_packages.dataDirectory(id)).removeRecursively();
+        notifyChanged();
+        done(snapshot());
+    };
+    if (clearData)
+        m_vault.clear(id, finish);
+    else
+        finish({});
 }
 Result<void> PluginManager::validateSelection(const QString &slot, const QString &contribution) const {
     if (contribution.isEmpty())
@@ -940,60 +917,25 @@ Result<QVariantMap> PluginManager::exportTheme(const QVariantMap &params) {
     return themes::exportTheme(theme, entry.directory, entry.manifest.raw, destination);
 }
 QVariantMap PluginManager::readConfig(const QString &id) const {
-    return readJsonFile(QDir(m_packages.dataDirectory(id)).filePath("config.json"), m_entries.value(id).manifest.defaultConfig)
-        .toMap();
+    return m_storage.readConfig(id, m_entries.value(id).manifest.defaultConfig);
 }
 Result<QVariantMap> PluginManager::setConfig(const QString &id, const QVariant &value) {
     if (!m_entries.contains(id) || value.typeId() != QMetaType::QVariantMap ||
         QJsonDocument::fromVariant(value).toJson(QJsonDocument::Compact).size() > 256 * 1024)
         return failure("Invalid extension configuration");
     const auto config = value.toMap();
-    if (auto saved = writeJsonFile(QDir(m_packages.dataDirectory(id)).filePath("config.json"), config); !saved)
+    if (auto saved = m_storage.writeConfig(id, config); !saved)
         return saved.error();
     if (const auto run = m_runs.value(id); run && run->context) {
         run->context->setConfig(config);
-        deliver(run, {{"event", "extension.config_changed"}, {"config", config}});
+        m_bus.deliver(id, {{"event", "extension.config_changed"}, {"config", config}});
     }
     return QVariantMap{{"config", config}};
 }
 
-void PluginManager::invoke(const QString &id, QString service, const QVariantMap &params, Completion done) {
-    const auto run = m_runs.value(id);
-    if (!run || run->state != ExtensionState::Running) {
-        done(failure("Extension is not running"));
-        return;
-    }
-    if (service.isEmpty()) {
-        done(failure("Service name required"));
-        return;
-    }
-    if (service.startsWith(id + "/"))
-        service = service.mid(id.size() + 1);
-    const auto handler = run->services.value(service, run->commands.value(service));
-    if (!handler) {
-        done(failure("Unknown service/command: " + service));
-        return;
-    }
-    const auto reply = run->calls.add(this, std::move(done), timeouts::call);
-    guarded(id, [&] { handler(params, reply); });
-}
-void PluginManager::deliver(const std::shared_ptr<Run> &run, const QVariantMap &event) {
-    const auto name = event.value("event").toString();
-    // Copy first: handlers may subscribe or dispose while running.
-    const auto subscriptions = run->subscriptions;
-    for (const auto &[key, subscription] : subscriptions)
-        if (subscription.first == "*" || subscription.first == name)
-            if (run->subscriptions.contains(key))
-                guarded(run->id, [&] { subscription.second(event); });
-}
-void PluginManager::broadcast(const QVariantMap &event) {
-    for (const auto &run : QList(m_runs.cbegin(), m_runs.cend()))
-        if (run->state == ExtensionState::Running)
-            deliver(run, event);
-}
 void PluginManager::publish(const QVariantMap &event) {
     if (!m_closing)
-        broadcast(event);
+        m_bus.broadcast(event);
 }
 void PluginManager::watchDevelopment(const std::shared_ptr<Run> &run) {
     run->watcher = std::make_unique<DevWatcher>(run->directory);
@@ -1021,19 +963,14 @@ void PluginManager::request(const QString &method, const QVariantMap &params, Co
     if (method == "extensions.list")
         done(snapshot());
     else if (method == "extensions.logs") {
-        QVariantList logs;
-        for (auto item : m_logs.value(id)) {
-            item.insert("message", redact(item.value("message").toString()));
-            logs.append(item);
-        }
-        done(QVariantMap{{"logs", logs}});
+        done(QVariantMap{{"logs", m_log.entries(id)}});
     } else if (method == "extensions.get_config") {
         if (!m_entries.contains(id))
             done(failure("Extension not found"));
         else
             done(QVariantMap{{"config", readConfig(id)}});
     } else if (method == "extensions.call")
-        invoke(id, params.value("service").toString(), params.value("params").toMap(), std::move(done));
+        m_bus.invoke(id, params.value("service").toString(), params.value("params").toMap(), std::move(done));
     else
         enqueue(
             [this, method, params, id](Completion finish) {

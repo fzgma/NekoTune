@@ -1,11 +1,7 @@
 #include "infrastructure/extensions/runtime/host_context.h"
 #include "domain/audio/pcm_source.h"
-#include "infrastructure/extensions/extension_secrets.h"
 #include "infrastructure/extensions/host_gateway.h"
-#include "infrastructure/extensions/package/json_file.h"
 #include "infrastructure/extensions/plugin_manager.h"
-#include <QDir>
-#include <QJsonDocument>
 #include <QPointer>
 #include <QThread>
 
@@ -82,23 +78,25 @@ void HostContext::hostCall(const QString &method, const sdk::Params &params, sdk
 
 sdk::RegistrationPtr HostContext::registerService(const QString &id, sdk::Handler handler) {
     return add(
-        "services", id, {}, [id, handler](Run &run) { run.services.insert(id, handler); },
-        [id](Run &run) { run.services.remove(id); });
+        "services", id, {},
+        [id, handler, manager = m_manager](Run &run) { manager->m_bus.addService(run.id, id, handler); },
+        [id, manager = m_manager](Run &run) { manager->m_bus.removeService(run.id, id); });
 }
 
 void HostContext::callService(const QString &extension, const QString &service, const sdk::Params &params,
                               sdk::Reply done) {
     auto reply = forward(std::move(done));
     onRun([manager = m_manager, extension, service, params, reply](const std::shared_ptr<Run> &) {
-        manager->invoke(extension, service, params, reply);
+        manager->m_bus.invoke(extension, service, params, reply);
     });
 }
 
 sdk::RegistrationPtr HostContext::registerCommand(const QString &id, sdk::Handler handler,
                                                   const sdk::Params &descriptor) {
     return add(
-        "commands", id, descriptor, [id, handler](Run &run) { run.commands.insert(id, handler); },
-        [id](Run &run) { run.commands.remove(id); });
+        "commands", id, descriptor,
+        [id, handler, manager = m_manager](Run &run) { manager->m_bus.addCommand(run.id, id, handler); },
+        [id, manager = m_manager](Run &run) { manager->m_bus.removeCommand(run.id, id); });
 }
 
 sdk::RegistrationPtr HostContext::registerUi(const QString &kind, const QString &id, const sdk::Params &descriptor) {
@@ -136,11 +134,11 @@ sdk::RegistrationPtr HostContext::registerLyricsProvider(const QString &id, sdk:
 sdk::RegistrationPtr HostContext::on(const QString &event, sdk::EventHandler handler) {
     // Reserve the key now so the handle can remove a subscription installed later.
     const auto key = m_nextSubscription.fetch_add(1);
-    onRun([key, event, handler](const std::shared_ptr<Run> &run) {
+    onRun([key, event, handler, manager = m_manager](const std::shared_ptr<Run> &run) {
         if (run->state != ExtensionState::Stopping)
-            run->subscriptions.emplace(key, std::pair{event, handler});
+            manager->m_bus.subscribe(run->id, key, event, handler);
     });
-    return std::make_unique<HostRegistration>(m_manager, m_run, [key](Run &run) { run.subscriptions.erase(key); });
+    return std::make_unique<HostRegistration>(m_manager, m_run, [key, manager = m_manager](Run &run) { manager->m_bus.unsubscribe(run.id, key); });
 }
 
 sdk::PcmCapabilities HostContext::pcmCapabilities() const {
@@ -206,38 +204,25 @@ void HostContext::publish(const QString &event, const sdk::Params &data) {
         }
         const QVariantMap message{
             {"event", QStringLiteral("extension.%1.%2").arg(run->id, event)}, {"extensionId", run->id}, {"data", data}};
-        manager->broadcast(message);
+        manager->m_bus.broadcast(message);
         emit manager->eventReady(message);
     });
 }
 
 void HostContext::storageGet(const QString &key, std::function<void(Result<QVariant>)> done) {
     auto reply = forward(std::move(done));
-    onRun([key, reply](const std::shared_ptr<Run> &run) {
+    onRun([manager = m_manager, key, reply](const std::shared_ptr<Run> &run) {
         if (key.size() > 256)
             reply(failure("Invalid storage key"));
         else
-            reply(run->storage.value(key));
+            reply(manager->m_storage.get(run->id, key));
     });
 }
 
 void HostContext::storageSet(const QString &key, const QVariant &value, std::function<void(Result<void>)> done) {
     auto reply = forward(std::move(done));
-    onRun([dataDirectory = m_dataDirectory, key, value, reply](const std::shared_ptr<Run> &run) {
-        if (key.size() > 256) {
-            reply(failure("Invalid storage key"));
-            return;
-        }
-        auto next = run->storage;
-        next.insert(key, value);
-        if (QJsonDocument::fromVariant(next).toJson(QJsonDocument::Compact).size() > 8 * 1024 * 1024) {
-            reply(failure("SDK storage limit exceeded; use dataDirectory for larger files"));
-            return;
-        }
-        const auto saved = writeJsonFile(QDir(dataDirectory).filePath("storage.json"), next);
-        if (saved)
-            run->storage = next;
-        reply(saved);
+    onRun([manager = m_manager, key, value, reply](const std::shared_ptr<Run> &run) {
+        reply(manager->m_storage.set(run->id, key, value));
     });
 }
 
@@ -325,29 +310,14 @@ sdk::RegistrationPtr HostContext::add(const QString &kind, const QString &id, co
 
 void HostContext::secret(const QString &operation, const QString &key, const QString &value,
                          IExtensionBackend::Completion done) {
-    onRun([manager = m_manager, dataDirectory = m_dataDirectory, operation, key, value,
-           done](const std::shared_ptr<Run> &run) {
-        if (key.isEmpty() || key.size() > 200) {
-            done(failure("Invalid secret key"));
-            return;
-        }
-        const auto keysFile = QDir(dataDirectory).filePath("secret-keys.json");
-        if (operation != "delete") {
-            run->secretKeys.insert(key);
-            writeJsonFile(keysFile, QStringList(run->secretKeys.cbegin(), run->secretKeys.cend()));
-        }
-        if (!value.isEmpty())
-            manager->m_secrets.insert(value);
-        extensionSecret({{"extensionId", run->id}, {"key", key}, {"operation", operation}, {"value", value}},
-                        [manager, run, keysFile, operation, key, done](Result<QVariantMap> result) {
-                            if (operation == "delete") {
-                                run->secretKeys.remove(key);
-                                writeJsonFile(keysFile, QStringList(run->secretKeys.cbegin(), run->secretKeys.cend()));
-                            }
-                            if (result && !result.value().value("value").toString().isEmpty())
-                                manager->m_secrets.insert(result.value().value("value").toString());
-                            done(std::move(result));
-                        });
+    onRun([manager = m_manager, operation, key, value, done](const std::shared_ptr<Run> &run) {
+        const auto reply = [run, done](Result<QVariantMap> result) { done(std::move(result)); };
+        if (operation == "get")
+            manager->m_vault.get(run->id, key, reply);
+        else if (operation == "set")
+            manager->m_vault.set(run->id, key, value, reply);
+        else
+            manager->m_vault.remove(run->id, key, reply);
     });
 }
 
