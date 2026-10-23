@@ -229,3 +229,7 @@ add_executable(nekotune_audio_pipeline_network_test audio_pipeline_network_test.
 target_link_libraries(nekotune_audio_pipeline_network_test PRIVATE nekotune_core Qt6::Test Qt6::Network)
 target_compile_definitions(nekotune_audio_pipeline_network_test PRIVATE NEKOTUNE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 nekotune_add_qt_test(NAME nekotune_audio_pipeline_network_test COMMAND nekotune_audio_pipeline_network_test)
+
+add_executable(nekotune_pcm_capture_test pcm_capture_test.cpp)
+target_link_libraries(nekotune_pcm_capture_test PRIVATE nekotune_core Qt6::Test Threads::Threads)
+nekotune_add_qt_test(NAME nekotune_pcm_capture_test COMMAND nekotune_pcm_capture_test)

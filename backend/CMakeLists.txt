@@ -79,6 +79,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 add_library(nekotune_application STATIC
+    application/audio/pcm_service.cpp
     application/playback/listening_history_service.cpp
     application/extensions/extension_service.h
     application/extensions/music_service.cpp

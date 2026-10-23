@@ -348,3 +348,10 @@ NEKOTUNE_TEST_SCREENSHOT=/tmp/nekotune.png \
 - 曲库列表全量传输和前端筛选适合当前规模；`RecordModel` 查找与重排最坏为平方复杂度，大曲库可考虑分页与索引。
 - 依赖检查通过源码包含的正则匹配发现违规，是架构约束的辅助检查，不能覆盖所有间接依赖。
 - Socket 是本地接口。Web、终端或其他客户端可复用协议，但这些客户端和远程访问桥接目前需要另行实现。
+
+
+### PCM 分析扩展边界
+
+`IPlaybackBackend` 提供可选的有界 PCM 观察，`PcmService` 管理后端线程订阅，
+`PluginManager` 通过 `IPcmSource` 领域端口暴露 SDK 2.2 可选接口。输出线程仅复制并按消费时钟投递，
+FFT、频段、消费者租约属于独立扩展，主题只显示扩展事件；原始 PCM 不进入 Socket／QML。

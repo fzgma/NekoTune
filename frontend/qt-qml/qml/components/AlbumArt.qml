@@ -13,6 +13,7 @@ Item {
     property bool hasSong: false
     property string coverUrl: ""
     property string playbackState: "stopped"
+    property real minimumDimension: 140
     property real maxDimension: 280
     property real decodeScale: Screen.devicePixelRatio
     property color lavenderColor: Theme.accentPrimary
@@ -43,7 +44,7 @@ Item {
     Rectangle {
         id: coverCard
         anchors.centerIn: parent
-        width: Math.max(140, root.artSize)
+        width: Math.max(root.minimumDimension, root.artSize)
         height: width
         radius: Theme.radiusLg
         color: Theme.bgSurface

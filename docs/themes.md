@@ -130,7 +130,7 @@ Rectangle {
 | `preferences` | 公共壁纸设置，包括 `lyrics`、`nextLine`、`updateHz`、`intensity` 等 |
 | `screen` | 当前屏幕信息，包括 `devicePixelRatio` |
 
-使用 `api.theme` 读取配色与 `reducedMotion`，公共封面背景、模糊和透明叠加由宿主在主题内容后方绘制。自定义布局须遵守歌词开关、插值频率和装饰强度：动画仅在 `playing`／`updating` 允许时运行，并尊重减少动态效果；歌词建议复用 `qrc:/qml/components/CompactLyrics.qml`，传入上下文数据，以保留切歌身份校验和逐字同步。可运行示例见 `examples/extensions/theme-qml/Wallpaper.qml`。没有真实音频频谱接口。
+使用 `api.theme` 读取配色与 `reducedMotion`，公共封面背景、模糊和透明叠加由宿主在主题内容后方绘制。自定义布局须遵守歌词开关、插值频率和装饰强度：动画仅在 `playing`／`updating` 允许时运行，并尊重减少动态效果；歌词建议复用 `qrc:/qml/components/CompactLyrics.qml`，传入上下文数据，以保留切歌身份校验和逐字同步。可运行示例见 `examples/extensions/theme-qml/Wallpaper.qml`。真实频谱可由独立功能扩展通过服务调用和事件推送提供，原始 PCM 不进入主题；宿主 SDK 2.2 仅向原生扩展提供 PCM。
 
 未提供入口、主题不可用或入口编译／创建／根类型失败时显示经典卡片，设置页提示原因和每屏加载错误；保存的 `wallpaper.style: "theme"` 保持不变，主题恢复可用后自动接回。指定来源不可用时提示并回退经典卡片，`wallpaper.themeWallpaper` 保留，来源恢复后自动接回。安全模式不加载自定义壁纸且禁止自动恢复；手动开启壁纸时回退经典卡片。加载仍沿用 QML 主题信任要求，独立引擎不是安全沙箱；运行中的任意脚本异常或死循环不保证能自动回退。
 

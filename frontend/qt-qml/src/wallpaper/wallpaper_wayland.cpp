@@ -19,6 +19,7 @@ bool hasLayerIntegration(QWindow *window) {
 
 class WaylandWallpaper final : public WallpaperPlatform {
   public:
+    bool supportsTransparency() const override { return true; }
     QString unavailableReason() const override {
         if (!QGuiApplication::platformName().startsWith("wayland"))
             return QStringLiteral("wallpaper_qpa_unavailable");

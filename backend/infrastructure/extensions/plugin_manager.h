@@ -13,6 +13,7 @@ class QPluginLoader;
 
 namespace nekotune {
 class AudioProxy;
+class IPcmSource;
 }
 
 namespace nekotune {
@@ -29,6 +30,7 @@ class PluginManager final : public IExtensionBackend {
     explicit PluginManager(QObject *parent = nullptr);
     ~PluginManager() override;
     void start(HostCall hostCall);
+    void setPcmService(IPcmSource *service) { m_pcm = service; }
     void shutdown();
     void request(const QString &method, const QVariantMap &params, Completion done) override;
     QVariantMap snapshot() const override;
@@ -118,6 +120,7 @@ class PluginManager final : public IExtensionBackend {
     QStringList m_developmentDirectories;
     QVariantMap m_extraState;
     std::deque<std::pair<Mutation, Completion>> m_mutations;
+    IPcmSource *m_pcm = nullptr;
     HostCall m_hostCall;
     std::unique_ptr<AudioProxy> m_audio;
     quint64 m_generation = 0;

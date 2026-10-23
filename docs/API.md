@@ -37,7 +37,7 @@ NekoTune 使用基于换行分隔的 JSON 协议，通过 Unix domain socket 进
 
 ## 事件
 
-音乐壁纸复用现有 `server.connected` 快照与 `player.* / lyrics.changed` 补丁，不新增 IPC 方法、事件或订阅，也不轮询播放状态。前端本地 `WallpaperManager.audioAnalysis` 返回 `spectrumAvailable: false`、`source: "none"`、空 `bands` 及不可用原因；这不是后端频谱 API。当前两个音频后端均未提供分析数据，见[壁纸说明](wallpaper.md)。
+内置音乐壁纸复用 `server.connected` 与 `player.* / lyrics.changed`，不轮询播放状态。前端本地 `WallpaperManager.audioAnalysis` 描述内置布局能力，仍返回 `spectrumAvailable: false`；它不是后端频谱 API。SDK 2.2 可向原生扩展提供默认 FFmpeg 后端的 PCM；主题通过既有 `extensions.call` 和命名空间扩展事件接收分析后的频段，Qt 兼容后端不支持 PCM。见[壁纸说明](wallpaper.md)。
 
 后端会向所有已连接客户端广播事件：
 
@@ -629,3 +629,10 @@ QML 的 `Theme` 兼容原变量名，并提供 `isDark` 与用户设置的 `redu
 | `library.remove_rollback` | `id`，`confirmed:true` | `{task}`；清理指定恢复前副本，不影响当前曲库，开始删除后不可取消 |
 
 恢复准备期间拒绝普通写入，仅保留任务查询、取消及状态接口；切换时 IPC 会短暂断开。重连后按原任务 ID 查询最终结果，播放保持停止。备份和导出允许播放；缺失或纯在线歌曲的导出会跳过并报告，恢复不触发联网补下载。详见 [音乐库存储与恢复](library-storage.md)。
+
+
+### 扩展 PCM 能力
+
+SDK 2.2 的 `IPcmExtensionContext` 是原生可选接口，不新增原始音频 IPC 方法。
+主题仍通过 `extensions.call` 调用功能扩展服务，并过滤 `extension.<id>.<event>` 事件。
+宿主只提供 PCM，具体频谱服务与帧协议由频谱扩展声明。

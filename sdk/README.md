@@ -37,3 +37,15 @@ cmake --install build-sdk --prefix /path/to/nekotune-sdk --component NekoTuneSDK
 
 此方式描述的是本地构建环境。面向正式宿主的 SDK 由宿主 CI 从相同构建环境导出，
 并随对应 Release 发布；社区应固定宿主 SDK 版本，避免直接依赖持续变化的主分支。
+
+## SDK 2.2：播放器 PCM 观察接口
+
+包含 `<nekotune/sdk/pcm_provider.h>`，通过 `sdk::pcmContext(context)` 检测可选能力。
+`pcmCapabilities()` 返回当前后端与可用原因；`subscribePcm(handler)` 返回 `RegistrationPtr`。
+这两个方法及回调运行在后端线程。回调必须尽快返回，FFT 等计算放到扩展自己的工作线程。
+
+PCM 为带采样率、双声道、流代次、输出帧位置和媒体时间的交错 float 数据；来源是默认 FFmpeg
+后端混音、音效和播放器音量后的分析副本，只在设备消费之后投递。输出线程不执行扩展代码。
+队列有上限，可以丢帧；按流代次和帧位置重置分析。取消订阅立即阻止后续回调，停用时自动清理。
+Qt 兼容后端不支持此能力；旧宿主的 `pcmContext()` 返回空指针。插件 IID、原有 context 虚表与
+`apiVersion:2` 不变。线程与格式细节以头文件注释为准。

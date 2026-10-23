@@ -73,6 +73,7 @@ class WallpaperManager final : public QObject {
     Q_PROPERTY(int runningCount READ runningCount NOTIFY changed)
     Q_PROPERTY(bool dataReady READ dataReady NOTIFY dataReadyChanged)
     Q_PROPERTY(bool linuxOverlay READ linuxOverlay CONSTANT)
+    Q_PROPERTY(bool transparentOverlaySupported READ transparentOverlaySupported CONSTANT)
     Q_PROPERTY(QVariantMap audioAnalysis READ audioAnalysis CONSTANT)
   public:
     explicit WallpaperManager(QObject *parent = nullptr, std::unique_ptr<WallpaperPlatform> platform = {});
@@ -87,6 +88,7 @@ class WallpaperManager final : public QObject {
     int runningCount() const;
     bool dataReady() const { return m_dataReady; }
     bool linuxOverlay() const;
+    bool transparentOverlaySupported() const;
     QVariantMap audioAnalysis() const;
     Q_INVOKABLE bool setOption(const QString &key, const QVariant &value);
     Q_INVOKABLE void retry();

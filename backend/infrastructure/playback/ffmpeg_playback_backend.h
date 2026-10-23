@@ -5,6 +5,7 @@
 #include <memory>
 namespace nekotune {
 class PcmOutputWorker;
+class PcmCaptureBuffer;
 class FFmpegPlaybackBackend final : public IPlaybackBackend {
     Q_OBJECT
   public:
@@ -12,6 +13,9 @@ class FFmpegPlaybackBackend final : public IPlaybackBackend {
     ~FFmpegPlaybackBackend() override;
     QString backendName() const override { return QStringLiteral("ffmpeg"); }
     BackendCapabilities backendCapabilities() const override { return {true, true, true, true}; }
+    bool supportsPcmCapture() const override { return true; }
+    void setPcmCaptureEnabled(bool enabled) override;
+    QVector<sdk::PcmBlock> takePcmBlocks() override;
     void setSource(const QUrl &url) override;
     QUrl source() const override { return m_source; }
     void play() override;
@@ -49,6 +53,7 @@ class FFmpegPlaybackBackend final : public IPlaybackBackend {
   private:
     friend class PcmOutputWorker;
     void dispatch(std::function<void(PcmOutputWorker &)> operation);
+    std::shared_ptr<PcmCaptureBuffer> m_capture;
     AudioOutputDevices m_outputs;
     QThread m_thread;
     PcmOutputWorker *m_worker = nullptr;

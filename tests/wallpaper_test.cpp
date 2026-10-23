@@ -12,6 +12,7 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlContext>
+#include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -24,6 +25,7 @@ class TestPlatform final : public WallpaperPlatform {
   public:
     int prepares = 0;
     bool recover = false;
+    bool supportsTransparency() const override { return true; }
     QString unavailable, failure;
     QString unavailableReason() const override { return unavailable; }
     QString prepare(QWindow *window, QScreen *screen) override {
@@ -123,9 +125,11 @@ class WallpaperTest final : public QObject {
                 while (m_peer && m_peer->canReadLine()) {
                     auto message = QJsonDocument::fromJson(m_peer->readLine()).object();
                     m_requests.append(message.value("method").toString());
-                    const QJsonObject data = message.value("method") == "extensions.list"
+                    QJsonObject data = message.value("method") == "extensions.list"
                         ? QJsonObject{{"catalogueReady", true}, {"startupComplete", true}}
                         : QJsonObject{};
+                    if (message.value("method") == "extensions.call" && message.value("params").toObject().value("id") == "nekotune.spectrum")
+                        data = {{"token", "visual-test"}, {"available", true}};
                     m_peer->write(QJsonDocument(QJsonObject{{"id", message.value("id")},
                                                             {"status", "ok"},
                                                             {"data", data}})
@@ -825,6 +829,74 @@ class WallpaperTest final : public QObject {
             QVERIFY(window()->grabWindow().save(directory + "/layout-" + QTest::currentDataTag() + ".png"));
         }
     }
+    void externalWallpaper_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("reference") << QSize(1296, 734);
+        QTest::newRow("desktop") << QSize(1920, 1080);
+        QTest::newRow("portrait") << QSize(720, 1280);
+        QTest::newRow("small") << QSize(800, 600);
+    }
+    void externalWallpaper() {
+        const auto directory = qEnvironmentVariable("NEKOTUNE_TEST_WALLPAPER_THEME_DIR");
+        if (directory.isEmpty()) QSKIP("Set NEKOTUNE_TEST_WALLPAPER_THEME_DIR to test an external theme");
+        QFETCH(QSize, size);
+        qunsetenv("NEKOTUNE_SAFE_MODE");
+        const bool native = qEnvironmentVariable("NEKOTUNE_TEST_NATIVE_WALLPAPER") == "1";
+        setup(native);
+        auto data = snapshot();
+        auto payload = data["data"].toObject();
+        payload["position"] = 45000; payload["duration"] = 163000;
+        auto song = payload["song"].toObject();
+        song["title"] = "T氏の話を信じるな"; song["artist"] = "ピノキオピー feat. 初音ミク・重音テト";
+        song["cover_url"] = "qrc:/artwork/default-cover.png"; payload["song"] = song;
+        payload["lyrics"] = QJsonObject{{"track_id", "track-a"}, {"state", "ready"},
+            {"document", QJsonObject{{"lines", QJsonArray{
+                QJsonObject{{"time_ms", 0}, {"text", "信じなきゃ狂っちゃうわ"}},
+                QJsonObject{{"time_ms", 40000}, {"text", "T氏の話を信じるな"}},
+                QJsonObject{{"time_ms", 80000}, {"text", "信じなきゃ狂っちゃうわ"}}}}}}};
+        data["data"] = payload; send(data);
+        QTRY_VERIFY(m_manager->dataReady());
+        QTRY_VERIFY(m_controllers->extensions->appearanceReady());
+        publishTheme(directory);
+        QVERIFY(m_manager->setOption("style", "theme"));
+        QVERIFY(m_manager->setOption("enabled", true));
+        QTRY_COMPARE_WITH_TIMEOUT(m_manager->runningCount(), 1, 10000);
+        if (!native) window()->resize(size);
+        QTRY_COMPARE_WITH_TIMEOUT(window()->property("themeStatus").toString(), QString("active"), 5000);
+        QTest::qWait(100);
+        QVERIFY(themeView());
+        QPointer<QQuickItem> item = themeView()->item(); QVERIFY(item);
+        for (const auto &name : {"lumenMusicCard", "lumenLyrics", "lumenTrackInfo", "lumenSpectrum"}) {
+            auto *child = item->findChild<QQuickItem *>(name); QVERIFY2(child, name);
+            const auto bounds = child->mapRectToScene(child->boundingRect());
+            QVERIFY2(bounds.width() > 0 && bounds.height() > 0 && bounds.left() >= 0 && bounds.top() >= 0
+                && bounds.right() <= window()->width() && bounds.bottom() <= window()->height(), name);
+        }
+        auto *spectrum = item->findChild<QObject *>("lumenSpectrumController"); QVERIFY(spectrum);
+        QTRY_VERIFY(!spectrum->property("token").toString().isEmpty());
+        QJsonArray bands;
+        for (int i = 0; i < 48; ++i) bands.append(std::max(0., (.5 + .5 * std::sin(i * 1.8)) * std::sin(i * 3.14159 / 48)));
+        send({{"event", "extension.nekotune.spectrum.frame"}, {"data", QJsonObject{
+            {"version", 1}, {"generation", 1}, {"sequence", 1}, {"bands", bands}}}});
+        QTRY_VERIFY(spectrum->property("lastFrame").toDouble() > 0);
+        QTest::qWait(100);
+        const auto picture = window()->grabWindow(); QVERIFY(!picture.isNull());
+        QCOMPARE(picture.pixelColor(0, 0).alpha(), 0);
+        const auto output = qEnvironmentVariable("NEKOTUNE_TEST_SCREENSHOT_DIR");
+        if (!output.isEmpty()) {
+            QVERIFY(QDir().mkpath(output)); QVERIFY(picture.save(output + "/lumen-alpha-" + QTest::currentDataTag() + ".png"));
+            // A test-only image behind the transparent surface. Never packaged in the theme.
+            QQmlComponent backdrop(m_engine.get());
+            backdrop.setData(R"(import QtQuick; Image { anchors.fill: parent; z: -100; source: "qrc:/artwork/default-cover.png"; fillMode: Image.PreserveAspectCrop })", QUrl());
+            auto *background = qobject_cast<QQuickItem *>(backdrop.create()); QVERIFY(background);
+            background->setParentItem(window()->contentItem());
+            QTest::qWait(80);
+            QVERIFY(window()->grabWindow().save(output + "/lumen-" + QTest::currentDataTag() + ".png"));
+            delete background;
+        }
+        if (native) QTest::qWait(std::clamp(qEnvironmentVariableIntValue("NEKOTUNE_TEST_PREVIEW_MS"), 0, 10000));
+        QVERIFY(m_manager->setOption("enabled", false)); QVERIFY(!window());
+    }
     void nativeWallpaper() {
         if (qEnvironmentVariable("NEKOTUNE_TEST_NATIVE_WALLPAPER") != "1")
             QSKIP("Explicit native desktop acceptance only");
@@ -844,7 +916,7 @@ class WallpaperTest final : public QObject {
         QTest::qWait(1000);
         const auto picture = window()->grabWindow();
         QVERIFY(!picture.isNull());
-        QCOMPARE(picture.pixelColor(0, 0).alpha(), m_manager->linuxOverlay() ? 0 : 255);
+        QCOMPARE(picture.pixelColor(0, 0).alpha(), m_manager->transparentOverlaySupported() ? 0 : 255);
         if (!directory.isEmpty()) {
             QVERIFY(QDir().mkpath(directory));
             QVERIFY(picture.save(directory + "/native-wallpaper.png"));

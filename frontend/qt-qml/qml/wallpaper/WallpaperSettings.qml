@@ -172,20 +172,15 @@ Rectangle {
                 required property var modelData
                 Layout.fillWidth: true
                 text: root.t(modelData.label)
-                visible: modelData.key !== "transparent" || (root.manager && root.manager.linuxOverlay)
+                visible: modelData.key !== "transparent" || (root.manager && root.manager.transparentOverlaySupported)
                 enabled: modelData.key !== "blur" || Boolean(root.preferences.coverBackground)
                 checked: Boolean(root.preferences[modelData.key])
                 onClicked: root.manager.setOption(modelData.key, checked)
             }
         }
-        OptionCheck {
-            objectName: "wallpaperSpectrum"
-            text: root.t("wallpaper_spectrum")
-            checked: false; enabled: false
-        }
         Label {
             Layout.fillWidth: true
-            text: root.manager ? root.t(root.manager.audioAnalysis.reason) : ""
+            text: root.t("wallpaper_spectrum_extension")
             color: Theme.textMuted; wrapMode: Text.Wrap; font.pixelSize: Theme.fontCaption
         }
         Label { Layout.fillWidth: true; text: root.t("wallpaper_update_hz"); color: Theme.textSecondary; wrapMode: Text.Wrap }

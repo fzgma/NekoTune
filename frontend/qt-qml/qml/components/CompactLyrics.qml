@@ -18,6 +18,11 @@ Item {
     property bool reducedMotion: Theme.reducedMotion
     property bool animateLineChanges: true
     property int updateInterval: 16
+    property real textLineHeight: Theme.lineHeightLyrics
+    property real lineSpacing: 12
+    property color activeColor: Theme.accentPrimary
+    property color inactiveColor: outlined ? "#f5f1fa" : Theme.textSecondary
+    property color previewColor: outlined ? "#f5f1fa" : Theme.textSecondary
     property int pixelSize: 18
     property int previewPixelSize: 24
     readonly property string songIdentity: String(song.resource_key || song.song_hash || "")
@@ -92,13 +97,14 @@ Item {
         required property real position
         property bool outgoing: false
         readonly property string fullText: line.fullText
-        implicitHeight: line.implicitHeight + (nextLabel.visible ? nextLabel.implicitHeight + 12 : 0)
+        implicitHeight: line.implicitHeight + (nextLabel.visible ? nextLabel.implicitHeight + root.lineSpacing : 0)
         LyricLine {
             id: line
             objectName: frame.outgoing ? "compactOutgoingLine" : "compactCurrentLine"
             lineIndex: frame.outgoing ? -1 : 0
             width: parent.width
             height: root.wrap ? implicitHeight : root.showNext ? parent.height * 0.57 : parent.height
+            textLineHeight: root.textLineHeight
             lyric: frame.lyric
             position: frame.position
             wrap: root.wrap
@@ -106,14 +112,14 @@ Item {
             pixelSize: root.pixelSize
             outlined: root.outlined
             reducedMotion: root.reducedMotion || frame.outgoing
-            activeColor: frame.activeIndex >= 0 ? Theme.accentPrimary : root.outlined ? "#f5f1fa" : Theme.textSecondary
-            inactiveColor: root.outlined ? "#f5f1fa" : Theme.textSecondary
+            activeColor: frame.activeIndex >= 0 ? root.activeColor : root.inactiveColor
+            inactiveColor: root.inactiveColor
         }
         Text {
             id: nextLabel
             objectName: frame.outgoing ? "compactOutgoingNextLine" : "compactNextLine"
             anchors.top: line.bottom
-            anchors.topMargin: root.wrap ? 12 : 0
+            anchors.topMargin: root.wrap ? root.lineSpacing : 0
             width: parent.width
             height: root.wrap ? implicitHeight : root.showNext ? parent.height * 0.43 : 0
             visible: root.showNext && frame.nextText.length > 0
@@ -125,7 +131,7 @@ Item {
             elide: root.wrap ? Text.ElideNone : Text.ElideRight
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            color: root.outlined ? "#f5f1fa" : Theme.textSecondary
+            color: root.previewColor
             style: root.outlined ? Text.Outline : Text.Normal
             styleColor: "#18121f"
         }

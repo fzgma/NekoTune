@@ -11,6 +11,7 @@ Item {
     property int distanceToActive: 0
     property int lineIndex: 0
     property bool wrap: true
+    property real textLineHeight: Theme.lineHeightLyrics
     property int pixelSize: Theme.fontLyricsCompact
     property int horizontalPadding: 16
     property color activeColor: Theme.textPrimary
@@ -41,7 +42,7 @@ Item {
         font.pixelSize: line.pixelSize
         font.weight: line.active ? Font.DemiBold : Font.Normal
         lineHeightMode: Text.ProportionalHeight
-        lineHeight: Theme.lineHeightLyrics
+        lineHeight: line.textLineHeight
         style: line.outlined ? Text.Outline : Text.Normal
         styleColor: "#18121f"
         color: line.active ? line.activeColor : line.hovered ? Theme.textPrimary

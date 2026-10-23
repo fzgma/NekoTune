@@ -551,6 +551,7 @@
   "wallpaper_next_line": "显示下一行歌词",
   "wallpaper_transparent": "Linux 透明叠加，保留已有桌面背景",
   "wallpaper_spectrum": "真实音频频谱",
+  "wallpaper_spectrum_extension": "真实频谱由功能扩展提供，需要支持频谱的壁纸主题及已启用的频谱扩展。",
   "wallpaper_spectrum_unavailable": "尚无音频分析与频谱传输接口；FFmpeg 和 Qt 后端均不提供频谱。装饰动画只跟随播放状态。",
   "wallpaper_update_hz": "歌词插值更新频率（非窗口 FPS 上限）",
   "wallpaper_intensity": "装饰动画强度",

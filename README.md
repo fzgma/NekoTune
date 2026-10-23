@@ -248,3 +248,8 @@ git diff --check
 Linux 密钥库相关集成测试通过 `dbus-run-session` 和 `gnome-keyring-daemon` 创建临时密钥环；缺少这些运行工具时，相应测试标记为跳过。Windows 可用 `-DNEKOTUNE_TEST_NATIVE_KEYCHAIN=ON` 启用原生密钥库测试。自动化测试、实际界面检查和真实账号验收应分别记录。
 
 开发前阅读[架构与扩展开发](docs/architecture.md)、[API 文档](docs/API.md)和[项目协作约定](AGENT.md)。社区插件从[扩展开发指南](docs/extensions.md#社区开发从模板到发布)开始；其他专题、产品规划和实施记录统一见[文档导航](docs/README.md)。
+
+
+动态音乐壁纸支持独立主题与频谱扩展。SDK 2.2 向原生扩展提供默认 FFmpeg 后端的只读 PCM，
+主题通过服务与事件呈现真实频谱；Qt 兼容后端不支持频谱。透明叠加按平台能力开放，Windows 原生效果待真机验收。
+详见 [壁纸说明](docs/wallpaper.md) 与 [扩展开发](docs/extensions.md#播放器-pcm-与频谱扩展sdk-22)。

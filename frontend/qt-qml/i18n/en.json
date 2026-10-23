@@ -551,6 +551,7 @@
   "wallpaper_next_line": "Show next lyric line",
   "wallpaper_transparent": "Linux transparent overlay over the existing wallpaper",
   "wallpaper_spectrum": "Real audio spectrum",
+  "wallpaper_spectrum_extension": "Live spectrum is provided by extensions. Use a compatible wallpaper theme and enable its spectrum extension.",
   "wallpaper_spectrum_unavailable": "Audio analysis and spectrum transport are not implemented for either FFmpeg or Qt. Decoration follows playback state only.",
   "wallpaper_update_hz": "Lyric interpolation update rate (not a window FPS limit)",
   "wallpaper_intensity": "Decoration intensity",

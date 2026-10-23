@@ -378,3 +378,21 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ctest --test-dir build --out
 `nekotune_native_extensions_test` 覆盖信任、加载失败、依赖、存储、事件、ZIP 安装、主题导出、音频代理、下载和崩溃记录。`cmake --install build --prefix <directory>` 安装应用、后台和扩展 SDK；Qt 等系统依赖仍由部署环境提供。
 
 主题包使用 `type: "theme"`，仅贡献 `themes`，没有扩展库。主题包无需信任即可启用；含 QML/JavaScript 的界面和壁纸在用户确认信任前不会加载，配色可单独使用。`extensions.list` 的条目包含 `type`、`hasCode` 和 `themes`（包含未启用主题的展示描述），`contributes` 仍只包含运行中的贡献。切勿根据 `themes` 列表直接加载 QML。前端只加载 `ThemeController` 生成的、已信任含代码主题的入口。
+
+## 播放器 PCM 与频谱扩展（SDK 2.2）
+
+宿主提供独立可选 `IPcmExtensionContext`，见
+[`pcm_provider.h`](../sdk/include/nekotune/sdk/pcm_provider.h)。原生扩展检测
+`sdk::pcmContext(context)` 后可查询 `pcmCapabilities()`，并订阅只读的已消费 PCM。
+订阅释放遵循 `RegistrationPtr`，原有 context ABI 和插件 IID 不变。
+默认 FFmpeg 后端支持；Qt 兼容后端明确返回不可用。无订阅不进行 PCM 分析复制。
+
+扩展收到的是应用音量处理后的交错立体声 float、采样率、流代次、输出帧位置和媒体时间；
+分析队列溢出会丢帧，扩展必须识别缺口并重置。回调在后端线程，耗时分析移至扩展工作线程。
+音频输出线程不执行扩展回调，不发送 JSON，也不等待扩展处理。
+
+主题可通过 `ExtensionApi.call("extensions.call", {id, service, params})` 调用独立扩展，
+后台通过 `publish` 推送 `extension.<id>.<event>`。当前前端 `api.event` 转发 IPC 事件，
+主题必须过滤完整事件名；`invoke` 仍只针对当前主题所属扩展。Qt 列表可能是 QML sequence，
+不能仅用 `Array.isArray` 判断事件中的数组。纯主题包不声明扩展依赖，缺少服务时应保留基本展示。
+独立频谱扩展协议由该扩展维护，宿主 PCM 能力不等于已安装频谱扩展。

@@ -13,6 +13,9 @@ class PlaybackBackendSupervisor final : public IPlaybackBackend {
     ~PlaybackBackendSupervisor() override;
     QString backendName() const override { return m_active->backendName(); }
     BackendCapabilities backendCapabilities() const override { return m_active->backendCapabilities(); }
+    bool supportsPcmCapture() const override { return m_active->supportsPcmCapture(); }
+    void setPcmCaptureEnabled(bool value) override { m_captureEnabled = value; m_active->setPcmCaptureEnabled(value); }
+    QVector<sdk::PcmBlock> takePcmBlocks() override { return m_active->takePcmBlocks(); }
     void setSource(const QUrl &) override;
     QUrl source() const override { return m_active->source(); }
     void play() override {
@@ -101,6 +104,7 @@ class PlaybackBackendSupervisor final : public IPlaybackBackend {
     EqualizerSettings m_equalizer;
     ReplayGainSettings m_replayGain;
     double m_volume = .8, m_rate = 1;
+    bool m_captureEnabled = false;
     bool m_playIntent = false, m_triedFallback = false;
     quint64 m_generation = 0;
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include "application/extensions/extension_service.h"
+#include "application/audio/pcm_service.h"
 #include "application/extensions/music_service.h"
 #include "application/library/download_service.h"
 #include "application/playback/listening_history_service.h"
@@ -57,6 +58,7 @@ class BackendSession final : public QObject {
     TagService m_tags;
     QueueService m_queue;
     std::unique_ptr<IPlaybackBackend> m_audio;
+    PcmService m_pcm;
     ShuffleStrategyService m_shuffleStrategies;
     PlayerEngine m_player;
     ListeningHistoryService m_history;

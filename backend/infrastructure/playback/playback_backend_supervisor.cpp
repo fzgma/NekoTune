@@ -65,6 +65,7 @@ void PlaybackBackendSupervisor::install(std::unique_ptr<IPlaybackBackend> backen
             emit sourceReleased(source);
     });
     connect(active, &IPlaybackBackend::decoderFailure, this, &PlaybackBackendSupervisor::decoderFailed);
+    active->setPcmCaptureEnabled(m_captureEnabled);
     active->setVolume(m_volume);
     active->setPlaybackRate(m_rate);
     active->setEqualizer(m_equalizer);

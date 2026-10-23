@@ -1,3 +1,4 @@
+#include "domain/audio/pcm_source.h"
 #include "infrastructure/extensions/plugin_manager.h"
 #include "app_paths.h"
 #include "infrastructure/extensions/audio_proxy.h"
@@ -109,6 +110,7 @@ struct PluginManager::Run {
         bool failed = false;
     };
     QMap<QString, Shuffle> shuffle;
+    std::map<quint64, sdk::RegistrationPtr> pcm;
     std::map<quint64, std::pair<QString, sdk::EventHandler>> subscriptions;
     quint64 nextSubscription = 1;
     QVariantMap storage;
@@ -142,7 +144,7 @@ class PluginManager::Handle final : public sdk::Registration {
     std::atomic<bool> m_disposed{false};
 };
 
-class PluginManager::Context final : public sdk::IExtensionContext, public sdk::IShuffleExtensionContext {
+class PluginManager::Context final : public sdk::IExtensionContext, public sdk::IShuffleExtensionContext, public sdk::IPcmExtensionContext {
   public:
     Context(PluginManager *manager, std::weak_ptr<Run> run, const Entry &entry, QString dataDirectory,
             QVariantMap config)
@@ -226,6 +228,39 @@ class PluginManager::Context final : public sdk::IExtensionContext, public sdk::
                 run->subscriptions.emplace(key, std::pair{event, handler});
         });
         return std::make_unique<Handle>(m_manager, m_run, [key](Run &run) { run.subscriptions.erase(key); });
+    }
+    sdk::PcmCapabilities pcmCapabilities() const override {
+        if (QThread::currentThread() != m_manager->thread() || !m_manager->m_pcm)
+            return {false, {}, QStringLiteral("pcm_unavailable")};
+        return m_manager->m_pcm->capabilities();
+    }
+    sdk::RegistrationPtr subscribePcm(sdk::PcmHandler handler) override {
+        if (QThread::currentThread() != m_manager->thread() || !handler || !m_manager->m_pcm)
+            return nullptr;
+        const auto run = m_run.lock();
+        if (!run || run->state == "stopping") return nullptr;
+        const auto key = m_nextSubscription.fetch_add(1);
+        auto active = std::make_shared<std::atomic<bool>>(true);
+        auto registration = m_manager->m_pcm->subscribe(
+            [manager = QPointer<PluginManager>(m_manager), weak = m_run, id = m_id, active, handler](const sdk::PcmBlock &block) {
+                const auto alive = weak.lock();
+                if (manager && alive && alive->state == "running" && active->load())
+                    manager->guarded(id, [&] { handler(block); });
+            });
+        if (!registration) return nullptr;
+        run->pcm.emplace(key, std::move(registration));
+        class Subscription final : public sdk::Registration {
+          public:
+            Subscription(std::shared_ptr<std::atomic<bool>> active, sdk::RegistrationPtr handle)
+                : active(std::move(active)), handle(std::move(handle)) {}
+            ~Subscription() override { dispose(); }
+            void dispose() override { *active = false; handle.reset(); }
+          private:
+            std::shared_ptr<std::atomic<bool>> active;
+            sdk::RegistrationPtr handle;
+        };
+        return std::make_unique<Subscription>(active,
+            std::make_unique<Handle>(m_manager, m_run, [key](Run &alive) { alive.pcm.erase(key); }));
     }
     sdk::RegistrationPtr registerShuffleStrategy(const QString &id, sdk::IShuffleProvider *provider,
                                                  const sdk::Params &descriptor) override {
@@ -1120,6 +1155,7 @@ void PluginManager::stop(const QString &id) {
     run->startTimer.reset();
     run->debounce.reset();
     run->watcher.reset();
+    run->pcm.clear();
     if (run->plugin)
         guarded(id, [&] { run->plugin->deactivate(); });
     // Every remaining function object or provider pointer belongs to the plugin; drop them before

@@ -533,6 +533,7 @@ class WindowsWallpaper final : public WallpaperPlatform {
     QElapsedTimer m_lastRequest;
 
   public:
+    bool supportsTransparency() const override { return true; }
     QString unavailableReason() const override {
         return QGuiApplication::platformName() == "windows" ? QString()
                                                             : QStringLiteral("wallpaper_qpa_unavailable");

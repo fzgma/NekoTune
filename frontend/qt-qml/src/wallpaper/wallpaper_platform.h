@@ -15,6 +15,7 @@ class WallpaperPlatform {
     virtual QString unavailableReason() const = 0;
     virtual QString prepare(QWindow *window, QScreen *screen) = 0;
     virtual QString check(QWindow *window, QScreen *screen) = 0;
+    virtual bool supportsTransparency() const { return false; }
     virtual bool needsHealthCheck() const { return false; }
     virtual bool retryable() const { return false; }
 };

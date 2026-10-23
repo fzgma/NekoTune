@@ -15,6 +15,7 @@ Item {
         property string error: ""
         property int runningCount: 0
         property bool linuxOverlay: true
+        property bool transparentOverlaySupported: true
         property var settings: ({autoRestore: false, target: "primary", updateHz: 30, intensity: 0.35})
         property var outputs: [{id: "edid", name: "DP-1", selected: true, state: "unavailable", error: "wallpaper_qpa_unavailable"}]
         property var audioAnalysis: ({spectrumAvailable: false, reason: "wallpaper_spectrum_unavailable"})
@@ -252,8 +253,7 @@ Item {
         compare(mockManager.requestedEnabled, true)
         compare(mockManager.runningCount, 0)
         compare(findChild(panel, "wallpaperStatus").text, "wallpaper_qpa_unavailable")
-        compare(findChild(panel, "wallpaperSpectrum").enabled, false)
-        compare(findChild(panel, "wallpaperSpectrum").checked, false)
+        verify(findChild(panel, "wallpaperSpectrum") === null)
     }
     function test_savedControlsAndMissingSelection() {
         mockManager.settings = {target: "selected", screenId: "disconnected", updateHz: 60, intensity: 0.5}

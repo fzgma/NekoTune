@@ -2,6 +2,7 @@
 #include "infrastructure/playback/pcm_decoder.h"
 #include "infrastructure/playback/pcm_dsp.h"
 #include "infrastructure/playback/pcm_renderer.h"
+#include "infrastructure/playback/pcm_capture_buffer.h"
 #include <QAudioSink>
 #include "infrastructure/playback/pcm_output_clock.h"
 #include <QIODevice>
@@ -55,6 +56,8 @@ class PcmOutputWorker final : public QObject {
         sources.clear();
         if (!keep.isEmpty())
             sources.push_back(keep);
+        owner->m_capture->reset(epoch);
+        captureFrames = 0;
         clock.reset();
         pending.clear();
         pendingOffset = 0;
@@ -72,8 +75,8 @@ class PcmOutputWorker final : public QObject {
         nextRequest = {};
     }
     void reset(const QUrl &url, qint64 seekMs, quint64 generation, bool resume, bool confirmSeek = false) {
-        clear(url);
         epoch = generation;
+        clear(url);
         publicSource = url;
         publicBaseMs = seekMs;
         playing = resume;
@@ -196,6 +199,7 @@ class PcmOutputWorker final : public QObject {
             started = true;
             post([](auto &backend) { emit backend.stateChanged(PlayerState::Playing); });
         }
+        owner->m_capture->advance(consumed, rate, volume, position());
         for (auto &event : clock.advance(consumed)) {
             if (event.token) {
                 const auto outgoingPosition = publicBaseMs + std::max<qint64>(0, event.frame - publicStart) * 1000 / rate;
@@ -310,6 +314,8 @@ class PcmOutputWorker final : public QObject {
             return;
         }
         bytes.resize(count * format.bytesPerFrame());
+        owner->m_capture->append(samples, captureFrames);
+        captureFrames += frames;
         pending.append(bytes);
     }
     void tick() {
@@ -452,9 +458,9 @@ class PcmOutputWorker final : public QObject {
     std::vector<QUrl> sources;
     PcmOutputClock clock;
     QByteArray pending;
-    qint64 pendingOffset = 0;
+    qint64 pendingOffset = 0, captureFrames = 0;
 };
-FFmpegPlaybackBackend::FFmpegPlaybackBackend() {
+FFmpegPlaybackBackend::FFmpegPlaybackBackend() : m_capture(std::make_shared<PcmCaptureBuffer>()) {
     m_outputs.setParent(this);
     m_worker = new PcmOutputWorker(this);
     m_worker->moveToThread(&m_thread);
@@ -481,6 +487,8 @@ void FFmpegPlaybackBackend::dispatch(std::function<void(PcmOutputWorker &)> oper
     QMetaObject::invokeMethod(
         m_worker, [worker = m_worker, operation = std::move(operation)] { operation(*worker); }, Qt::QueuedConnection);
 }
+void FFmpegPlaybackBackend::setPcmCaptureEnabled(bool enabled) { m_capture->setEnabled(enabled); }
+QVector<sdk::PcmBlock> FFmpegPlaybackBackend::takePcmBlocks() { return m_capture->take(m_generation); }
 void FFmpegPlaybackBackend::setSource(const QUrl &url) {
     m_source = url;
     m_position = 0;

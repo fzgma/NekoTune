@@ -25,7 +25,7 @@ Window {
     readonly property bool connected: transport.connected && manager.dataReady
     readonly property bool updating: visible && outputRunning && connected && hasSong
     readonly property bool playing: updating && playback.state === "playing"
-    readonly property bool transparentOverlay: manager.linuxOverlay && preferences.transparent
+    readonly property bool transparentOverlay: manager.transparentOverlaySupported && preferences.transparent
     // An explicit source wins; an empty value follows the current layout, then appearance.
     readonly property string themeSource: preferences.themeWallpaper || ""
     readonly property var themeDescriptor: !app.theme ? ({})

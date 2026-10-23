@@ -11,6 +11,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QScreen>
+#include <QSurfaceFormat>
 #include <cmath>
 
 namespace {
@@ -154,9 +155,11 @@ bool WallpaperManager::linuxOverlay() const {
 #endif
 }
 
+bool WallpaperManager::transparentOverlaySupported() const { return m_platform->supportsTransparency(); }
+
 QVariantMap WallpaperManager::audioAnalysis() const {
     return {{"spectrumAvailable", false},
-            {"reason", "wallpaper_spectrum_unavailable"},
+            {"reason", "wallpaper_spectrum_extension"},
             {"source", "none"},
             {"bands", QVariantList{}}};
 }
@@ -327,6 +330,9 @@ void WallpaperManager::start(Output &output) {
     window->setTransientParent(nullptr);
     window->setFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus |
                      Qt::WindowTransparentForInput | Qt::Tool);
+    auto format = window->format();
+    format.setAlphaBufferSize(8);
+    window->setFormat(format);
     output.window = window;
     // QML presentation failures fall back within this window. They do not mean
     // the native desktop surface failed or needs to be recreated.

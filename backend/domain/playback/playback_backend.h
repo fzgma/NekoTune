@@ -3,6 +3,7 @@
 #include "domain/result.h"
 #include "domain/playback/audio_settings.h"
 #include <functional>
+#include <nekotune/sdk/pcm_provider.h>
 #include <QObject>
 #include <QList>
 #include <QUrl>
@@ -51,6 +52,9 @@ class IPlaybackBackend : public QObject {
     using QObject::QObject;
     virtual QString backendName() const { return QStringLiteral("qt"); }
     virtual BackendCapabilities backendCapabilities() const { return {}; }
+    virtual bool supportsPcmCapture() const { return false; }
+    virtual void setPcmCaptureEnabled(bool) {}
+    virtual QVector<sdk::PcmBlock> takePcmBlocks() { return {}; }
     virtual void preloadNext(const PreloadRequest &) {}
     virtual void cancelPreload() {}
     virtual void authorizeTransition(quint64) {}
