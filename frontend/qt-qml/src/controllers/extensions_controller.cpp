@@ -8,6 +8,11 @@ ExtensionsController::ExtensionsController(IpcClient &client) : FeatureControlle
             refresh();
         if (name == "extensions.changed")
             apply(event);
+        if (name == "appearance.changed") {
+            m_selections = event.value("selections").toObject().toVariantMap();
+            m_appearanceLoaded = true;
+            emit changed();
+        }
         if (name == "extensions.error") {
             m_error = event.value("message").toString();
             emit errorChanged();
@@ -17,23 +22,32 @@ ExtensionsController::ExtensionsController(IpcClient &client) : FeatureControlle
     connect(&client, &IpcClient::connectedChanged, this, [this] {
         if (!m_client.connected()) {
             m_items.clear();
-            m_catalogueReady = false;
-            m_startupComplete = false;
+            m_contributions.clear();
+            m_themes.clear();
+            m_sources.clear();
+            m_commands.clear();
+            m_runtime.clear();
+            m_selections.clear();
+            m_appearanceLoaded = false;
             emit changed();
         }
     });
 }
 void ExtensionsController::apply(const QJsonObject &data) {
     m_items = data.value("extensions").toVariant().toList();
-    m_selections = data.value("selections").toObject().toVariantMap();
-    m_catalogueReady = data.value("catalogueReady").toBool();
-    m_startupComplete = data.value("startupComplete").toBool();
+    m_contributions = data.value("contributions").toObject().toVariantMap();
+    m_themes = data.value("themes").toVariant().toList();
+    m_sources = data.value("sources").toObject().toVariantMap();
+    m_commands = data.value("commands").toVariant().toList();
+    m_runtime = data.value("runtime").toObject().toVariantMap();
     emit changed();
 }
 bool ExtensionsController::appearanceReady() const {
-    if (m_startupComplete)
+    if (!m_appearanceLoaded)
+        return false;
+    if (m_runtime.value("startupComplete").toBool())
         return true;
-    if (!m_catalogueReady)
+    if (!m_runtime.value("catalogueReady").toBool())
         return false;
     // The catalogue arrives before enabled extensions activate. Only wait for
     // selected UI providers; unrelated background workers need not delay a window.
@@ -51,6 +65,13 @@ bool ExtensionsController::appearanceReady() const {
     return true;
 }
 void ExtensionsController::refresh() {
+    send("appearance.get", {}, [this](const QJsonObject &data, const QString &error) {
+        if (error.isEmpty()) {
+            m_selections = data.value("selections").toObject().toVariantMap();
+            m_appearanceLoaded = true;
+            emit changed();
+        }
+    }, false);
     send(
         "extensions.list", {},
         [this](const QJsonObject &data, const QString &error) {
@@ -71,12 +92,17 @@ int ExtensionsController::request(const QString &method, const QVariantMap &para
             return;
         }
         auto normalized = params;
-        if (method == "extensions.install" || method == "extensions.export_theme")
+        if (method == "extensions.install" || method == "appearance.export_theme")
             normalized.insert("path", IpcClient::normalizePath(params.value("path").toString()));
         send(
             method, QJsonObject::fromVariantMap(normalized),
             [this, id](const QJsonObject &data, const QString &error) {
                 if (error.isEmpty() && data.contains("extensions")) apply(data);
+                if (error.isEmpty() && data.contains("selections")) {
+                    m_selections = data.value("selections").toObject().toVariantMap();
+                    m_appearanceLoaded = true;
+                    emit changed();
+                }
                 m_error = error;
                 emit errorChanged();
                 emit completed(id, data.toVariantMap(), error);
@@ -89,38 +115,21 @@ QVariantList ExtensionsController::contributions(const QString &kind) const {
     QVariantList result;
     if (qEnvironmentVariable("NEKOTUNE_SAFE_MODE") == "1")
         return result;
-    for (const auto &value : m_items) {
-        const auto extension = value.toMap();
-        if (extension.value("state") != "running")
-            continue;
-        for (const auto &entry : extension.value("contributes").toMap().value(kind).toList()) {
-            auto item = entry.toMap();
-            item.insert("generation", extension.value("generation"));
-            result.append(item);
-        }
-    }
-    return result;
-}
-QVariantList ExtensionsController::pages() const {
-    auto result = contributions("pages");
-    for (auto &value : result) {
-        auto item = value.toMap();
-        if (!item.contains("group"))
-            item.insert("group", "primary");
-        value = item;
-    }
-    return result;
-}
-QVariantList ExtensionsController::registrations(const QString &kind) const {
-    QVariantList result;
-    if (qEnvironmentVariable("NEKOTUNE_SAFE_MODE") == "1")
+    if (kind == "themes") {
+        for (const auto &value : m_themes)
+            if (value.toMap().value("available").toBool())
+                result.append(value);
         return result;
-    for (const auto &value : m_items)
-        result.append(value.toMap().value("registrations").toMap().value(kind).toList());
-    return result;
+    }
+    return m_contributions.value(kind).toList();
 }
-QVariantList ExtensionsController::commands() const { return registrations("commands"); }
-QVariantList ExtensionsController::sources() const { return registrations("music"); }
+QVariantList ExtensionsController::pages() const { return contributions("pages"); }
+QVariantList ExtensionsController::commands() const {
+    return qEnvironmentVariable("NEKOTUNE_SAFE_MODE") == "1" ? QVariantList{} : m_commands;
+}
+QVariantList ExtensionsController::sources() const {
+    return qEnvironmentVariable("NEKOTUNE_SAFE_MODE") == "1" ? QVariantList{} : m_sources.value("music").toList();
+}
 QVariantList ExtensionsController::browserSources() const {
     QSet<QString> pageIds;
     for (const auto &value : pages()) {
@@ -188,6 +197,9 @@ void ExtensionsController::execute(const QString &id, const QVariantMap &params)
     request("extensions.call", {{"id", id.left(slash)}, {"service", id.mid(slash + 1)}, {"params", params}});
 }
 void ExtensionsController::resetInterface() {
+    QVariantMap changes;
     for (auto it = m_selections.cbegin(); it != m_selections.cend(); ++it)
-        request("extensions.select", {{"slot", it.key()}, {"contribution", ""}});
+        changes.insert(it.key(), QString());
+    if (!changes.isEmpty())
+        request("appearance.select", {{"selections", changes}});
 }

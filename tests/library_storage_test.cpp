@@ -38,21 +38,32 @@ class FakeAudio final : public TestAudioBackend {
     double volume() const override { return level; }
     AudioMetadata metadata() const override { return {}; }
 };
-class DeferredExtensions final : public IExtensionBackend {
+class DeferredSources final : public IMusicSourceCatalog {
   public:
-    Completion download;
+    std::function<void(Result<QString>)> pendingDownload;
     QVariantMap callback;
-    void request(const QString &method, const QVariantMap &params, Completion done) override {
-        if (method == "extensions.download_audio")
-            download = std::move(done);
-        else {
-            if (method == "extensions.download_completed")
-                callback = params;
-            done(QVariantMap{});
-        }
+    QVariantList sources() const override { return {}; }
+    void search(const QString &, const QString &, const QString &,
+                std::function<void(Result<sdk::SearchPage>)> done) override {
+        done(failure("Unavailable"));
     }
-    QVariantMap snapshot() const override { return {}; }
-    void publish(const QVariantMap &) override {}
+    void track(const QString &, const QString &, std::function<void(Result<sdk::Track>)> done) override {
+        done(failure("Unavailable"));
+    }
+    void resolvePlayback(const QString &, const QString &, std::function<void(Result<Playback>)> done) override {
+        done(failure("Unavailable"));
+    }
+    void release(const QUrl &) override {}
+    void download(const QString &, const QString &, const QString &, const QString &, Progress,
+                  std::function<void(Result<QString>)> done) override {
+        pendingDownload = std::move(done);
+    }
+    void cancelDownload(const QString &) override {}
+    void downloaded(const QString &source, const QString &id, const QString &path, int songId, bool existing,
+                    std::function<void(Result<QVariantMap>)> done) override {
+        callback = {{"path", path}, {"song_id", songId}, {"existing", existing}, {"id", id}, {"source", source}};
+        done(QVariantMap{});
+    }
 };
 class DeferredInspector final : public IFileInspector {
   public:
@@ -388,21 +399,20 @@ class LibraryStorageTest : public QObject {
         MusicDirectory directory(store.db, root);
         auto file = directory.manage({source, hash("cancel download")});
         QVERIFY(file);
-        DeferredExtensions backend;
-        ExtensionService extensions(backend);
+        DeferredSources sources;
         DeferredInspector inspector;
         CommandScheduler commands;
-        MusicService service(extensions, store.library, inspector, commands,
+        MusicService service(sources, store.library, inspector, commands,
                              [&](const auto &, const auto &) -> Result<QString> { return source; });
         SongMetadata remote;
         remote.providerId = "test/music";
         remote.providerTrackId = "cancelled";
         QSignalSpy events(&service, &MusicService::taskChanged);
         const auto task = service.download(remote.providerId, remote);
-        QVERIFY(backend.download);
+        QVERIFY(sources.pendingDownload);
         if (inspecting) {
-            auto complete = std::move(backend.download);
-            complete(QVariantMap{{"path", source}});
+            auto complete = std::move(sources.pendingDownload);
+            complete(source);
             QTRY_VERIFY(inspector.pending);
         }
         service.cancelDownload(task, [](auto result) { QVERIFY(result); });
@@ -410,11 +420,11 @@ class LibraryStorageTest : public QObject {
             auto complete = std::move(inspector.pending);
             complete(file.value());
         } else {
-            auto complete = std::move(backend.download);
-            complete(QVariantMap{{"path", source}});
+            auto complete = std::move(sources.pendingDownload);
+            complete(source);
         }
         QVERIFY(store.songs().isEmpty());
-        QVERIFY(backend.callback.isEmpty());
+        QVERIFY(sources.callback.isEmpty());
         QCOMPARE(events.last().first().toMap()["state"].toString(), QString("cancelled"));
         QVERIFY(!service.downloadActive());
     }
@@ -424,11 +434,10 @@ class LibraryStorageTest : public QObject {
         MusicDirectory directory(store.db, root);
         auto file = directory.manage({source, hash("download bytes")});
         QVERIFY(file);
-        DeferredExtensions backend;
-        ExtensionService extensions(backend);
+        DeferredSources sources;
         DeferredInspector inspector;
         CommandScheduler commands;
-        MusicService service(extensions, store.library, inspector, commands,
+        MusicService service(sources, store.library, inspector, commands,
                              [&](const auto &, const auto &) -> Result<QString> { return source; });
         SongMetadata remote;
         remote.providerId = "test/music";
@@ -437,15 +446,15 @@ class LibraryStorageTest : public QObject {
         QVERIFY(song);
         QSignalSpy events(&service, &MusicService::taskChanged);
         service.download(remote.providerId, remote);
-        auto downloaded = std::move(backend.download);
-        downloaded(QVariantMap{{"path", source}});
+        auto downloaded = std::move(sources.pendingDownload);
+        downloaded(source);
         QTRY_VERIFY(inspector.pending);
         auto inspected = std::move(inspector.pending);
         inspected(file.value());
-        QTRY_VERIFY(!backend.callback.isEmpty());
-        QCOMPARE(backend.callback["path"].toString(), source);
-        QCOMPARE(backend.callback["song_id"].toInt(), song->id);
-        QVERIFY(backend.callback["path"].toString() != file.value().path);
+        QTRY_VERIFY(!sources.callback.isEmpty());
+        QCOMPARE(sources.callback["path"].toString(), source);
+        QCOMPARE(sources.callback["song_id"].toInt(), song->id);
+        QVERIFY(sources.callback["path"].toString() != file.value().path);
         QTRY_VERIFY(inspector.pending);
         auto assets = std::move(inspector.pending);
         assets(failure("Invalid cover image"));

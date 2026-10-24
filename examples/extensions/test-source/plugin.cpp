@@ -115,7 +115,7 @@ class Tones final : public sdk::IMusicProvider {
             }
         done(failure("Track not found"));
     }
-    void resolve(const QString &id, const QString &, std::function<void(Result<sdk::ResolvedAudio>)> done) override {
+    void resolve(const QString &id, sdk::ResolvePurpose, std::function<void(Result<sdk::ResolvedAudio>)> done) override {
         if (id != "one" && id != "two") {
             done(failure("Track not found"));
             return;
@@ -135,15 +135,15 @@ class TestSourceExample final : public QObject, public sdk::IExtensionPlugin {
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &context, std::function<void(Result<void>)> done) override {
+    void activate(sdk::ExtensionContext &context, sdk::Done done) override {
         m_server = std::make_unique<ToneServer>();
         if (!m_server->listen(QHostAddress::LocalHost, 0)) {
             done(failure("Cannot start the tone server: " + m_server->errorString()));
             return;
         }
         m_tones.port = m_server->serverPort();
-        m_registration = context.registerMusicProvider("tones", &m_tones,
-                                                       {{"name", "Local test tones / 本地测试音源"}, {"download", true}});
+        m_registration = context.music().add("tones", &m_tones,
+                                                       {.name = "Local test tones / 本地测试音源", .download = true});
         done({});
     }
     void deactivate() override {

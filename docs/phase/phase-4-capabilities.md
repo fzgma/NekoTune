@@ -382,9 +382,17 @@ class ShuffleStrategies final : public QObject {
 
 ### 4A.9 测试调整
 
-只允许以下调整；断言的期望值不变。
+只允许以下调整；除第 0 条删除的数据行外，断言的期望值不变。
 
 `tests/native_extensions_test.cpp`：
+
+0. `hostCallGateway_data()`：删除数据行
+
+```cpp
+        QTest::newRow("internal") << "extensions.provider_call" << false;
+```
+
+   本阶段之后这个方法已经不存在，这一行只是在测“`extensions.*` 前缀下未公开的方法会被拒绝”。紧随其后的 `unknown-extension`（`extensions.future_method`）已经覆盖同一条规则，所以不用换成别的名字。`HostGateway` 本身不改。
 
 1. 新增辅助函数（放在匿名命名空间 `call()` 之后）：
 

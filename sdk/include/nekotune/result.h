@@ -7,7 +7,7 @@ namespace nekotune {
 // Messages may contain contextual details or translation keys.
 // The IPC layer chooses how these failures become JSON responses.
 // Keeping this type independent of transport enables service tests.
-enum class ErrorCode { InvalidArgument, NotFound, Storage, Io, Cancelled, Unavailable };
+enum class ErrorCode { InvalidArgument, NotFound, Storage, Io, Cancelled, Unavailable, PermissionDenied };
 struct AppError {
     ErrorCode code = ErrorCode::Unavailable;
     QString message;

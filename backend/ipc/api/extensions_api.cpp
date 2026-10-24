@@ -5,7 +5,7 @@ void registerExtensionsApi(IpcRouter &router, ApiContext &api) {
     for (const QString method :
          {"extensions.list", "extensions.install", "extensions.enable", "extensions.disable",
           "extensions.reload", "extensions.uninstall", "extensions.get_config", "extensions.set_config",
-          "extensions.logs", "extensions.call", "extensions.select", "extensions.export_theme"}) {
+          "extensions.logs", "extensions.call"}) {
         router.registerMethod(method, [&api, method](const QJsonObject &params, auto done) {
             if (!api.extensions) {
                 done(error(failure("Extensions unavailable")));

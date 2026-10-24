@@ -1,6 +1,6 @@
 # 扩展系统重构方案
 
-> 状态：已定稿（2026-10-23），可执行步骤见 [phase/README.md](phase/README.md)。本文记录现状诊断、目标架构与取舍。现行规则仍以[扩展开发与使用](extensions.md)为准。
+> 状态：已实施（2026-10-24），实施步骤见 [phase/README.md](phase/README.md)。本文保留重构前的诊断、目标架构与取舍；本次验证与未达指标见第 8 节。现行规则仍以[扩展开发与使用](extensions.md)为准。
 
 ## 1. 背景与目标
 
@@ -21,7 +21,7 @@
 - **兼容 SDK 2.x**：IID 升级为 `org.nekotune.IExtensionPlugin/3`，旧插件拒绝加载并在管理页提示需要更新。仓库内示例和测试夹具随本次重构迁移；外部插件（酷狗、网易云、世界计划）之后单独重写，不在本文范围内。
 - **强类型的宿主 API**：`hostCall(method, params)` 暂时保留字符串形式。
 
-## 2. 现状诊断
+## 2. 重构前诊断（历史）
 
 ### 2.1 进程内的字符串协议
 
@@ -383,3 +383,66 @@ m_pause = ctx.commands().add("pause", handler, {.title = "Pause", .shortcut = "C
 | 看门狗阈值 | 后端线程上的扩展调用 5 秒告警、30 秒判定卡死；随机算法 `select` 超过 200 毫秒告警 |
 | 纯 QML 扩展的 `apiVersion` | 带原生库必须为 `3`；纯界面扩展与主题包接受 `1`–`3` |
 | 前端 QML 侧授权 | 已信任扩展的 QML 拿得到完整 `controllers`，无法在同一引擎内限制，记为已知限制，本次不处理 |
+
+
+## 8. 实施与验收记录（2026-10-24）
+
+本节记录 Phase 8 对当前源码的复核。前文诊断、拟议类型名和阶段步骤保留为历史背景；现行契约见[扩展文档](extensions.md)、[API](API.md)与[架构](architecture.md)。本次只修改 Phase 8 列出的 13 份 Markdown 文件。
+
+### 8.1 提交记录
+
+| 阶段 | 本地提交 |
+| --- | --- |
+| Phase 0 | 按手册不提交；基线代码为 `b32abe4` |
+| Phase 1 | `e5b8c13` |
+| Phase 2 | `b2cb9ac` |
+| Phase 3 | `8d60bed` |
+| Phase 4A | `a3a32e9` |
+| Phase 4B | `e6dcb3f` |
+| Phase 5 | `9d372b3` |
+| Phase 6 | `17c1cb2` |
+| Phase 7 | `d0bb24d`（本次开始前已提交） |
+| Phase 8 | 本节所在的文档提交 |
+
+### 8.2 构建与自动化
+
+在 Linux、Qt 6.11 环境执行：
+
+- `cmake -S . -B build -DNEKOTUNE_ENABLE_WALLPAPER=ON` 与 `cmake --build build -j2` 成功。配置保留 Qt Wayland 私有 ABI 提示及可选 Vulkan 头文件未找到的提示，不把成功构建称为无警告。
+- `QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ctest --test-dir build --output-on-failure`：**29/29 通过，0 失败**，耗时 210 秒。原生扩展 76 个函数级用例通过，扩展前端 33 个通过。
+- 函数级跳过 7 项：`WallpaperTest::externalWallpaper` 的 reference/desktop/portrait/small 四项未设置外部主题目录，`nativeWallpaper` 未启用实机验收，`PcmCaptureTest::nativeMutedPlayback` 未启用原生音频验收，`nativeSpectrumExtension` 未提供外部频谱扩展。跳过不计作功能通过。
+- `cmake -DSOURCE_DIR="$PWD" -P tests/dependency_boundaries.cmake` 通过；Markdown 相对文件链接、新快照 JSON 示例与 `git diff --check` 检查通过。
+- `cmake --install build --prefix /tmp/nekotune-host` 成功；从 `sdk/templates/native` 使用该安装前缀独立配置到 `/tmp/nekotune-template`，构建成功，模板加载测试 **1/1 通过**。
+- 完整 CTest 日志为 `/tmp/nekotune-extensions-final.txt`，函数级明细为 `build/Testing/Temporary/LastTest.log`。Phase 0 的 `/tmp/nekotune-extensions-baseline.txt` 在本次环境中已不存在，无法逐行比较旧日志；当前失败集合为空，因此没有新增失败。临时日志不是仓库交付物，可能被后续运行覆盖。
+
+### 8.3 手动验收与运行时检查
+
+使用独立 `/tmp/nekotune-phase8-accept`、`/tmp/nekotune-phase8.sock`、数据库与 XDG 目录，启动真实桌面程序（xcb、software）。音源仅访问示例的本地回环 WAV 服务，播放器静音。以下分别说明实窗与 IPC 覆盖范围，不能把协议检查当作完整的鼠标操作验收。
+
+| # | 结果与实际覆盖 | 跳过／替代路径 |
+| --- | --- | --- |
+| 1 | 部分通过：在实窗信任并启用 custom-ui，页面、工具栏正常，页面按钮返回原生服务消息；快照包含设置、两个菜单及命令，IPC 命令执行成功 | 设置子页与歌曲／歌单菜单的逐项点击已跳过；以注册快照和命令调用验证接线，未宣称这些交互全部通过 |
+| 2 | 通过：在实窗搜索 test-source、播放与下载，显示下载入库成功；IPC 确认播放状态、下载完成和 `received/total` 进度事件 | 小 WAV 很快完成，进度记录包含初始 `0/352844` 后完成，不要求必有中间百分比；未做听感验收 |
+| 3 | IPC 通过：从 example.lyrics 搜索、选择候选，状态进入 ready，返回三行示例 LRC | 实窗歌词来源选择操作已跳过，以公开歌词 API 验证完整查询、候选解析链路 |
+| 4 | IPC 通过：播放中切到 `example.shuffle/artist`，当前歌曲与 playing 状态保持；全量测试覆盖算法行为 | 队列菜单的鼠标选择操作已跳过，使用 `player.set_shuffle_strategy` 验证同一后端入口 |
+| 5 | 通过：将 automation 配置为 1 秒，通过 IPC 调用睡眠定时器命令，观察到 paused；确认 SDK 宿主调用允许 `player.pause` | 使用命令 API 触发，没有等待默认的 30 秒 |
+| 6 | 持久化通过：外观窗口选择 Deep ocean 配色，IPC 选择 Mint QML 界面；正常退出重启后外观、界面及独立插槽选择完全一致，appearance.json 存在，实窗加载自定义 Shell | 使用独立管理窗口的外观页；设置页入口与界面卡片点击已跳过，界面选择通过 `appearance.select` 完成 |
+| 7 | 通过：在管理窗口下拉框选择 Ocean shell，实窗切换；`Ctrl+Shift+E` 打开独立窗口后点击恢复默认界面，所有替换值清空，主窗口恢复 | 额外用 IPC 同时设置多个插槽验证一并清空 |
+| 8 | 通过：custom-ui 的临时副本独立构建并挂载；修改 C++ 服务回复后重新构建，宿主自动从 generation 7 切到 8，服务返回 `Reloaded Phase 8` | 源码与构建均在 `/tmp`，没有修改本阶段范围外的仓库源码 |
+| 9 | 通过：挂载 legacy 夹具后启用失败，实窗管理卡片显示 `Unsupported extension interface org.nekotune.IExtensionPlugin/2` | 夹具清单使用 apiVersion 3，以便单独验证 SDK 2 二进制 IID 被拒绝 |
+| 10 | 通过：同一隔离目录用 `--safe-mode` 启动，已启用扩展状态为 disabled，贡献和命令为空，进程映射不含扩展运行库；配置值和数据文件 SHA-256 保持一致 | 显式安全模式的实窗与 IPC 检查；自动安全模式计数和清零由原生测试覆盖 |
+
+实窗截图和 IPC 记录位于 `/tmp/nekotune-phase8-*`；验收进程均正常退出。Windows、真实硬件壁纸和外部频谱扩展没有在本次环境验收。
+
+### 8.4 规模与偏差
+
+`plugin_manager.cpp` 从基线 `b32abe4` 的 **1890 行降至 884 行**，减少 1006 行（约 53.2%），**尚未达到 600 行以内的目标**。扩展基础设施中其余较大的实现为 `audio_proxy.cpp` 565 行、`host_context.cpp` 361 行、`theme_package.cpp` 346 行；本次文档阶段没有继续拆代码。
+
+复核到的执行差异与现存限制：
+
+- Phase 4A 按同步修订的手册删除已移除内部方法的重复拒绝测试行，未知扩展方法仍覆盖网关前缀规则；Phase 5 还调整了 `tests/extensions_test.cpp` 的 SDK 版本断言，并为 SDK 2 夹具冻结 provider 头文件、保留可到达 IID 检查的清单。Phase 7 同步迁移了清单之外的 `tests/pcm_capture_test.cpp` 和 `tests/refactor_test.cpp` 的旧快照断言。本次没有重新修改这些已提交文件。
+- 自动安全模式原因已通过 `runtime.safeModeReason` 和 `extensions.error` 提供，但当前管理页没有持续显示 `runtime.safeModeReason`；启动早期的错误事件也不保证被后连接的前端收到。文档按可观察的协议能力描述，没有承诺管理页必定显示原因；该界面差距保留待后续处理。
+- 模板文档要求固定**确实包含 SDK 3 附件**的 Release，并核对 `build-info.json` 的 `sdkVersion`，没有臆造或验证某个已发布标签；本次只验收本地安装的 SDK。
+- SDK 头文件笼统称所有方法可跨线程调用，但当前 PCM 查询与订阅实际要求后端线程；开发文档按实现写明这一要求，头文件未在本阶段改动。
+- 扫描命令排除阶段手册和两份历史方案后，保留三处命中：`docs/extensions.md` 的 SDK 2 拒绝错误说明，以及两份 SDK README 的旧插件迁移说明。它们描述兼容性边界，不是仍可用的旧接口。`selections` 仍是新外观协议的合法字段，不应删除。
+- 发现但按手册未顺手改写的既有问题：API 的音乐来源段落仍写“扩展进程”，扩展文档把下载解析约称为 10 分钟而源码超时为 610 秒；`ILyricsSourceCatalog` 头文件仍有 SDK 2 的历史注释，custom-ui 示例页仍显示 `JS/TS + QML`。这些文字与当前实现不完全一致，留给对应范围的后续清理。

@@ -1328,7 +1328,7 @@ class RefactorTest final : public QObject {
         RpcPeer peer;
         QVERIFY(peer.connect(m_socket));
         QTRY_VERIFY_WITH_TIMEOUT(
-            peer.call("extensions.list").value("data").toObject().value("runtimeReady").toBool(), 15000);
+            peer.call("extensions.list").value("data").toObject().value("runtime").toObject().value("ready").toBool(), 15000);
         const auto installed = peer.call("extensions.install",
             {{"path", QStringLiteral(NEKOTUNE_TEST_EXTENSIONS "/test.dedicated-source")},
              {"development", true}, {"replace", true}});

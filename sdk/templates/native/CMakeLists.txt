@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(HelloExtension VERSION 1.0.0 LANGUAGES CXX)
 
-find_package(NekoTuneSDK 2 REQUIRED)
+find_package(NekoTuneSDK 3 REQUIRED)
 nekotune_add_extension(hello_extension
     MANIFEST extension.json
     SOURCES plugin.cpp

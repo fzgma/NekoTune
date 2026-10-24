@@ -1,5 +1,6 @@
 #pragma once
-#include <nekotune/result.h>
+#include <nekotune/sdk/types.h>
+#include <optional>
 #include <QHash>
 #include <QStringList>
 #include <QUrl>
@@ -9,9 +10,6 @@
 #include <utility>
 
 namespace nekotune::sdk {
-using Params = QVariantMap;
-using Reply = std::function<void(Result<Params>)>;
-
 struct Track {
     QString id;
     QString title;
@@ -70,6 +68,16 @@ struct ResolvedAudio {
     }
 };
 
+enum class ResolvePurpose { Play, Download };
+
+struct MusicSourceInfo {
+    QString name;
+    /// The source supports downloads.
+    bool download = false;
+    /// Local ID of this extension's browse page; empty matches a page with the source's ID.
+    QString page;
+};
+
 /// Every method is called on the backend thread and must complete its callback exactly once,
 /// from any thread. Long work belongs on the plugin's own threads.
 class IMusicProvider {
@@ -78,8 +86,8 @@ class IMusicProvider {
     virtual void search(const QString &query, const QString &cursor,
                         std::function<void(Result<SearchPage>)> done) = 0;
     virtual void track(const QString &id, std::function<void(Result<Track>)> done) = 0;
-    /// purpose is "play" or "download"; downloads may take minutes and return a prepared file://.
-    virtual void resolve(const QString &id, const QString &purpose,
+    /// Downloads may take minutes and return a prepared file://.
+    virtual void resolve(const QString &id, ResolvePurpose purpose,
                          std::function<void(Result<ResolvedAudio>)> done) = 0;
     /// Called after the host imported a download; the returned map is merged into the task report.
     virtual void downloaded(const QString &id, const QString &path, int songId, bool existing, Reply done) {
@@ -91,13 +99,38 @@ class IMusicProvider {
     }
 };
 
-/// Same contract as the JavaScript SDK: search returns {candidates: [...]}, each candidate may carry
-/// synced_lyrics/plain_lyrics/krc_lyrics/cover_url/score/song_result. resolve receives one candidate
-/// and returns a document, or {candidates} for staged sources.
+struct LyricsQuery {
+    QString title, artist, album, trackId;
+    qint64 durationMs = 0;
+};
+struct LyricsDocument {
+    QString syncedLyrics, plainLyrics, krcLyrics, coverUrl;
+    bool instrumental = false;
+};
+/// One search result. Source-defined fields (IDs, tokens for staged lookups) go in extra; the
+/// host keeps candidates in the backend and never sends extra to the frontend.
+struct LyricsCandidate {
+    QString title, artist, album;
+    qint64 durationMs = 0;
+    double score = 1.0;
+    /// A song version in a staged source; resolving it returns further candidates.
+    bool songResult = false;
+    LyricsDocument document;
+    QVariantMap extra;
+};
+/// Either a document, or further candidates for staged sources.
+struct LyricsResolution {
+    std::optional<LyricsDocument> document;
+    QVector<LyricsCandidate> candidates;
+};
+struct LyricsSourceInfo {
+    QString name;
+};
+
 class ILyricsProvider {
   public:
     virtual ~ILyricsProvider() = default;
-    virtual void search(const Params &query, Reply done) = 0;
-    virtual void resolve(const Params &candidate, Reply done) = 0;
+    virtual void search(const LyricsQuery &query, std::function<void(Result<QVector<LyricsCandidate>>)> done) = 0;
+    virtual void resolve(const LyricsCandidate &candidate, std::function<void(Result<LyricsResolution>)> done) = 0;
 };
 } // namespace nekotune::sdk

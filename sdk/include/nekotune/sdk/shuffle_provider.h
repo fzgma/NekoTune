@@ -1,8 +1,12 @@
 #pragma once
-#include <nekotune/sdk/extension_context.h>
+#include <nekotune/sdk/types.h>
 #include <QVector>
 
 namespace nekotune::sdk {
+struct ShuffleInfo {
+    QString name;
+};
+
 /// queueId identifies an occurrence; songId may be shared by several occurrences.
 struct ShuffleTrack {
     int queueId = 0;
@@ -35,18 +39,4 @@ class IShuffleProvider {
     virtual Result<ShuffleSelection> select(const ShuffleRequest &request) = 0;
 };
 
-/// Optional SDK 2.1 capability. Kept separate to preserve the SDK 2.0 context ABI and plugin IID.
-class IShuffleExtensionContext {
-  public:
-    virtual ~IShuffleExtensionContext() = default;
-    /// Same threading/handle lifetime contract as IExtensionContext registrations.
-    /// descriptor requires a nonempty name. The provider must outlive its registration.
-    virtual RegistrationPtr registerShuffleStrategy(const QString &id, IShuffleProvider *provider,
-                                                     const Params &descriptor) = 0;
-};
-
-/// Null on older hosts. Check before registering and explain the required host capability.
-inline IShuffleExtensionContext *shuffleContext(IExtensionContext &context) {
-    return dynamic_cast<IShuffleExtensionContext *>(&context);
-}
 } // namespace nekotune::sdk

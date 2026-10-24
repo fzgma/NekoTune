@@ -10,7 +10,7 @@ class SlowExtension final : public QObject, public sdk::IExtensionPlugin {
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &, std::function<void(Result<void>)> done) override {
+    void activate(sdk::ExtensionContext &, sdk::Done done) override {
         QTimer::singleShot(250, this, [done] { done({}); });
     }
 };

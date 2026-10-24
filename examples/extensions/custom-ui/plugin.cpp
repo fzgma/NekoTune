@@ -8,18 +8,18 @@ class CustomUiExample final : public QObject, public sdk::IExtensionPlugin {
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &context, std::function<void(Result<void>)> done) override {
-        m_hello = context.registerService("hello", [](const sdk::Params &, sdk::Reply reply) {
+    void activate(sdk::ExtensionContext &context, sdk::Done done) override {
+        m_hello = context.services().add("hello", [](const sdk::Params &, sdk::Reply reply) {
             reply(sdk::Params{{"message", "Hello from the native extension!"}});
         });
-        m_inspect = context.registerCommand(
+        m_inspect = context.commands().add(
             "inspect-song",
             [&context](const sdk::Params &params, sdk::Reply reply) {
-                context.log(QtInfoMsg, "Selection received");
-                context.publish("selection", params);
+                context.log().write(QtInfoMsg, "Selection received");
+                context.events().publish("selection", params);
                 reply(params);
             },
-            {{"title", "Inspect selection"}});
+            {.title = "Inspect selection"});
         done({});
     }
     void deactivate() override {

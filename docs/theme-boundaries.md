@@ -82,7 +82,7 @@
 | 记住抽屉宽度、折叠状态 | 主题局部状态 | 允许重建后丢失；不得写入用户数据目录 |
 | 设计一套唱片样式的桌面壁纸布局 | 界面（主题或界面扩展）✅ | 只用宿主提供的壁纸上下文呈现 |
 | 选择主题时自动开启桌面壁纸 | ❌ 禁止 | 辅助窗口开关归用户和宿主（§6.2） |
-| 壁纸显示真实音频频谱 | 功能扩展 + 宿主接口 | 原生扩展通过 SDK 2.2 PCM 分析，主题消费频段事件 |
+| 壁纸显示真实音频频谱 | 功能扩展 + 宿主接口 | 原生扩展通过 SDK 3 PCM 分析，主题消费频段事件 |
 | 界面布局里写死 `#FF0000` 作为强调色 | ❌ 不应 | 会导致无法与其他外观组合（§5.3.4） |
 
 ## 2. 职责分配
@@ -317,7 +317,7 @@
 
 #### 5.3.7 迁移
 
-【现状】**不做一次性迁移**：外观选择沿用 `selections.theme`，界面使用 `selections.themeLayout`；`themeLayout` 键不存在时界面跟随外观选择，空字符串明确表示内置界面。
+【现状】外观选择文件为 `config/extensions/appearance.json`；首次启动会从旧 `registry.json` 迁移选择，已有外观文件时不覆盖。界面跟随规则不做一次性改写：外观选择沿用 `selections.theme`，界面使用 `selections.themeLayout`；`themeLayout` 键不存在时界面跟随外观选择，空字符串明确表示内置界面。
 
 | 旧状态 | 升级后的解析结果 |
 | --- | --- |
@@ -328,7 +328,7 @@
 | 旧版仅含 `tokens` 的扩展主题 | 只作为外观出现，沿用现有的浅色兼容规则 |
 
 - 除壁纸字段外，旧主题包和清单字段不需要修改。`ui.wallpaper` 已废弃（2026-10），含该字段的包会被拒绝，作者须把它移到顶层 `wallpaper`；已保存的 `wallpaper.style` 与 `wallpaper.themeWallpaper` 偏好不需要迁移。
-- 用户使用新的选择操作后，`theme` 和 `themeLayout` 总是通过批量 `extensions.select` 一起校验并保存，此后不再依赖键缺失时的“跟随”规则。
+- 用户使用新的选择操作后，`theme` 和 `themeLayout` 总是通过批量 `appearance.select` 一起校验并保存，此后不再依赖键缺失时的“跟随”规则。
 
 #### 5.3.8 恢复
 
@@ -446,6 +446,6 @@
 | [`ThemeSlot.qml`](../frontend/qt-qml/qml/components/ThemeSlot.qml) | 主题入口与回退入口的两级加载和错误展示 | — |
 | [`theme_controller.cpp`](../frontend/qt-qml/src/controllers/theme_controller.cpp) | 配色与界面选择、明暗、变量合成、界面与壁纸入口生成、按用途请求信任 | — |
 | [`shared/themes/theme_resolution.*`](../shared/themes/theme_resolution.h) | 前后端共用的变量合成与界面能力判断 | — |
-| [`theme_package.cpp`](../backend/infrastructure/extensions/theme_package.cpp) | 主题内容、插槽名、页面 ID、资源校验与导出 | 不做 QML 行为沙箱 |
+| [`theme_package.cpp`](../backend/infrastructure/extensions/package/theme_package.cpp) | 主题内容、插槽名、页面 ID、资源校验与导出 | 不做 QML 行为沙箱 |
 | [`catalog.json`](../shared/themes/catalog.json) | 变量定义、归属、默认值与内置主题 | — |
 | [`ExtensionsWindow.qml`](../frontend/qt-qml/qml/ExtensionsWindow.qml) | 独立的管理与恢复界面，固定使用内置样式 | — |

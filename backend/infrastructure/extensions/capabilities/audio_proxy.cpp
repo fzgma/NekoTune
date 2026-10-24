@@ -1,4 +1,4 @@
-#include "infrastructure/extensions/audio_proxy.h"
+#include "infrastructure/extensions/capabilities/audio_proxy.h"
 #include <QDateTime>
 #include <QDir>
 #include <QFile>

@@ -1,7 +1,7 @@
 #include "runtime/backend_session.h"
 #include "app_paths.h"
 #include "application/transaction.h"
-#include "infrastructure/extensions/extension_lyrics_provider.h"
+#include "infrastructure/extensions/capabilities/extension_lyrics_provider.h"
 #include "infrastructure/lyrics/lrclib_provider.h"
 #include "infrastructure/lyrics/lyrics_storage.h"
 #include "infrastructure/playback/playback_backend_supervisor.h"
@@ -82,11 +82,16 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
       m_scanner(m_imports, m_music, m_library, m_router.commands()),
       m_server(m_router, [this] { return m_api.status(); }),
       m_musicSources(
-          m_extensions, m_library, m_imports, m_router.commands(),
+          m_extensionBackend.musicSources(), m_library, m_imports, m_router.commands(),
           [this](const QString &id, const QString &title) { return m_music.reserveDownload(id, title); }),
       m_maintenance(m_database, m_music, m_imports, m_songs, m_playlistRepository, m_library, m_player,
                     m_router) {
     m_extensionBackend.setPcmService(&m_pcm);
+    m_extensionBackend.setAppearance(&m_appearance);
+    m_api.appearance = &m_appearance;
+    connect(&m_appearance, &IAppearanceBackend::eventReady, this, [this](const QVariantMap &event) {
+        m_server.broadcastEvent(QJsonObject::fromVariantMap(event));
+    });
     m_api.shuffleStrategies = &m_shuffleStrategies;
     connect(&m_shuffleStrategies, &ShuffleStrategyService::strategyChanged, this, [this] {
         m_player.setShuffleStrategy(m_shuffleStrategies.createStrategy());
@@ -96,12 +101,12 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
         event.insert("event", "player.shuffle_strategy_changed");
         m_server.broadcastEvent(event);
     });
-    connect(&m_extensionBackend, &PluginManager::shuffleCatalogueChanged, this, [this] {
-        m_shuffleStrategies.setCatalogue(m_extensionBackend.shuffleStrategies(),
-            [backend = QPointer<PluginManager>(&m_extensionBackend)](const QString &id, quint64 generation,
+    connect(&m_extensionBackend.shuffle(), &ShuffleStrategies::catalogueChanged, this, [this] {
+        m_shuffleStrategies.setCatalogue(m_extensionBackend.shuffle().strategies(),
+            [backend = QPointer<ShuffleStrategies>(&m_extensionBackend.shuffle())](const QString &id, quint64 generation,
                                                                    const sdk::ShuffleRequest &request) -> Result<sdk::ShuffleSelection> {
                 if (!backend) return failure("Shuffle extension unavailable", ErrorCode::Unavailable);
-                return backend->selectShuffle(id, generation, request);
+                return backend->select(id, generation, request);
             });
     });
     m_maintenance.install();
@@ -253,15 +258,15 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     m_player.setSourceResolver(&m_musicSources);
     connect(&m_lyrics, &LyricsController::sourcesChanged, this,
             [this] { m_server.broadcastEvent({{"event", "lyrics.sources_changed"}}); });
-    connect(&m_extensions, &ExtensionService::changed, this, [this] {
+    connect(&m_extensionBackend.lyricsSources(), &ILyricsSourceCatalog::sourcesChanged, this, [this] {
         QSet<QString> next;
-        for (const auto &value : m_extensions.sources("lyrics")) {
+        for (const auto &value : m_extensionBackend.lyricsSources().sources()) {
             const auto source = value.toMap();
             const auto id = source.value("id").toString();
             next.insert(id);
             if (!m_extensionLyrics.contains(id))
                 m_lyrics.addProvider(
-                    new ExtensionLyricsProvider(m_extensionBackend, id, source.value("name", id).toString()));
+                    new ExtensionLyricsProvider(m_extensionBackend.lyricsSources(), id, source.value("name", id).toString()));
         }
         for (const auto &id : m_extensionLyrics)
             if (!next.contains(id))
@@ -301,6 +306,7 @@ BackendSession::BackendSession(std::unique_ptr<IPlaybackBackend> audio)
     registerLyricsApi(m_router, m_api);
     registerAiApi(m_router, m_api);
     registerExtensionsApi(m_router, m_api);
+    registerAppearanceApi(m_router, m_api);
     registerMusicApi(m_router, m_api);
     auto libraryChanged = [this] {
         m_resourceIds.clear();

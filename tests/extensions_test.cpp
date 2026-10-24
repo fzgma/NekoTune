@@ -5,7 +5,7 @@
 #include "controllers/app_controllers.h"
 #include "extensions/extension_view.h"
 #include "i18n.h"
-#include "infrastructure/extensions/extension_manifest.h"
+#include "infrastructure/extensions/package/extension_manifest.h"
 #include "runtime/backend_runtime.h"
 #include "support/store_fixture.h"
 #include <QElapsedTimer>
@@ -135,22 +135,21 @@ class ExtensionsTest final : public QObject {
     void sourceBrowserUsesOnlyMatchingNavigationPages() {
         IpcClient client;
         ExtensionsController controller(client);
-        QJsonObject extension{
-            {"id", "test.music"}, {"state", "running"},
-            {"registrations", QJsonObject{{"music", QJsonArray{
-                QJsonObject{{"id", "test.music/one"}, {"extensionId", "test.music"}},
-                QJsonObject{{"id", "test.music/two"}, {"extensionId", "test.music"}, {"page", "browse"}}
-            }}}}
+        const QJsonArray sources{
+            QJsonObject{{"id", "test.music/one"}, {"extensionId", "test.music"}},
+            QJsonObject{{"id", "test.music/two"}, {"extensionId", "test.music"}, {"page", "browse"}}
         };
         auto update = [&](const QJsonArray &pages) {
-            extension.insert("contributes", QJsonObject{
-                {"pages", pages},
-                {"settings", QJsonArray{QJsonObject{{"id", "test.music/browse"}}}}
+            emit client.eventReceived({
+                {"event", "extensions.changed"},
+                {"extensions", QJsonArray{QJsonObject{{"id", "test.music"}, {"state", "running"}}}},
+                {"sources", QJsonObject{{"music", sources}}},
+                {"contributions", QJsonObject{{"pages", pages},
+                    {"settings", QJsonArray{QJsonObject{{"id", "test.music/browse"}}}}}}
             });
-            emit client.eventReceived({{"event", "extensions.changed"}, {"extensions", QJsonArray{extension}}});
         };
-        const QJsonObject one{{"id", "test.music/one"}};
-        const QJsonObject unrelated{{"id", "test.music/help"}};
+        const QJsonObject one{{"id", "test.music/one"}, {"group", "primary"}};
+        const QJsonObject unrelated{{"id", "test.music/help"}, {"group", "primary"}};
         update({one, unrelated});
         QCOMPARE(controller.sources().size(), 2);
         QCOMPARE(controller.browserSources().size(), 1);
@@ -379,7 +378,7 @@ class ExtensionsTest final : public QObject {
         peer.socket.connectToServer(runtime.serverName());
         QVERIFY(peer.socket.waitForConnected(3000));
         QTRY_VERIFY_WITH_TIMEOUT(
-            peer.call("extensions.list").value("data").toObject().value("runtimeReady").toBool(), 15'000);
+            peer.call("extensions.list").value("data").toObject().value("runtime").toObject().value("ready").toBool(), 15'000);
         auto install =
             peer.call("extensions.install",
                       {{"path", QStringLiteral(NEKOTUNE_EXAMPLE_EXTENSIONS "/example.test-source")},
@@ -771,7 +770,7 @@ class ExtensionsTest final : public QObject {
         QVERIFY(QDir().mkpath(QFileInfo(folder + "/" + library).absolutePath()));
         QVERIFY(QFile::copy(slow.filePath(library), folder + "/" + library));
         manifest.remove("type");
-        manifest.insert("apiVersion", 2);
+        manifest.insert("apiVersion", 3);
         manifest.insert("library", slowManifest.value("library"));
         manifest.insert("qt", slowManifest.value("qt"));
       }
@@ -867,7 +866,7 @@ class ExtensionsTest final : public QObject {
       QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
                                    .value("data")
                                    .toObject()
-                                   .value("runtimeReady")
+                                   .value("runtime").toObject().value("ready")
                                    .toBool(),
                                15000);
       const auto folder = profile.filePath("theme");
@@ -1160,7 +1159,7 @@ class ExtensionsTest final : public QObject {
                    .value("status")
                    .toString(),
                "ok");
-      QCOMPARE(peer.call("extensions.select",
+      QCOMPARE(peer.call("appearance.select",
                          {{"slot", "bottomPlayer"},
                           {"contribution", "example.custom-ui/player"}})
                    .value("status")
@@ -1229,7 +1228,7 @@ class ExtensionsTest final : public QObject {
       QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
                                    .value("data")
                                    .toObject()
-                                   .value("runtimeReady")
+                                   .value("runtime").toObject().value("ready")
                                    .toBool(),
                                15000);
       const auto folder = profile.filePath("combo");
@@ -1298,7 +1297,7 @@ class ExtensionsTest final : public QObject {
       };
 
       // Legacy single-slot selection: the layout follows the appearance.
-      QCOMPARE(peer.call("extensions.select",
+      QCOMPARE(peer.call("appearance.select",
                          {{"slot", "theme"},
                           {"contribution", "test.combo/layout"}})
                    .value("status").toString(),
@@ -1307,7 +1306,7 @@ class ExtensionsTest final : public QObject {
       QVERIFY(!app.extensions->selections().contains("themeLayout"));
       QCOMPARE(app.theme->layoutSelectedId(), QString("test.combo/layout"));
       QTRY_VERIFY(comboPlayer());
-      QCOMPARE(peer.call("extensions.select",
+      QCOMPARE(peer.call("appearance.select",
                          {{"slot", "theme"},
                           {"contribution", "test.combo/palette"}})
                    .value("status").toString(),
@@ -1445,7 +1444,7 @@ class ExtensionsTest final : public QObject {
       QVERIFY(peer.socket.waitForConnected(3000));
       QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
                                    .value("data").toObject()
-                                   .value("runtimeReady").toBool(), 15000);
+                                   .value("runtime").toObject().value("ready").toBool(), 15000);
       QCOMPARE(peer.call("extensions.install",
                          {{"path", folder}, {"development", true}})
                    .value("status").toString(), "ok");
@@ -1519,7 +1518,7 @@ class ExtensionsTest final : public QObject {
       QTRY_VERIFY_WITH_TIMEOUT(peer.call("extensions.list")
                                    .value("data")
                                    .toObject()
-                                   .value("runtimeReady")
+                                   .value("runtime").toObject().value("ready")
                                    .toBool(),
                                15000);
       const auto folder = profile.filePath("trust");
@@ -1604,7 +1603,7 @@ class ExtensionsTest final : public QObject {
 
       // Stored selections cannot bypass the QML gate on an already running package.
       idle();
-      QCOMPARE(peer.call("extensions.select",
+      QCOMPARE(peer.call("appearance.select",
                          {{"slot", "themeLayout"},
                           {"contribution", "test.trust/default"}})
                    .value("status").toString(),
@@ -1657,7 +1656,7 @@ class ExtensionsTest final : public QObject {
         peer.socket.connectToServer(runtime.serverName());
         QVERIFY(peer.socket.waitForConnected(3000));
         QTRY_VERIFY_WITH_TIMEOUT(
-            peer.call("extensions.list").value("data").toObject().value("runtimeReady").toBool(), 15'000);
+            peer.call("extensions.list").value("data").toObject().value("runtime").toObject().value("ready").toBool(), 15'000);
         for (const QString name : {"test-source", "custom-ui"}) {
             const QString id = "example." + name;
             auto result =
@@ -1740,7 +1739,7 @@ class ExtensionsTest final : public QObject {
         QTRY_COMPARE(controllers.extensions->browserSources().size(), 1);
         QTRY_VERIFY(visualItem(window->contentItem(), "nav_music_sources"));
         QCOMPARE(
-            peer.call("extensions.select", {{"slot", "theme"}, {"contribution", "example.custom-ui/ocean"}})
+            peer.call("appearance.select", {{"slot", "theme"}, {"contribution", "example.custom-ui/ocean"}})
                 .value("status")
                 .toString(),
             "ok");
@@ -1763,7 +1762,7 @@ class ExtensionsTest final : public QObject {
         }
         recoveryWindow->close();
         QCOMPARE(
-            peer.call("extensions.select", {{"slot", "shell"}, {"contribution", "example.custom-ui/shell"}})
+            peer.call("appearance.select", {{"slot", "shell"}, {"contribution", "example.custom-ui/shell"}})
                 .value("status")
                 .toString(),
             "ok");

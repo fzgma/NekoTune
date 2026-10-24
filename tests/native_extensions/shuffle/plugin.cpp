@@ -24,25 +24,24 @@ class ShuffleFixture final : public QObject, public sdk::IExtensionPlugin {
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &context, std::function<void(Result<void>)> done) override {
-        auto *shuffle = sdk::shuffleContext(context);
-        if (!shuffle) { done(failure("Missing shuffle capability")); return; }
-        m_provider.mode = context.config().value("mode").toString();
-        m_registration = shuffle->registerShuffleStrategy("test", &m_provider, {{"name", "Test shuffle"}});
-        m_validation = context.registerService("validate", [this, shuffle](const sdk::Params &, sdk::Reply reply) {
-            const bool duplicate = bool(shuffle->registerShuffleStrategy("test", &m_provider, {{"name", "Duplicate"}}));
-            const bool invalid = bool(shuffle->registerShuffleStrategy("../bad", &m_provider, {{"name", "Invalid"}}));
-            const bool unnamed = bool(shuffle->registerShuffleStrategy("unnamed", &m_provider, {}));
-            const bool nullProvider = bool(shuffle->registerShuffleStrategy("null", nullptr, {{"name", "Null"}}));
+    void activate(sdk::ExtensionContext &context, sdk::Done done) override {
+        auto *shuffle = &context.shuffle();
+        m_provider.mode = context.config().get().value("mode").toString();
+        m_registration = shuffle->add("test", &m_provider, {.name = "Test shuffle"});
+        m_validation = context.services().add("validate", [this, shuffle](const sdk::Params &, sdk::Reply reply) {
+            const bool duplicate = bool(shuffle->add("test", &m_provider, {.name = "Duplicate"}));
+            const bool invalid = bool(shuffle->add("../bad", &m_provider, {.name = "Invalid"}));
+            const bool unnamed = bool(shuffle->add("unnamed", &m_provider, {}));
+            const bool nullProvider = bool(shuffle->add("null", nullptr, {.name = "Null"}));
             reply(sdk::Params{{"duplicate", duplicate}, {"invalid", invalid}, {"unnamed", unnamed}, {"null", nullProvider}});
         });
-        m_release = context.registerService("release", [this](const sdk::Params &, sdk::Reply reply) {
+        m_release = context.services().add("release", [this](const sdk::Params &, sdk::Reply reply) {
             m_registration.reset();
             reply(sdk::Params{});
         });
-        m_register = context.registerService("register", [this, shuffle](const sdk::Params &, sdk::Reply reply) {
+        m_register = context.services().add("register", [this, shuffle](const sdk::Params &, sdk::Reply reply) {
             m_registration.reset();
-            m_registration = shuffle->registerShuffleStrategy("test", &m_provider, {{"name", "Test shuffle"}});
+            m_registration = shuffle->add("test", &m_provider, {.name = "Test shuffle"});
             reply(sdk::Params{{"registered", bool(m_registration)}});
         });
         done({});

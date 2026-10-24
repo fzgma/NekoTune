@@ -1,4 +1,4 @@
-#include "infrastructure/extensions/semver.h"
+#include "infrastructure/extensions/package/semver.h"
 #include <QRegularExpression>
 #include <QStringList>
 

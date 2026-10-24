@@ -1,6 +1,7 @@
-#include "infrastructure/extensions/crash_guard.h"
+#include "infrastructure/extensions/runtime/crash_guard.h"
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <atomic>
 #include <cstring>
 #ifdef Q_OS_UNIX
@@ -14,21 +15,24 @@
 
 namespace nekotune::crashguard {
 namespace {
-// Fixed buffers: the signal handler may not allocate. Only the backend thread writes them.
+// Fixed buffers: the signal handler may not allocate.
 #ifdef Q_OS_WIN
 wchar_t sentinel[4096];
 #else
 char sentinel[4096];
 #endif
-char active[128];
-std::atomic<int> activeLength{0};
+QString sentinelFile;
+// Synchronous fatal signals and the Windows filter run on the faulting thread. The library
+// is linked statically into the executable, so the handler can read these through static TLS.
+thread_local char active[128];
+thread_local int activeLength = 0;
 #ifdef Q_OS_UNIX
 constexpr int fatalSignals[] = {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT};
 struct sigaction previous[std::size(fatalSignals)];
 std::atomic<bool> installed{false};
 
 void handler(int signal) {
-    const int length = activeLength.load();
+    const int length = activeLength;
     if (length > 0 && sentinel[0]) {
         const int fd = ::open(sentinel, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
         if (fd >= 0) {
@@ -47,7 +51,7 @@ LPTOP_LEVEL_EXCEPTION_FILTER previousFilter = nullptr;
 std::atomic<bool> installed{false};
 
 LONG WINAPI filter(EXCEPTION_POINTERS *exception) {
-    const int length = activeLength.load();
+    const int length = activeLength;
     if (length > 0 && sentinel[0]) {
         const HANDLE file = CreateFileW(sentinel, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file != INVALID_HANDLE_VALUE) {
@@ -60,14 +64,15 @@ LONG WINAPI filter(EXCEPTION_POINTERS *exception) {
 }
 #endif
 void setActive(const QByteArray &id) {
-    activeLength.store(0);
+    activeLength = 0;
     const auto length = qMin<qsizetype>(id.size(), sizeof(active));
     std::memcpy(active, id.constData(), length);
-    activeLength.store(int(length));
+    activeLength = int(length);
 }
 } // namespace
 
 void install(const QString &sentinelPath) {
+    sentinelFile = sentinelPath;
 #ifdef Q_OS_WIN
     const auto path = QDir::toNativeSeparators(sentinelPath);
     if (path.size() >= qsizetype(std::size(sentinel)))
@@ -101,7 +106,17 @@ QString takeSentinel(const QString &sentinelPath) {
     file.remove();
     return id;
 }
-Scope::Scope(const QString &extensionId) : m_previous(active, activeLength.load()) {
+void writeSentinel(const QString &extensionId) {
+    QSaveFile file(sentinelFile);
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    const auto id = extensionId.toUtf8();
+    if (file.write(id) == id.size())
+        file.commit();
+}
+void clearSentinel() { QFile::remove(sentinelFile); }
+Scope::Scope(const QString &extensionId) : m_previous(active, activeLength) {
     setActive(extensionId.toUtf8());
 }
 Scope::~Scope() { setActive(m_previous); }

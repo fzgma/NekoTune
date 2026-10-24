@@ -21,6 +21,7 @@ class ExtensionsController final : public FeatureController {
     explicit ExtensionsController(IpcClient &client);
     QVariantList items() const { return m_items; }
     QVariantList pages() const;
+    QVariantList themes() const { return m_themes; }
     QVariantList settingsPages() const { return contributions("settings"); }
     QVariantList commands() const;
     QVariantList sources() const;
@@ -50,11 +51,10 @@ class ExtensionsController final : public FeatureController {
 
   private:
     void apply(const QJsonObject &data);
-    QVariantList registrations(const QString &kind) const;
-    QVariantList m_items;
+    QVariantList m_items, m_themes, m_commands;
+    QVariantMap m_contributions, m_sources, m_runtime;
     QVariantMap m_selections;
     QString m_error;
     int m_nextId = 1;
-    bool m_catalogueReady = false;
-    bool m_startupComplete = false;
+    bool m_appearanceLoaded = false;
 };

@@ -7,7 +7,7 @@ NekoTune 的扩展由 C++ 原生库（Qt 插件）和可选 QML 界面组成。�
 社区扩展维护在作者自己的仓库，不需要下载或编译整个宿主。
 
 1. 从目标宿主的 Release 下载对应平台的 `NekoTuneSDK-<宿主版本>-<linux|windows>-x64.zip`
-   和 `.sha256`，核对校验值后解压。该附件由新的 CI 流程生成，旧 Release 可能没有。
+   和 `.sha256`，核对校验值后解压。选择包含 SDK 3.0.0 的附件，旧 Release 可能没有 SDK 或仍提供旧版接口。
 2. 根据 `share/NekoTuneSDK/build-info.json` 准备 Qt 和编译器。SDK 包只含头文件、
    CMake 工具、模板和环境信息，不包含 Qt 或编译器；安装的 SDK 会在配置阶段拒绝
    平台、Qt 小版本或编译器主版本不匹配的原生工程。
@@ -17,7 +17,7 @@ NekoTune 的扩展由 C++ 原生库（Qt 插件）和可选 QML 界面组成。�
 4. 按模板 README 配置、构建和测试，在宿主挂载 `build/extensions/<id>/` 调试。
    修改源码后重新构建，宿主自动重载；用独立 `NEKOTUNE_HOME` 和 `NEKOTUNE_SOCKET`
    隔离测试。原生模板的加载测试不替代真实宿主的功能、界面及启停验收。
-5. 原生插件仓库设置 Actions 变量 `NEKOTUNE_SDK_TAG` 为**已经包含 SDK 附件**的宿主
+5. 原生插件仓库设置 Actions 变量 `NEKOTUNE_SDK_TAG` 为**已经包含 SDK 3 附件**的宿主
    Release 标签，并将模板引用的公共 workflow 固定到对应标签或提交 SHA。
    提交后自动构建 Linux/Windows ZIP，供下载验收。
 6. 更新清单版本，推送一致的 `v<version>` 标签，模板工作流会创建带 ZIP 和 SHA-256
@@ -75,7 +75,7 @@ my-extension/
   "id": "my.extension",
   "name": "My extension",
   "version": "1.0.0",
-  "apiVersion": 2,
+  "apiVersion": 3,
   "qt": "6.11",
   "library": {
     "linux-x86_64": "lib/libmy-extension.so",
@@ -95,7 +95,7 @@ my-extension/
 
 | 字段 | 说明 |
 | --- | --- |
-| `apiVersion` | 带原生库的扩展必须为 `2`。纯界面扩展与主题包可写 `1` 或 `2`。旧版 Node.js 扩展（带 `main`）不再加载，管理页提示需要更新 |
+| `apiVersion` | 带原生库的扩展必须为 `3`。纯界面扩展与主题包可写 `1`–`3`。旧版 Node.js 扩展（带 `main`）不再加载，管理页提示需要更新 |
 | `library` | 平台到库文件相对路径的映射。当前平台缺少条目时扩展可以安装，但不能启用 |
 | `qt` | 构建所用的 Qt 小版本，必须与宿主一致 |
 | `nativeModules` | 扩展 QML 带 Qt 原生模块时声明，更新需要重启 |
@@ -104,7 +104,7 @@ my-extension/
 
 ### ABI 约定
 
-扩展库只依赖 SDK 头文件，不链接宿主程序的符号。由于接口使用 `QString`、`QVariantMap` 和 `std::function`，扩展必须与宿主使用同一套工具链：Linux 上为同一 GCC 主版本，Windows 上与发行版相同的 MSYS2 UCRT64 MinGW；Qt 小版本也必须一致。宿主升级 Qt 小版本后需要重新构建扩展。接口不兼容时 IID（`org.nekotune.IExtensionPlugin/2`）升级，旧库会被拒绝加载。
+扩展库只依赖 SDK 头文件，不链接宿主程序的符号。由于接口使用 `QString`、`QVariantMap` 和 `std::function`，扩展必须与宿主使用同一套工具链：Linux 上为同一 GCC 主版本，Windows 上与发行版相同的 MSYS2 UCRT64 MinGW；Qt 小版本也必须一致。宿主升级 Qt 小版本后需要重新构建扩展。当前 SDK 版本为 3.0.0，插件 IID 为 `org.nekotune.IExtensionPlugin/3`。SDK 2.x 编译的插件必须迁移并重新构建，否则启用失败，错误为 `Unsupported extension interface org.nekotune.IExtensionPlugin/2`。
 
 ## 构建与打包
 
@@ -115,7 +115,7 @@ cmake_minimum_required(VERSION 3.28)
 project(MyExtension LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core)
-find_package(NekoTuneSDK 2 REQUIRED)   # 或 add_subdirectory(/path/to/NekoTune/sdk nekotune-sdk)
+find_package(NekoTuneSDK 3 REQUIRED)   # 或 add_subdirectory(/path/to/NekoTune/sdk nekotune-sdk)
 
 nekotune_add_extension(my_extension
     MANIFEST extension.json
@@ -164,15 +164,15 @@ class MyExtension final : public QObject, public sdk::IExtensionPlugin {
     Q_PLUGIN_METADATA(IID NEKOTUNE_EXTENSION_IID)
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
   public:
-    void activate(sdk::IExtensionContext &context, std::function<void(Result<void>)> done) override {
-        m_pause = context.registerCommand("pause", [&context](const sdk::Params &, sdk::Reply reply) {
-            context.hostCall("player.pause", {}, reply);
-        }, {{"title", "Pause playback"}, {"shortcut", "Ctrl+Shift+P"}});
-        m_hello = context.registerService("hello", [](const sdk::Params &params, sdk::Reply reply) {
+    void activate(sdk::ExtensionContext &context, sdk::Done done) override {
+        m_pause = context.commands().add("pause", [&context](const sdk::Params &, sdk::Reply reply) {
+            context.host().call("player.pause", {}, reply);
+        }, {.title = "Pause playback", .shortcut = "Ctrl+Shift+P"});
+        m_hello = context.services().add("hello", [](const sdk::Params &params, sdk::Reply reply) {
             reply(sdk::Params{{"greeting", "Hello, " + params.value("name").toString()}});
         });
-        m_track = context.on("player.track_changed", [&context](const sdk::Params &event) {
-            context.log(QtInfoMsg, "Now playing: " + event.value("song").toMap().value("title").toString());
+        m_track = context.events().on("player.track_changed", [&context](const sdk::Params &event) {
+            context.log().write(QtInfoMsg, "Now playing: " + event.value("song").toMap().value("title").toString());
         });
         done({});
     }
@@ -191,29 +191,36 @@ class MyExtension final : public QObject, public sdk::IExtensionPlugin {
 
 | 能力 | 接口 |
 | --- | --- |
-| 调用宿主业务 | `hostCall(method, params, done)`，方法见 [API](API.md) |
-| 事件 | `on(name, handler)`（`*` 订阅全部），`publish(name, data)`；自定义事件以 `extension.<id>.<name>` 广播 |
-| 命令、快捷键 | `registerCommand(id, handler, {title, shortcut})` |
-| 扩展间调用 | `registerService`、`callService(extensionId, service, params, done)` |
-| 随机算法（SDK 2.1） | `sdk::shuffleContext(context)->registerShuffleStrategy(id, provider, {name})`，先检查能力是否可用 |
-| 动态界面贡献 | `registerUi(kind, id, descriptor)`，字段与清单相同 |
-| 配置 | `config()`、`updateConfig(config, done)`；变更会作为 `extension.config_changed` 事件送达 |
-| 小型 JSON 存储 | `storageGet/storageSet`；总量上限 8 MiB，大文件使用 `dataDirectory()` |
-| 凭据 | `secretGet/secretSet/secretDelete`，按扩展命名空间保存到系统密钥库，无明文回退 |
-| 任务进度 | `reportTask(taskId, {state, progress, message})` |
-| 日志 | `log(level, message)`，进入该扩展的日志环形缓冲区 |
+| 调用宿主业务 | `context.host().call(method, params, done)`，方法见 [API](API.md)。扩展管理与授信（`extensions.*`，`extensions.call`、`extensions.list` 除外）、`appearance.*`、曲库删除／迁移／恢复、清空历史与 AI 配置方法返回 `PermissionDenied`；具体范围见 API |
+| 事件 | `context.events().on(name, handler)`（`*` 订阅全部）、`publish(name, data)`；自定义事件以 `extension.<id>.<name>` 广播 |
+| 扩展间调用 | `context.services().add(id, handler)`、`call(extensionId, service, params, done)` |
+| 命令、快捷键 | `context.commands().add(id, handler, CommandInfo{title, shortcut})` |
+| 动态界面贡献 | `context.ui().add(kind, id, descriptor)`，字段与清单相同 |
+| 音乐来源 | `context.music().add(id, provider, MusicSourceInfo)` |
+| 歌词来源 | `context.lyrics().add(id, provider, LyricsSourceInfo)` |
+| 随机算法 | `context.shuffle().add(id, provider, ShuffleInfo)` |
+| PCM 观察 | `context.pcm().capabilities()`、`subscribe(handler)` |
+| 配置 | `context.config().get()`、`update(config, done)`；变更作为 `extension.config_changed` 事件送达 |
+| 小型 JSON 存储 | `context.storage().get/set()`；总量上限 8 MiB，大文件使用 `context.info().dataDirectory` |
+| 凭据 | `context.secrets().get/set/remove()`，按扩展命名空间保存到系统密钥库，无明文回退 |
+| 任务进度 | `context.tasks().report(taskId, TaskProgress{state, progress, message})` |
+| 日志 | `context.log().write(level, message)`，进入扩展的日志环形缓冲区 |
+| 自建线程归因 | `context.attributeThread()`，返回的 RAII 对象必须在创建它的线程销毁 |
 | 系统能力 | Qt 与标准 C++（`QNetworkAccessManager`、`QProcess`、`QFile` 等） |
 
-`registerXxx` 返回 `RegistrationPtr`；释放句柄即撤销注册。在后端线程上注册时，宿主立即校验：ID 非法、重复，或 `source` 越出扩展目录时返回 `nullptr`，原因写入扩展日志。
+注册能力的 `add()` 及事件订阅返回 `RegistrationPtr`；释放句柄即撤销注册。在后端线程上注册时，宿主立即校验：ID 非法、重复，或 `source` 越出扩展目录时返回 `nullptr`，原因写入扩展日志。
 
 线程与生命周期约定：
 
 - `activate`、`deactivate`、服务、命令、事件和来源方法都在后端线程调用，必须尽快返回。Qt 的异步对象（网络请求、`QProcess`、定时器）可以直接在后端线程使用；会阻塞的计算和 I/O 放到自己的线程或 `QtConcurrent`，否则整个后端会卡住。
-- 上下文的所有方法都可以从任意线程调用，宿主会转到后端线程执行。传给扩展的 `done`/`reply` 也可以从任意线程调用一次，宿主保证结果在后端线程处理。
+- 一般上下文操作可从其他线程调用，由宿主转到后端线程；返回注册句柄等同步操作建议在后端线程执行，PCM 查询与订阅在后端线程执行。传给扩展的 `done`/`reply` 可从任意线程调用一次，结果回到后端线程处理。上下文只在本次激活有效，`deactivate()` 返回后不得继续持有或使用。
+- 自建线程、`QThread` 或 `QtConcurrent` 任务开始时调用 `context.attributeThread()`，保存返回值到工作结束，并在同一线程销毁，崩溃才能归因到扩展。宿主调用的入口和回调已自动归因。
 - 扩展停用后，迟到的回调会被宿主丢弃，不会再调用扩展代码。
 - `activate` 必须在 30 秒内调用 `done`，普通调用超时 30 秒，下载解析 10 分钟，`downloaded` 两分钟。
 - 库在本次运行中不卸载。再次启用会复用同一个插件对象，因此 `deactivate()` 必须停止自建线程、取消网络请求、释放注册句柄并恢复初始状态。
-- 扩展代码抛出的 C++ 异常会被捕获，该扩展按故障停用；随机算法的选曲异常只禁用对应注册并回退至内置洗牌。进程级崩溃无法拦截，由下次启动的自动停用兜底。宿主不检测后台卡死。
+- 扩展代码抛出的 C++ 异常会被捕获，该扩展按故障停用；随机算法的选曲异常只禁用对应注册并回退至内置洗牌。进程级崩溃无法拦截，由下次启动的自动停用兜底。
+- 后端线程上的单次扩展调用超过 5 秒记录告警，超过 30 秒写入卡死哨兵；调用返回后按故障停用，若始终不返回，下次启动按崩溃停用。随机算法 `select` 超过 200 毫秒记录告警。这些检测不能抢占原生代码，也不能恢复被阻塞的 GUI。
+- 加载过扩展代码的会话连续两次异常退出且无法归因时，下次启动自动进入安全模式。`extensions.list` 的 `runtime.safeModeReason` 为 `repeated_crashes`，并通过 `extensions.error` 报告原因；正常退出会清除异常退出计数。
 
 服务返回对象；标量或数组应包装为 `{value: ...}`。ZIP 更新在新版本激活失败时恢复旧程序；开发目录自动重载无法还原作者已经覆盖的源文件，修改错误后手动重试即可。
 
@@ -221,20 +228,11 @@ class MyExtension final : public QObject, public sdk::IExtensionPlugin {
 
 ### 自定义随机算法
 
-SDK 2.1 为原生扩展提供独立的可选接口 `IShuffleExtensionContext`，不改变原有 context
-虚表、插件 IID 或清单 `apiVersion: 2`。用 `sdk::shuffleContext(context)` 检查宿主能力；
-返回空指针时，应提示需要支持 SDK 2.1 随机算法的宿主。纯 QML 扩展不能注册原生算法。
-
-实现 `IShuffleProvider::select(const ShuffleRequest &)`，再注册并保存句柄：
+原生扩展实现 `IShuffleProvider::select(const ShuffleRequest &)`，通过 SDK 3 的随机能力注册并保存句柄；纯 QML 扩展不能注册原生算法：
 
 ```cpp
-auto *shuffle = sdk::shuffleContext(context);
-if (!shuffle) {
-    done(failure("Requires a host with SDK 2.1 shuffle support"));
-    return;
-}
-m_shuffle = shuffle->registerShuffleStrategy("artist", &m_provider,
-                                           {{"name", "Avoid consecutive artists"}});
+m_shuffle = context.shuffle().add("artist", &m_provider,
+                                  {.name = "Avoid consecutive artists"});
 ```
 
 算法完整 ID 为 `扩展ID/算法ID`；描述必须包含非空名称。用户在队列页或抽屉的播放模式菜单
@@ -259,7 +257,7 @@ m_shuffle = shuffle->registerShuffleStrategy("artist", &m_provider,
 重载才能恢复。宿主不为同步原生计算提供超时抢占。provider 必须存活到注册释放，
 `deactivate()` 中先释放注册再销毁 provider。
 
-程序保存在音乐目录下 `config/extensions/packages`，数据保存在 `config/extensions/data/<id>`，注册状态与界面选择保存在 `config/extensions/registry.json`。这些位置均遵循 `NEKOTUNE_HOME`。
+程序保存在音乐目录下 `config/extensions/packages`，数据保存在 `config/extensions/data/<id>`，注册状态保存在 `config/extensions/registry.json`，外观与界面选择独立保存在 `config/extensions/appearance.json`。首次启动将旧注册表中的选择迁移到外观文件，已有外观文件时不覆盖。这些位置均遵循 `NEKOTUNE_HOME`。
 
 ## QML 界面、菜单和主题
 
@@ -283,7 +281,7 @@ Item {
 
 `ExtensionApi` 提供 `call(method, params)`、`invoke(service, params)`、宿主事件信号、`app` 业务控制器、`window` 窗口对象、`theme` 主题变量和本地化辅助函数 `t`。`wallpaper` 在主题音乐壁纸中提供只读播放、歌词、设置与屏幕上下文，在其他视图中为 `null`，详见 [主题音乐壁纸](themes.md#主题音乐壁纸)。`ownerId` 是当前扩展 ID。后台不直接持有 QML 对象；多前端可各自加载视图，共享同一扩展后台。
 
-每个扩展视图用独立 QML 引擎管理；重载销毁旧视图与引擎。耗时任务应放在后台，QML 代码仍共享 GUI 线程，不能保证任意 QML 代码的故障隔离。
+每个扩展视图用独立 QML 引擎管理；重载销毁旧视图与引擎。耗时任务应放在后台，QML 代码仍共享 GUI 线程，不能保证任意 QML 代码的故障隔离。已知限制 R16：已信任扩展的 QML 可取得完整 `controllers`（通过 `ExtensionApi.app`）；原生 SDK 的宿主调用限制不约束 QML 侧，也不构成权限沙箱。
 
 同目录的 QML 类型可直接使用，子目录用相对路径导入（例如 `import "components"`）。宿主不将每个视图目录额外注册为模块搜索根，避免 Qt 6.8 把多个扩展的同名类型（如 `Translator.qml`）解析为同一个旧式模块。
 
@@ -323,7 +321,7 @@ class Music final : public sdk::IMusicProvider {
     void track(const QString &id, std::function<void(Result<sdk::Track>)> done) override {
         done(sdk::Track{id, "Example song"});
     }
-    void resolve(const QString &id, const QString &purpose,
+    void resolve(const QString &id, sdk::ResolvePurpose purpose,
                  std::function<void(Result<sdk::ResolvedAudio>)> done) override {
         sdk::ResolvedAudio audio;
         audio.url = QUrl("https://example.org/audio.mp3");
@@ -332,17 +330,17 @@ class Music final : public sdk::IMusicProvider {
     }
 };
 // activate():
-m_music = context.registerMusicProvider("music", &m_provider, {{"name", "Example music"}, {"download", true}});
+m_music = context.music().add("music", &m_provider, {.name = "Example music", .download = true});
 ```
 
 搜索返回 `SearchPage{tracks, cursor}`，`cursor` 是扩展自己的分页游标，空字符串表示没有下一页。曲目必须有稳定字符串 `id` 和 `title`，可带 `artist`、`album`、`durationMs`、`coverUrl`。不要把凭据或签名播放地址放入曲目描述。
 
-音源自带浏览页面时，在注册描述中指定 `page`，其值为本扩展 `contributes.pages` 的局部 ID，例如 `{{"name", "Example music"}, {"page", "browse"}}`。未指定时自动匹配与音源局部 ID 相同的页面。页面必须位于默认或 `primary`、`utility` 导航组；设置页和无关页面不算音乐页面。存在对应页面的音源使用自己的入口，不重复出现在通用「扩展音源」中。只有仍有无专属页面的音源时，默认侧栏才显示通用入口；页面撤销后音源重新出现在通用列表。`music.sources` 和 SDK 的完整来源列表保持不变，默认界面使用控制器的 `browserSources` 过滤结果。
+音源自带浏览页面时，在注册描述中指定 `page`，其值为本扩展 `contributes.pages` 的局部 ID，例如 `{.name = "Example music", .page = "browse"}`。未指定时自动匹配与音源局部 ID 相同的页面。页面必须位于默认或 `primary`、`utility` 导航组；设置页和无关页面不算音乐页面。存在对应页面的音源使用自己的入口，不重复出现在通用「扩展音源」中。只有仍有无专属页面的音源时，默认侧栏才显示通用入口；页面撤销后音源重新出现在通用列表。`music.sources` 和 SDK 的完整来源列表保持不变，默认界面使用控制器的 `browserSources` 过滤结果。
 
-`resolve(id, purpose)` 返回 `ResolvedAudio`：`url`、可选 `headers`、毫秒 Unix 时间戳 `expiresAt`，以及下载文件扩展名 `extension`。`purpose` 为 `play` 或 `download`，下载时可以返回更慢但更完整的结果。`url` 可以是：
+`resolve(id, purpose)` 返回 `ResolvedAudio`：`url`、可选 `headers`、毫秒 Unix 时间戳 `expiresAt`，以及下载文件扩展名 `extension`。`purpose` 为 `sdk::ResolvePurpose::Play` 或 `sdk::ResolvePurpose::Download`，下载时可以返回更慢但更完整的结果。`url` 可以是：
 
 - `https://`/`http://`：宿主通过本地代理播放、下载，并附加 `headers`。
-- `file://`：必须位于该扩展的 `dataDirectory()` 内。播放时直接打开，下载时宿主复制后入库。适合需要预处理（转码、裁切）的来源；扩展应自行清理旧文件。
+- `file://`：必须位于该扩展的 `context.info().dataDirectory` 内。播放时直接打开，下载时宿主复制后入库。适合需要预处理（转码、裁切）的来源；扩展应自行清理旧文件。
 
 媒体编码能力由播放后端决定。
 
@@ -354,9 +352,9 @@ m_music = context.registerMusicProvider("music", &m_provider, {{"name", "Example
 
 在线曲目加入队列或歌单后才保存，以来源和来源曲目 ID 去重；本地音频继续以真实 SHA-256 去重。本地曲库默认不显示纯在线记录。来源故障或停用不会删除队列/歌单项。下载完成后返回本地 `song_id`，不自动改动原有在线引用或播放队列。
 
-歌词实现 `sdk::ILyricsProvider` 并调用 `registerLyricsProvider(id, provider, {{"name", ...}})`。`search(query, done)` 收到 `title`、`artist`、`album`、`duration_ms`、`track_id`，返回 `{candidates:[...]}`，候选可带 `title`、`artist`、`score` 和来源自行定义的字段。`resolve(candidate, done)` 返回 `synced_lyrics`、`krc_lyrics`、`plain_lyrics`、`instrumental`、`cover_url` 等字段。返回现有 LRC/KRC 文本，宿主负责解析、选择和缓存。动态歌词来源出现在既有歌词搜索入口中，不改变本地歌词优先级。
+歌词实现 `sdk::ILyricsProvider`，通过 `context.lyrics().add("lyrics", &m_provider, {.name = "Example lyrics"})` 注册。`search(const LyricsQuery &, done)` 接收强类型的 `title`、`artist`、`album`、`durationMs`、`trackId`，返回 `QVector<LyricsCandidate>`。候选包含标题、歌手、专辑、时长、评分及可选的 `LyricsDocument`；来源自定义字段放在 `LyricsCandidate::extra`，只留在后端，不序列化给前端。
 
-分阶段歌词来源可以让 `resolve` 再次返回 `{candidates:[...]}`；歌曲版本候选标记 `song_result:true`，随后的歌词候选标记为 false 或省略。候选中的访问凭据只保存在后端解析句柄中，不序列化给前端。
+`resolve(const LyricsCandidate &, done)` 返回 `LyricsResolution`：可选的 `document` 或下一阶段的 `candidates`。文档使用 `syncedLyrics`、`krcLyrics`、`plainLyrics`、`instrumental`、`coverUrl`，宿主负责解析现有 LRC/KRC 文本、选择和缓存。歌曲版本候选设置 `songResult: true`，随后的歌词候选设置为 false。动态歌词来源出现在既有歌词搜索入口中，不改变本地歌词优先级。
 
 ## 示例与验证
 
@@ -377,22 +375,21 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ctest --test-dir build --out
 
 `nekotune_native_extensions_test` 覆盖信任、加载失败、依赖、存储、事件、ZIP 安装、主题导出、音频代理、下载和崩溃记录。`cmake --install build --prefix <directory>` 安装应用、后台和扩展 SDK；Qt 等系统依赖仍由部署环境提供。
 
-主题包使用 `type: "theme"`，仅贡献 `themes`，没有扩展库。主题包无需信任即可启用；含 QML/JavaScript 的界面和壁纸在用户确认信任前不会加载，配色可单独使用。`extensions.list` 的条目包含 `type`、`hasCode` 和 `themes`（包含未启用主题的展示描述），`contributes` 仍只包含运行中的贡献。切勿根据 `themes` 列表直接加载 QML。前端只加载 `ThemeController` 生成的、已信任含代码主题的入口。
+主题包使用 `type: "theme"`，仅贡献 `themes`，没有扩展库。主题包无需信任即可启用；含 QML/JavaScript 的界面和壁纸在用户确认信任前不会加载，配色可单独使用。`extensions.list` 的扩展条目包含 `type`、`hasCode`；顶层 `themes` 包含未启用主题的展示描述，并以 `available` 表示是否运行，顶层 `contributions`、`sources`、`commands` 只包含运行中的贡献与注册。切勿根据 `themes` 列表直接加载 QML。前端只加载 `ThemeController` 生成的、已信任含代码主题的入口。
 
-## 播放器 PCM 与频谱扩展（SDK 2.2）
+## 播放器 PCM 与频谱扩展
 
-宿主提供独立可选 `IPcmExtensionContext`，见
-[`pcm_provider.h`](../sdk/include/nekotune/sdk/pcm_provider.h)。原生扩展检测
-`sdk::pcmContext(context)` 后可查询 `pcmCapabilities()`，并订阅只读的已消费 PCM。
-订阅释放遵循 `RegistrationPtr`，原有 context ABI 和插件 IID 不变。
-默认 FFmpeg 后端支持；Qt 兼容后端明确返回不可用。无订阅不进行 PCM 分析复制。
+SDK 3 通过 `context.pcm().capabilities()` 查询能力，调用 `context.pcm().subscribe(handler)`
+订阅只读的已消费 PCM，格式见 [`pcm_provider.h`](../sdk/include/nekotune/sdk/pcm_provider.h)。
+订阅释放遵循 `RegistrationPtr`；默认 FFmpeg 后端支持，Qt 兼容后端明确返回不可用。
+无订阅不进行 PCM 分析复制。
 
 扩展收到的是应用音量处理后的交错立体声 float、采样率、流代次、输出帧位置和媒体时间；
 分析队列溢出会丢帧，扩展必须识别缺口并重置。回调在后端线程，耗时分析移至扩展工作线程。
 音频输出线程不执行扩展回调，不发送 JSON，也不等待扩展处理。
 
 主题可通过 `ExtensionApi.call("extensions.call", {id, service, params})` 调用独立扩展，
-后台通过 `publish` 推送 `extension.<id>.<event>`。当前前端 `api.event` 转发 IPC 事件，
+后台通过 `context.events().publish()` 推送 `extension.<id>.<event>`。当前前端 `api.event` 转发 IPC 事件，
 主题必须过滤完整事件名；`invoke` 仍只针对当前主题所属扩展。Qt 列表可能是 QML sequence，
 不能仅用 `Array.isArray` 判断事件中的数组。纯主题包不声明扩展依赖，缺少服务时应保留基本展示。
 独立频谱扩展协议由该扩展维护，宿主 PCM 能力不等于已安装频谱扩展。

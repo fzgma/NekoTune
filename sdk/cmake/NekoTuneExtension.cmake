@@ -55,7 +55,7 @@ function(nekotune_add_extension target)
     endif()
 
     _nekotune_platform_key(platform)
-    string(JSON json SET "${json}" apiVersion 2)
+    string(JSON json SET "${json}" apiVersion 3)
     string(JSON json SET "${json}" qt "\"${Qt6_VERSION_MAJOR}.${Qt6_VERSION_MINOR}\"")
     string(JSON json SET "${json}" library "{\"${platform}\": \"lib/$<TARGET_FILE_NAME:${target}>\"}")
     string(JSON json REMOVE "${json}" main)

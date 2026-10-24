@@ -1,6 +1,6 @@
-#include "infrastructure/extensions/extension_manifest.h"
-#include "infrastructure/extensions/semver.h"
-#include "infrastructure/extensions/theme_package.h"
+#include "infrastructure/extensions/package/extension_manifest.h"
+#include "infrastructure/extensions/package/semver.h"
+#include "infrastructure/extensions/package/theme_package.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -48,19 +48,19 @@ Result<ExtensionManifest> readManifest(const QString &directory) {
     const auto document = QJsonDocument::fromJson(file.readAll(), &error);
     if (!document.isObject())
         return failure("Invalid extension.json: " + error.errorString());
-    ExtensionManifest manifest{document.object().toVariantMap()};
-    const auto &data = manifest.data;
+    const auto data = document.object().toVariantMap();
+    ExtensionManifest manifest;
     const int apiVersion = data.value("apiVersion").toInt();
-    if (!validExtensionId(manifest.id()) || !semver::parse(manifest.version()) ||
-        data.value("name").typeId() != QMetaType::QString || (apiVersion != 1 && apiVersion != 2))
-        return failure("Invalid extension identity, version or apiVersion (expected 2)");
-    if (manifest.id() == "builtin")
+    if (!validExtensionId(data.value("id").toString()) || !semver::parse(data.value("version").toString()) ||
+        data.value("name").typeId() != QMetaType::QString || (apiVersion != 1 && apiVersion != 2 && apiVersion != 3))
+        return failure("Invalid extension identity, version or apiVersion (expected 3)");
+    if (data.value("id").toString() == "builtin")
         return failure("Reserved extension ID");
     if (data.contains("main"))
-        return failure("Node.js extensions are no longer supported; update the extension to apiVersion 2");
+        return failure("Node.js extensions are no longer supported; update the extension to apiVersion 3");
     const bool hasLibrary = data.contains("library");
-    if (hasLibrary && apiVersion != 2)
-        return failure("Native libraries require apiVersion 2");
+    if (hasLibrary && apiVersion != 3)
+        return failure("Native libraries require apiVersion 3");
     if (!hasLibrary && !data.contains("contributes"))
         return failure("Extension needs a library or UI contributions");
     if (hasLibrary) {
@@ -84,11 +84,13 @@ Result<ExtensionManifest> readManifest(const QString &directory) {
     const auto dependencies = data.value("dependencies");
     if (dependencies.isValid() && dependencies.typeId() != QMetaType::QVariantMap)
         return failure("dependencies must be an object");
-    const auto dependencyMap = manifest.dependencies();
-    for (auto it = dependencyMap.cbegin(); it != dependencyMap.cend(); ++it)
+    const auto dependencyMap = dependencies.toMap();
+    for (auto it = dependencyMap.cbegin(); it != dependencyMap.cend(); ++it) {
         if (!validExtensionId(it.key()) || !semver::validRange(it.value().toString()))
             return failure("Invalid dependency: " + it.key());
-    const auto contributes = manifest.contributes();
+        manifest.dependencies.insert(it.key(), it.value().toString());
+    }
+    const auto contributes = data.value("contributes").toMap();
     for (const auto &kind : uiKinds) {
         if (!contributes.contains(kind))
             continue;
@@ -107,14 +109,24 @@ Result<ExtensionManifest> readManifest(const QString &directory) {
         }
     }
     for (const auto &theme : contributes.value("themes").toList())
-        if (auto valid = themes::validate(theme.toMap(), directory, manifest.isTheme()); !valid)
+        if (auto valid = themes::validate(theme.toMap(), directory, data.value("type").toString() == "theme"); !valid)
             return valid.error();
-    if (manifest.isTheme()) {
+    if (data.value("type").toString() == "theme") {
         const auto info = themes::inspectPackage(directory, data);
         if (!info)
             return info.error();
         manifest.themeHasCode = info.value().hasCode;
     }
+    manifest.id = data.value("id").toString();
+    manifest.name = data.value("name").toString();
+    manifest.version = data.value("version").toString();
+    manifest.description = data.value("description").toString();
+    manifest.type = data.value("type", "extension").toString();
+    manifest.apiVersion = apiVersion;
+    manifest.nativeModules = data.value("nativeModules").toBool();
+    manifest.defaultConfig = data.value("config").toMap();
+    manifest.contributes = contributes;
+    manifest.raw = data;
     return manifest;
 }
 } // namespace nekotune

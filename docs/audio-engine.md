@@ -18,7 +18,7 @@ ReplayGain 默认关闭，可选择单曲／专辑模式及 ±12 dB 预增益。
 
 ## 实现边界
 
-音乐壁纸前端消费既有播放、歌词状态及可选扩展频段事件，不持有原始 PCM、不增加解码器或输出。SDK 2.2 提供默认 FFmpeg 后端的只读 PCM 观察接口，由独立原生扩展执行 FFT 和分发频段；Qt 兼容后端明确不支持 PCM。内置装饰动画仍只跟随播放状态，设置页说明频谱由扩展提供。
+音乐壁纸前端消费既有播放、歌词状态及可选扩展频段事件，不持有原始 PCM、不增加解码器或输出。SDK 3 提供默认 FFmpeg 后端的只读 PCM 观察接口，由独立原生扩展执行 FFT 和分发频段；Qt 兼容后端明确不支持 PCM。内置装饰动画仍只跟随播放状态，设置页说明频谱由扩展提供。
 
 - 两路解码工作线程分别产生经过 priming/padding 裁剪的原生采样率立体声浮点数据；MP4/AAC 还使用编辑列表结束时间裁剪最后一帧。seek 从目标前最多一秒预滚，按采样时间戳精确裁剪。
 - 输出线程负责连续重采样、过渡、DSP 和 `QAudioSink`。同采样率的连续源保留重采样历史与分数相位；异采样率分别排空。每路原生缓冲 15 MiB、规范化缓冲 12 MiB，余量用于转换与输出；高采样率或准备不足时缩短 Crossfade，下一首未就绪则普通换曲。
@@ -52,7 +52,7 @@ uv run --no-project --python 3.12 -m unittest discover -s scripts/ci/tests
 
 ## 只读 PCM 分析
 
-SDK 2.2 可选接口由后端线程的 `PcmService` 管理，`PluginManager` 依赖领域端口 `IPcmSource`。
+SDK 3 的 `context.pcm().capabilities()` / `subscribe()` 由后端线程的 `PcmService` 支持，`PluginManager` 依赖领域端口 `IPcmSource`。
 默认 FFmpeg 后端在混音／DSP 后复制立体声数据到固定容量历史区，按 `QAudioSink` 消费帧时钟
 投递到 SPSC 队列；分析副本应用当前播放器音量，不修改播放样本。无订阅不复制。
 队列最多 64×512 帧，历史容量 262144 帧；生产者不分配内存、不等待消费者。

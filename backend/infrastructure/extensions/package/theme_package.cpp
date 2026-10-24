@@ -1,5 +1,5 @@
-#include "infrastructure/extensions/theme_package.h"
-#include "infrastructure/extensions/zip_archive.h"
+#include "infrastructure/extensions/package/theme_package.h"
+#include "infrastructure/extensions/package/zip_archive.h"
 #include "themes/theme_resolution.h"
 #include <QDir>
 #include <QDirIterator>

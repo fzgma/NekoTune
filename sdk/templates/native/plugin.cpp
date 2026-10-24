@@ -7,9 +7,9 @@ class HelloExtension final : public QObject, public nekotune::sdk::IExtensionPlu
     Q_INTERFACES(nekotune::sdk::IExtensionPlugin)
 
   public:
-    void activate(nekotune::sdk::IExtensionContext &context,
-                  std::function<void(nekotune::Result<void>)> done) override {
-        m_hello = context.registerService("hello", [](const nekotune::sdk::Params &params,
+    void activate(nekotune::sdk::ExtensionContext &context,
+                  nekotune::sdk::Done done) override {
+        m_hello = context.services().add("hello", [](const nekotune::sdk::Params &params,
                                                      nekotune::sdk::Reply reply) {
             reply(nekotune::sdk::Params{{"message", "Hello, " + params.value("name").toString()}});
         });

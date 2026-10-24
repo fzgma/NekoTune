@@ -69,17 +69,26 @@ backend/
 ├── domain/
 │   ├── library/                # 曲库类型、文件检查与托管文件接口
 │   ├── playback/               # 队列、播放模式、播放器接口与随机策略
-│   └── lyrics/                 # 歌词类型、解析、来源与存储接口
+│   ├── lyrics/                 # 歌词类型、解析、来源与存储接口
+│   ├── extensions/             # 扩展后端与音乐／歌词来源目录端口
+│   └── appearance/             # 外观后端端口
 ├── application/
 │   ├── library/                # 曲库、歌单、标签、跨集合操作与下载后导入
 │   ├── playback/               # 播放引擎、队列提交与播放顺序
-│   └── lyrics/                 # 歌词服务、播放协调与封面解析
+│   ├── lyrics/                 # 歌词服务、播放协调与封面解析
+│   └── extensions/             # 扩展管理服务、音乐来源业务编排
 ├── storage/                    # SQLite 会话与歌曲、队列、歌单、标签仓储
 ├── infrastructure/
 │   ├── library/                # 文件检查、时长读取与托管资源目录
 │   ├── playback/               # FFmpeg／Qt 播放、连续 PCM 管线、DSP 与设备输出
 │   ├── lyrics/                 # 网络来源、缓存、存储与配套文件
-│   ├── extensions/             # 扩展加载、清单、包管理、主题包、音频代理与崩溃记录
+│   ├── appearance/             # AppearanceService：选择持久化、迁移、主题导出
+│   ├── extensions/
+│   │   ├── package/            # 清单、注册表、ZIP、主题包、安装回滚与清理
+│   │   ├── runtime/            # 依赖、加载、调用保护、开发监听、崩溃归因与看门狗
+│   │   ├── capabilities/       # 音乐、歌词、随机、服务、命令、贡献、存储、凭据与日志
+│   │   ├── host_gateway.*      # SDK 调用宿主的权限边界
+│   │   └── plugin_manager.*    # 装配包管理、运行时与能力的门面
 │   ├── kugou/                  # 仅旧凭据迁移和兼容密钥存储
 │   ├── ai/                     # AI 设置、请求与工作线程
 │   └── credentials/            # 系统密钥库与旧凭据迁移
@@ -246,6 +255,8 @@ SQLite 连接只能在创建它的线程使用。导入线程返回 `ImportedFil
 
 `LyricsService` 和它的 provider 子对象一起移入歌词线程，新增网络对象必须保持正确线程归属。线程退出前先取消任务和网络请求，完成等待回调，再释放对象。
 
+原生扩展入口和回调由 `CallGuard` 归因到当前线程；自建工作线程使用 `context.attributeThread()`。看门狗监测后端线程调用：5 秒告警、30 秒卡死哨兵，选曲 200 毫秒告警；无法归因的连续异常退出触发自动安全模式。阈值、退出计数与生命周期约定见[扩展文档](extensions.md#后台-sdk)。
+
 当前 `BackendSession::shutdown()` 先停止曲库维护并取消响度分析，再停止播放以释放解码器与代理资源租约，随后关闭原生扩展、扫描和配套文件任务，再停止接收连接、关闭命令调度、停止 AI 与导入任务、断开客户端并停止歌词任务。`BackendRuntime` 在后端线程销毁 session 后才退出线程并等待结束。每个模块的关闭应可重复调用。
 
 ## 7. 持久化、托管文件与一致性
@@ -274,13 +285,15 @@ SQLite 连接只能在创建它的线程使用。导入线程返回 `ImportedFil
 
 ### 用户动态扩展
 
-完整使用与开发契约见 [扩展文档](extensions.md)。`IExtensionBackend` 是领域侧的异步调用与事件边界，`ExtensionService` 和 `MusicService` 在应用层编排注册来源和业务操作。基础设施中的 `PluginManager` 实现该边界：读取清单与注册表，在用户信任后用 `QPluginLoader` 加载扩展库，并把服务、命令、来源和事件直接路由到扩展对象，不再经过进程间协议。扩展库只依赖 `sdk/` 的头文件，宿主实现隐藏在 `IExtensionContext` 之后。所有扩展调用都在后端线程执行；扩展从其他线程回调时由上下文转回后端线程，停用后迟到的回调被丢弃。库在本次运行中不卸载，再次启用复用同一插件对象；开发目录按内容哈希复制后加载。调用扩展代码期间 `crash_guard` 在内存中记录当前扩展，致命信号（Windows 为未处理异常）时写入哨兵文件，下次启动停用该扩展。无库的主题和纯界面扩展直接发布清单贡献，仍参与启停、更新与开发重载。普通扩展调用不会占住 `CommandScheduler`，只有短暂的数据库变更和已有文件导入流程进入串行队列。
+完整使用与开发契约见 [扩展文档](extensions.md)。`ExtensionService` 只编排扩展管理，不承载来源业务。`MusicService` 依赖 `IMusicSourceCatalog`，歌词适配器通过 `ILyricsSourceCatalog` 连接歌词线程与后端线程；随机能力由 `ShuffleStrategies` 注册并接入播放引擎，不再使用内部字符串协议。
+
+基础设施 `PluginManager` 是包管理、运行时与能力的装配门面：`package/` 负责清单和程序目录，`runtime/` 管理状态、依赖、加载和调用生命周期，`capabilities/` 维护强类型来源与注册。它在用户信任后用 `QPluginLoader` 加载扩展，SDK 3 的 `ExtensionContext` 按能力分组隐藏宿主实现。调用在后端线程执行，其他线程的完成回调转回后端；停用后丢弃迟到结果。库在本次运行中不卸载，再次启用复用插件对象；开发目录按内容哈希复制后加载。崩溃归因与看门狗见第 6 节。无库主题和纯界面扩展直接发布清单贡献，仍参与启停、更新与开发重载。普通扩展调用不占用 `CommandScheduler`，只有短暂的数据库变更和已有文件导入流程进入串行队列。
 
 音乐来源以来源 ID 和来源曲目 ID 保存稳定身份，`songs.hash` 对在线记录为空。`ISourceResolver` 将在线引用异步解析成 `AudioProxy` 提供的回环代理 URL（扩展返回 `file://` 时为其数据目录内的文件），再交给当前播放后端；网络地址、鉴权头和有效期只存在于运行时。解析代次与播放意图隔离迟到结果。下载复用托管资源分配、文件校验与曲库入库。远程资源的歌词、封面使用独立资源键，不进行本地配套文件探测或清理。
 
 前端 `ExtensionsController` 消费后台注册快照。`PageHost` 保留原页面，并按用户选择加载替代项；`ExtensionView` 使用独立 QML 引擎管理视图和重载生命周期。默认 Shell 仍由 `Main.qml` 组织，完整 Shell 扩展接管窗口内容。恢复窗口由宿主独立加载，并强制使用内置主题。QML 故障不能实现进程级隔离，安全模式用于重启恢复。
 
-`ThemeController` 消费同一扩展快照，与后端共用 `nekotune_theme_resolution`，按 `catalog.json` 中的变量归属合成外观与界面。外观和界面分别保存在 `selections.theme`、`selections.themeLayout`；旧配置缺少后者时继续跟随外观，前端新的选择操作通过批量 `extensions.select` 原子保存两项。显示模式和用户的减少动态效果偏好由 `AppPaths` 保存，主题无法覆盖后者。`ThemeSlot` 按界面选择、独立扩展、内置界面的顺序回退，不改写独立插槽选择；静态背景来自外观选择，主题页面按实际显示加载。壁纸来源独立保存在 `wallpaper.themeWallpaper`，未指定时先取界面、再取外观的壁纸入口。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出由 `theme_package` 完成，卡片与导入流程不实例化主题 QML。格式、信任、限制与恢复方法见 [主题文档](themes.md)。
+`ThemeController` 消费扩展目录与独立的外观选择快照，与后端共用 `nekotune_theme_resolution`，按 `catalog.json` 中的变量归属合成外观与界面。`AppearanceService` 通过能力层的 `ContributionCatalog` 校验选择，外观和界面分别保存在 `config/extensions/appearance.json` 的 `selections.theme`、`selections.themeLayout`；旧注册表中的选择只在外观文件缺失时迁移。旧配置缺少后者时继续跟随外观，前端新的选择操作通过批量 `appearance.select` 原子保存两项。显示模式和用户的减少动态效果偏好由 `AppPaths` 保存，主题无法覆盖后者。`ThemeSlot` 按界面选择、独立扩展、内置界面的顺序回退，不改写独立插槽选择；静态背景来自外观选择，主题页面按实际显示加载。壁纸来源独立保存在 `wallpaper.themeWallpaper`，未指定时先取界面、再取外观的壁纸入口。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出由 `theme_package` 完成，卡片与导入流程不实例化主题 QML。格式、信任、限制与恢复方法见 [主题文档](themes.md)。
 
 主题的职责、状态和接口边界统一见[主题边界规范](theme-boundaries.md)。新代码保持主题为已有业务能力的呈现层，宿主拥有业务控制器、数据及系统生命周期；新的来源、算法或后台服务进入宿主或功能扩展。外观、界面与壁纸来源已可独立选择；默认前端抽取为完整主题以及跨 Shell 会话状态恢复仍为待实现目标。
 
@@ -301,13 +314,15 @@ SQLite 连接只能在创建它的线程使用。导入线程返回 `ImportedFil
 
 在 `infrastructure/lyrics` 实现 `LyricsProvider` 的 `descriptor`、`request`、`cancel`，分阶段来源声明 `staged` 并实现 `choose`。通过 `completed` 发布候选，通过 `resolved` 发布文档；提供方私有 hash、凭据与下载标识保留在适配器内部，通用候选携带不透明句柄。
 
+动态歌词扩展实现 SDK 3 `ILyricsProvider`，通过 `context.lyrics().add()` 注册；`ILyricsSourceCatalog` 提供独立查询方法，由能力层转换为 SDK 强类型值，`ExtensionLyricsProvider` 在歌词线程使用不透明候选句柄，后端保存来源的 `extra`。新增音源实现 `IMusicProvider` 并用 `context.music().add()` 注册，由 `IMusicSourceCatalog` 供音乐服务调用。
+
 加入 providers 构建目标，在 `BackendSession` 的歌词装配处注册并设置父对象。`lyrics.sources` 自动暴露来源，前端据此生成菜单。自动加载依据歌曲的来源 ID 精确匹配或同一扩展 ID 的前缀匹配选择歌词提供方，无匹配来源时使用默认 LRCLIB。
 
 ### 新增页面或播放实现
 
 页面在 `qml/pages` 中声明 `shell`、`controllers`、`transport`、`translator` 属性，按需提供导入和编辑信号。将描述加入 `PageRegistry.js`，文件加入 `resources.qrc`；页面选择和请求回调保留在功能控制器或页面中。
 
-替换播放器时实现 `IPlaybackBackend`，在装配处通过后端代理工厂选择实现。扩展随机算法实现 `IShuffleStrategy` 并注入 `PlayerEngine`；新增播放模式还需同步领域枚举、顺序规则、IPC 校验、前端选项、翻译和协议文档。
+替换播放器时实现 `IPlaybackBackend`，在装配处通过后端代理工厂选择实现。内置随机策略实现 `IShuffleStrategy` 并注入 `PlayerEngine`；动态扩展实现 SDK 3 `IShuffleProvider`，通过 `context.shuffle().add()` 接入 `ShuffleStrategies`；新增播放模式还需同步领域枚举、顺序规则、IPC 校验、前端选项、翻译和协议文档。
 
 ## 9. 验证与当前约束
 
@@ -353,5 +368,5 @@ NEKOTUNE_TEST_SCREENSHOT=/tmp/nekotune.png \
 ### PCM 分析扩展边界
 
 `IPlaybackBackend` 提供可选的有界 PCM 观察，`PcmService` 管理后端线程订阅，
-`PluginManager` 通过 `IPcmSource` 领域端口暴露 SDK 2.2 可选接口。输出线程仅复制并按消费时钟投递，
+`PluginManager` 通过 `IPcmSource` 领域端口向 SDK 3 的 `context.pcm()` 提供能力。输出线程仅复制并按消费时钟投递，
 FFT、频段、消费者租约属于独立扩展，主题只显示扩展事件；原始 PCM 不进入 Socket／QML。
