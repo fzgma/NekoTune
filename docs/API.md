@@ -37,7 +37,7 @@ NekoTune 使用基于换行分隔的 JSON 协议，通过 Unix domain socket 进
 
 ## 事件
 
-内置音乐壁纸复用 `server.connected` 与 `player.* / lyrics.changed`，不轮询播放状态。前端本地 `WallpaperManager.audioAnalysis` 描述内置布局能力，仍返回 `spectrumAvailable: false`；它不是后端频谱 API。SDK 2.2 可向原生扩展提供默认 FFmpeg 后端的 PCM；主题通过既有 `extensions.call` 和命名空间扩展事件接收分析后的频段，Qt 兼容后端不支持 PCM。见[壁纸说明](wallpaper.md)。
+内置音乐壁纸复用 `server.connected` 与 `player.* / lyrics.changed`，不轮询播放状态。前端本地 `WallpaperManager.audioAnalysis` 描述内置布局能力，仍返回 `spectrumAvailable: false`；它不是后端频谱 API。SDK 3 可向原生扩展提供默认 FFmpeg 后端的 PCM；主题通过既有 `extensions.call` 和命名空间扩展事件接收分析后的频段，Qt 兼容后端不支持 PCM。见[壁纸说明](wallpaper.md)。
 
 后端会向所有已连接客户端广播事件：
 
@@ -515,21 +515,65 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 | 方法 | 参数 | data / 行为 |
 | --- | --- | --- |
-| `extensions.list` | 无 | `extensions` 注册状态数组、`selections` 界面选择；`runtimeReady` 表示管理进程已连接且扩展发现已完成；`catalogueReady` 表示目录已读取，`startupComplete` 表示启动激活已结束（含失败），不代表所有扩展均可用 |
+| `extensions.list` | 无 | 按 `runtime`、`extensions`、`contributions`、`themes`、`sources`、`commands` 分组的快照，外观选择由 `appearance.get` 提供 |
 | `extensions.install` | `path` 本地 ZIP；开发目录传 `development:true`；覆盖已有版本需 `replace:true` | `extension` 安装记录；更新启动失败回滚旧程序版本 |
 | `extensions.enable` | `id`；首次信任需 `trusted:true` | 依赖按序启动，返回注册快照 |
 | `extensions.disable` | `id` | 撤销能力，依赖该扩展的其他扩展进入 blocked 状态 |
-| `extensions.reload` | `id` | 重新读取 manifest 并重建相关进程和界面贡献 |
+| `extensions.reload` | `id` | 重新读取 manifest 并重载原生扩展及界面贡献 |
 | `extensions.uninstall` | `id,clearData?` | 默认保留数据；不删除挂载的开发目录 |
 | `extensions.get_config` | `id` | `config` 对象 |
 | `extensions.set_config` | `id,config` | 原子替换配置，通知运行中的扩展 |
 | `extensions.logs` | `id` | 最近最多 500 条 `logs`，字段为 `time,level,message` |
 | `extensions.call` | `id,service,params?` | 调用扩展注册的服务或命令 |
-| `extensions.select` | `slot,contribution` 或 `selections` | 选择命名空间贡献 ID，空字符串恢复默认；`selections` 为 `{插槽: 贡献 ID}` 对象，全部校验通过后一起保存，任何一项失败均不生效；值未变化的项不重新校验 |
 
-扩展记录包含 `id,name,version,directory,development,trusted,enabled,state,error,generation,contributes,registrations`。`enabled` 表示持久启用意图，`state` 为实际运行状态；可为 `disabled,starting,running,stopping,failed,blocked`。来源和 UI 贡献只有在运行状态下公开。
+快照示例（已发现一个尚未启用的开发扩展）：
 
-后台广播 `extensions.changed`，其字段与注册快照一致。`extensions.error` 表示管理进程级别错误。扩展主动发布的事件使用 `extension.<扩展ID>.<事件名>`，附带 `extensionId` 与 `data`。私有运行时调用、密钥读取和原始音频解析结果不作为通用管理 API 暴露。
+```json
+{
+  "runtime": {
+    "catalogueReady": true,
+    "startupComplete": true,
+    "ready": true,
+    "safeMode": false,
+    "safeModeReason": ""
+  },
+  "extensions": [{
+    "id": "community.hello",
+    "name": "Hello",
+    "version": "1.0.0",
+    "description": "Example extension",
+    "directory": "/tmp/extensions/community.hello",
+    "development": true,
+    "trusted": false,
+    "enabled": false,
+    "state": "disabled",
+    "error": "",
+    "generation": 0,
+    "nativeModules": false,
+    "type": "extension",
+    "hasCode": true
+  }],
+  "contributions": {"pages": [], "settings": [], "slots": [], "menus": [], "toolbars": []},
+  "themes": [],
+  "sources": {"music": [], "lyrics": [], "shuffle": []},
+  "commands": []
+}
+```
+
+扩展条目只包含上述身份、安装与运行状态字段，不嵌入贡献或注册。`enabled` 表示持久启用意图，`state` 为实际状态：`disabled,starting,running,stopping,failed,blocked`。`runtime.catalogueReady` 表示目录已读取，`startupComplete` 表示启动激活已结束（含失败），`ready` 表示目录已就绪且未在关闭，不保证每个扩展都可用。`runtime.safeModeReason` 为 `repeated_crashes` 时表示连续两次无法归因的异常退出触发自动安全模式。
+
+顶层 `contributions`、`sources`、`commands` 只公开运行中扩展的贡献和注册；贡献带命名空间 `id`、`localId`、`extensionId`、`generation`，`source` 为绝对路径，页面 `group` 默认 `primary`。顶层 `themes` 包含所有已安装扩展的主题（含未运行者），带 `available`，其余主题字段保留；不得仅凭目录项加载 QML。来源与命令按扩展目录顺序、各扩展内的局部 ID 顺序输出。
+
+后台广播 `extensions.changed`，其字段与快照一致。`extensions.error` 表示运行时或管理错误。扩展主动发布的事件使用 `extension.<扩展ID>.<事件名>`，附带 `extensionId` 与 `data`。私有运行时调用、密钥读取和原始音频解析结果不作为通用管理 API 暴露。
+
+原生 SDK 的 `context.host().call()` 经过宿主调用网关。以下方法返回 `PermissionDenied`：
+
+- `extensions.*`，但允许 `extensions.call`、`extensions.list`。
+- 全部 `appearance.*`。
+- `library.delete`、`library.migrate`、`library.restore`、`library.restore_preview`、`library.remove_rollback`。
+- `history.clear`、`ai.config.get`、`ai.config.set`、`ai.config.clear_key`。
+
+这是 SDK 调用边界；已信任 QML 仍可访问完整控制器，详见[已知限制 R16](extensions.md#qml-界面菜单和主题)。
 
 ## 扩展音乐来源
 
@@ -561,22 +605,30 @@ AI 操作失败沿用 `status: "error"` 和 `message`，后者为可翻译的 `a
 
 职责与稳定接口范围见[主题边界规范](theme-boundaries.md)。下列是当前已实现协议，包括外观、界面独立选择与主题壁纸来源；完整默认界面模板仍属于迁移目标。主题 QML 调用已有接口仍须遵守原业务语义，主题职责约定不构成运行时权限沙箱。
 
-- `extensions.select` 的 `slot: "theme"` 接受主题贡献 ID、`builtin/yozakura`、`builtin/ocean`、`builtin/forest`；空字符串选择默认夜樱。持久化失败不改变当前选择。
+| 方法 | 参数 | data / 行为 |
+| --- | --- | --- |
+| `appearance.get` | 无 | `{selections: {插槽: 贡献 ID}}` |
+| `appearance.select` | `slot,contribution` 或 `selections` | 单项或批量选择命名空间贡献 ID，空字符串恢复默认；批量全部校验通过后原子保存，校验或持久化失败保留原选择；未变化项不重新校验；返回 `selections` |
+| `appearance.export_theme` | `contribution,path` | 导出主题 ZIP，返回 `{path, includesQml}` |
+
+选择保存在音乐根目录的 `config/extensions/appearance.json`。首次启动会迁移旧 `registry.json` 的 `selections`，成功后移除旧键；已有外观文件时不覆盖。选择变化广播 `appearance.changed`，载荷为 `{event: "appearance.changed", selections: {...}}`；扩展状态变化使用独立的 `extensions.changed`。
+
+- `appearance.select` 的 `slot: "theme"` 接受主题贡献 ID、`builtin/yozakura`、`builtin/ocean`、`builtin/forest`；空字符串选择默认夜樱。持久化失败不改变当前选择。
 - `slot: "themeLayout"` 接受运行中且声明了 `shell`、`bottomPlayer`、`background` 或非空 `pages` 的主题贡献 ID；空字符串表示内置界面，键不存在时界面跟随 `theme`。删除主题包时，指向它的 `theme`、`themeLayout` 均重置为空字符串；新前端选择操作总是同时写入两个键。
 - `extensions.install` 增加可选 `themeOnly: true`，强制按主题包大小限制解包，并拒绝普通可执行扩展。重复 ID 默认拒绝，确认更新后传 `replace: true`。卡片定向更新可传 `expectedId`：目标必须已安装且与新包 ID 一致，在更改旧包前校验，不匹配返回 `theme_update_id_mismatch`。
-- `extensions.export_theme` 参数 `{contribution, path}`：将主题导出到本地 ZIP 文件，返回 `{path, includesQml}`。主题专用包完整导出；内置主题和普通扩展导出独立的配色与静态背景包。支持仍安装的静态主题贡献，以及当前运行时动态注册的主题。
+- `appearance.export_theme` 参数 `{contribution, path}`：将主题导出到本地 ZIP 文件，返回 `{path, includesQml}`。主题专用包完整导出；内置主题和普通扩展导出独立的配色与静态背景包。支持仍安装的静态主题贡献，以及当前运行时动态注册的主题。
 - 主题包沿用 `extensions.enable/disable/reload/uninstall`，启用不需要 `trusted`，仍以 `running` 表示已启用。对已运行主题包调用 `extensions.enable` 并传 `trusted: true` 会记录信任，不会重启；信任按包保存，前端在信任前不生成含代码主题的界面或壁纸入口。普通扩展的授权规则不变；禁用保留选择以便恢复。
 
 前端 `controllers.theme` 提供：
 
 - 状态：`items`、`selectedId`、`activeId`、`layoutSelectedId`、`activeLayoutId`、`layoutUnavailable`、`mode`、`isDark`、`reducedMotion`、`tokens`、`background`、`uiSlots`、`wallpaperSlots`、`busy/error/notice` 等；`items` 每项有 `hasLayout`、`hasWallpaper`。`wallpaperSlots` 以主题贡献 ID 为键，仅包含可用且允许加载的壁纸入口。
 - 选择：`selectAppearance(id, trusted = false)`、`selectLayout(id, trusted = false)`；`selectTheme` 对含界面的主题同时设置配色和界面，对不含界面的主题只设置配色。`resetAppearance`、`resetLayout` 分别重置；`reset` 重置配色、界面与深色模式，不重置壁纸偏好。
-- 管理：`importTheme/updateTheme/reloadTheme/exportTheme/removeTheme` 走既有扩展管理接口；`setMode` 保存本地 `theme_mode`，`setReducedMotion(bool)` 保存布尔设置 `reduced_motion`（默认 `false`），主题不能覆盖它。
+- 管理：`importTheme/updateTheme/reloadTheme/removeTheme` 走扩展管理接口，`exportTheme` 走 `appearance.export_theme`；`setMode` 保存本地 `theme_mode`，`setReducedMotion(bool)` 保存布尔设置 `reduced_motion`（默认 `false`），主题不能覆盖它。
 - 信号：`trustRequested(id, target)`，`target` 为 `theme`、`appearance`、`layout` 或 `wallpaper`，授权后应重试同一操作。主题包的 `selectAppearance` 不请求代码授权；普通扩展仍须先授权。
 
 QML 的 `Theme` 兼容原变量名，并提供 `isDark` 与用户设置的 `reducedMotion`。格式与示例见 [主题制作](themes.md)。
 
-主题可声明顶层 `wallpaper` QML `Item`。用户选择 `wallpaper.style: "theme"` 后加载；`wallpaper.themeWallpaper` 是字符串，空字符串（默认）使用 `uiSlots.wallpaper`，先取界面选择、再取外观选择的壁纸；指定主题贡献 ID 则使用 `wallpaperSlots` 中该来源。入口使用 `ExtensionApi.wallpaper` 的只读播放、歌词、设置及屏幕上下文；无入口或加载失败回退经典卡片并保留选择。`themeStatus` 包括 `loading/active/missing/source-missing/error/safe-mode`，其中 `source-missing` 表示指定来源不可用，恢复后自动接回。它不新增后端 IPC，详见 [主题音乐壁纸](themes.md#主题音乐壁纸) 与 [壁纸状态](wallpaper.md)。`ui.wallpaper` 已废弃，校验时报错。前端 `ThemeController.selectWallpaper(id, trusted)` 校验并在需要时请求授权，成功后发出 `wallpaperReady(id)`；它不修改 `extensions.select` 的选择，也没有新增 IPC 方法。
+主题可声明顶层 `wallpaper` QML `Item`。用户选择 `wallpaper.style: "theme"` 后加载；`wallpaper.themeWallpaper` 是字符串，空字符串（默认）使用 `uiSlots.wallpaper`，先取界面选择、再取外观选择的壁纸；指定主题贡献 ID 则使用 `wallpaperSlots` 中该来源。入口使用 `ExtensionApi.wallpaper` 的只读播放、歌词、设置及屏幕上下文；无入口或加载失败回退经典卡片并保留选择。`themeStatus` 包括 `loading/active/missing/source-missing/error/safe-mode`，其中 `source-missing` 表示指定来源不可用，恢复后自动接回。它不新增后端 IPC，详见 [主题音乐壁纸](themes.md#主题音乐壁纸) 与 [壁纸状态](wallpaper.md)。`ui.wallpaper` 已废弃，校验时报错。前端 `ThemeController.selectWallpaper(id, trusted)` 校验并在需要时请求授权，成功后发出 `wallpaperReady(id)`；它不修改 `appearance.select` 的选择，也没有新增 IPC 方法。
 
 
 ## 听歌历史与统计
@@ -633,6 +685,6 @@ QML 的 `Theme` 兼容原变量名，并提供 `isDark` 与用户设置的 `redu
 
 ### 扩展 PCM 能力
 
-SDK 2.2 的 `IPcmExtensionContext` 是原生可选接口，不新增原始音频 IPC 方法。
+SDK 3 的 `context.pcm().capabilities()` / `subscribe()` 提供原生 PCM 观察，不新增原始音频 IPC 方法。
 主题仍通过 `extensions.call` 调用功能扩展服务，并过滤 `extension.<id>.<event>` 事件。
 宿主只提供 PCM，具体频谱服务与帧协议由频谱扩展声明。

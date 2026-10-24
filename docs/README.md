@@ -32,7 +32,7 @@
 | --- | --- |
 | [产品需求](PRD.md) | 产品定位、目标及早期里程碑；不作为功能完成清单 |
 | [待办](todo/README.md) | 按 feat、bug、perf、ux、chore 分类；包含优先级、状态与验收记录 |
-| [扩展系统重构方案](extensions-refactor-plan.md) | 现状诊断、目标分层、SDK 3 与已定取舍 |
+| [扩展系统重构方案](extensions-refactor-plan.md) | 已实施（2026-10-24）；重构背景、SDK 3、验收记录与偏差 |
 | [扩展系统重构实施手册](phase/README.md) | 分阶段实施步骤（Phase 0–8） |
 | [C++ 原生扩展迁移](native-extensions-plan.md) | 已实施迁移的设计取舍与历史记录，包含迁移前的 Node.js 链路 |
 

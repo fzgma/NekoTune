@@ -12,7 +12,7 @@ SDK 只包含头文件、CMake 工具、模板和构建信息，不包含 Qt 或
 纯 QML 扩展直接复制 `templates/qml/`，无需安装原生工具链。
 模板中的 `.github/` 和 `.gitignore` 也必须复制，另按自己的代码和资源选择许可证。
 
-## SDK 3 接口
+## SDK 3 接口（3.0.0）
 
 原生插件实现 `sdk::IExtensionPlugin`，在 `activate(sdk::ExtensionContext &, sdk::Done)` 中注册能力。
 插件 IID 为 `org.nekotune.IExtensionPlugin/3`，带原生库的清单必须使用 `apiVersion: 3`。
@@ -26,10 +26,12 @@ SDK 2.x 插件需要迁移接口并重新构建；纯界面和主题清单继续
 - `music().add()`、`lyrics().add()`、`shuffle().add()` 使用各自的强类型来源描述符。
 - `config().get/update()`、`storage().get/set()`、`secrets().get/set/remove()` 管理配置、存储与系统密钥库。
 - `tasks().report()` 使用 `TaskProgress` 报告任务；`log().write()` 写入经过凭据脱敏的扩展日志。
+- `pcm().capabilities/subscribe()` 提供只读 PCM 观察；不支持时返回能力原因。
+- `attributeThread()` 为自建线程和 `QtConcurrent` 任务归因，返回的 RAII 对象必须在创建它的同一线程销毁。
 
 保存注册句柄，停用时释放。provider 由扩展持有，必须存活到注册释放。
 宿主将回调投递到后端线程；长任务放到扩展自己的工作线程，停用时取消任务并停止线程。
-具体线程、回调及句柄生命周期约定以对应头文件为准。
+后端线程上的单次调用超过 5 秒告警、30 秒写入卡死哨兵，随机选曲超过 200 毫秒告警；无法归因的连续两次异常退出会触发自动安全模式。详情见[线程与生命周期约定](../docs/extensions.md#后台-sdk)，接口细节以对应头文件为准。
 
 音源解析使用 `ResolvePurpose::Play` 或 `Download`。歌词提供方使用 `LyricsQuery`、
 `LyricsCandidate` 和 `LyricsResolution`；分阶段查询返回更多候选，来源自定义字段放在候选的 `extra` 中。

@@ -38,7 +38,7 @@ NekoTune 是一款本地优先的 Linux／Windows 桌面音乐播放器，使用
 - Zlib 和 FFmpeg 开发库：`libavformat`、`libavutil`、`libavcodec`、`libswresample`、`libavfilter`。
 - QtKeychain 0.17+ 的 Qt6 开发包，CMake 包名为 `Qt6Keychain`。
 - Linux 还需 `libsecret-1` 开发库，用于读取并迁移旧版系统密钥库条目。建议安装 `libpulse` 14+ 开发库（Debian/Ubuntu：`libpulse-dev`），以便直接选择同一声卡下的耳机／扬声器端口；兼容 PulseAudio 和 PipeWire 的 Pulse 服务，未编入此支持时仍可选择 Qt 音频设备。
-- 扩展以 C++ 原生库在后端进程内加载，不需要 Node.js。扩展运行时支持 Linux 和 Windows x86_64，扩展必须与宿主使用同一工具链和 Qt 小版本构建，详见 [扩展文档](docs/extensions.md)。
+- 扩展以 C++ 原生库在后端进程内加载，不需要 Node.js。原生扩展使用 SDK 3.0.0 与清单 `apiVersion: 3`，纯界面与主题包接受 `apiVersion` 1–3。扩展运行时支持 Linux 和 Windows x86_64，扩展必须与宿主使用同一工具链和 Qt 小版本构建，详见 [扩展文档](docs/extensions.md)。
 
 Linux 构建使用系统开发包或官方 Qt SDK；Windows 构建使用 MSYS2 UCRT64 的 GCC、CMake、Ninja、pkgconf、Qt6、QtKeychain、FFmpeg 和 Zlib。不支持 macOS。
 
@@ -250,6 +250,6 @@ Linux 密钥库相关集成测试通过 `dbus-run-session` 和 `gnome-keyring-da
 开发前阅读[架构与扩展开发](docs/architecture.md)、[API 文档](docs/API.md)和[项目协作约定](AGENT.md)。社区插件从[扩展开发指南](docs/extensions.md#社区开发从模板到发布)开始；其他专题、产品规划和实施记录统一见[文档导航](docs/README.md)。
 
 
-动态音乐壁纸支持独立主题与频谱扩展。SDK 2.2 向原生扩展提供默认 FFmpeg 后端的只读 PCM，
+动态音乐壁纸支持独立主题与频谱扩展。SDK 3 向原生扩展提供默认 FFmpeg 后端的只读 PCM，
 主题通过服务与事件呈现真实频谱；Qt 兼容后端不支持频谱。透明叠加按平台能力开放，Windows 原生效果待真机验收。
-详见 [壁纸说明](docs/wallpaper.md) 与 [扩展开发](docs/extensions.md#播放器-pcm-与频谱扩展sdk-22)。
+详见 [壁纸说明](docs/wallpaper.md) 与 [扩展开发](docs/extensions.md#播放器-pcm-与频谱扩展)。
