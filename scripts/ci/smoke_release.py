@@ -211,19 +211,19 @@ def check_distribution(stage: Path, native_wayland: bool, backend_only: bool, in
         extensions: dict = {}
         while time.monotonic() < deadline:
             extensions = call("extensions.list")
-            if extensions.get("catalogueReady"):
+            if extensions.get("runtime", {}).get("catalogueReady"):
                 break
             time.sleep(0.15)
-        assert extensions.get("catalogueReady") is True, f"Extension runtime failed:\n{diagnostics()}"
-        selection = call("extensions.select", {"slot": "theme", "contribution": "builtin/ocean"})
+        assert extensions.get("runtime", {}).get("catalogueReady") is True, f"Extension runtime failed:\n{diagnostics()}"
+        selection = call("appearance.select", {"slot": "theme", "contribution": "builtin/ocean"})
         assert selection["selections"]["theme"] == "builtin/ocean"
         theme_path = root / "ocean.nktheme.zip"
-        call("extensions.export_theme", {"contribution": "builtin/ocean", "path": str(theme_path)})
+        call("appearance.export_theme", {"contribution": "builtin/ocean", "path": str(theme_path)})
         assert struct.unpack("<I", theme_path.read_bytes()[:4])[0] == 0x04034B50
         imported = call("extensions.install", {"path": str(theme_path), "themeOnly": True})
         assert imported["extension"]["type"] == "theme"
         assert imported["extension"]["hasCode"] is False
-        call("extensions.select", {"slot": "theme", "contribution": ""})
+        call("appearance.select", {"slot": "theme", "contribution": ""})
         time.sleep(1.5)
         assert not child.exited, f"Process exited after IPC startup:\n{diagnostics()}"
         output = child.text() + (frontend.text() if frontend else "")

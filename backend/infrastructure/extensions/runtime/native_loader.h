@@ -24,12 +24,12 @@ class NativeLoader {
 
     /// Windows does not search a DLL's own directory for its dependencies; SetDllDirectory is
     /// process-wide, so it is set only for the lifetime of this object. No-op elsewhere.
-    class SearchPath {
+    class DllDirectoryScope {
       public:
-        explicit SearchPath(const QString &libraryPath);
-        ~SearchPath();
-        SearchPath(const SearchPath &) = delete;
-        SearchPath &operator=(const SearchPath &) = delete;
+        explicit DllDirectoryScope(const QString &libraryPath);
+        ~DllDirectoryScope();
+        DllDirectoryScope(const DllDirectoryScope &) = delete;
+        DllDirectoryScope &operator=(const DllDirectoryScope &) = delete;
     };
 
   private:

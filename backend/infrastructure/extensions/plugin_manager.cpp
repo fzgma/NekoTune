@@ -439,7 +439,7 @@ void PluginManager::startOne(const QString &id, Done done) {
     m_retainedDirectories.insert(entry.directory);
     bool loaded = false;
     {
-        const NativeLoader::SearchPath searchPath(path.value());
+        const NativeLoader::DllDirectoryScope dllDirectory(path.value());
         m_session.loaded(id);
         if (!guarded(id, [&] { loaded = loader.value()->load(); }))
             return;

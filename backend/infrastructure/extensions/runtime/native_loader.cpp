@@ -77,7 +77,7 @@ Result<sdk::IExtensionPlugin *> NativeLoader::instance(QPluginLoader *loader, bo
         return failure(loaded ? QStringLiteral("Library does not implement IExtensionPlugin") : loader->errorString());
     return plugin;
 }
-NativeLoader::SearchPath::SearchPath(const QString &libraryPath) {
+NativeLoader::DllDirectoryScope::DllDirectoryScope(const QString &libraryPath) {
 #ifdef Q_OS_WIN
     // Windows does not search a DLL's own directory for its dependencies. SetDllDirectory is
     // process-wide, so keep it only for this load on the backend thread.
@@ -86,7 +86,7 @@ NativeLoader::SearchPath::SearchPath(const QString &libraryPath) {
     Q_UNUSED(libraryPath);
 #endif
 }
-NativeLoader::SearchPath::~SearchPath() {
+NativeLoader::DllDirectoryScope::~DllDirectoryScope() {
 #ifdef Q_OS_WIN
     SetDllDirectoryW(nullptr);
 #endif
