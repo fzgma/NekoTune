@@ -13,7 +13,7 @@ QtObject {
     function call(method, params) {
         return new Promise((resolve, reject) => {
             if (!api.bridge) { reject(new Error("Extension bridge unavailable")); return }
-            const requestId = api.bridge.request(method, params || {})
+            const requestId = api.bridge.viewRequest(method, params || {})
             api.pending[requestId] = {resolve: resolve, reject: reject}
         })
     }

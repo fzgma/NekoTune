@@ -81,14 +81,23 @@ void ExtensionsController::refresh() {
         false);
 }
 int ExtensionsController::request(const QString &method, const QVariantMap &params) {
+    return dispatch(method, params, true);
+}
+int ExtensionsController::viewRequest(const QString &method, const QVariantMap &params) {
+    return dispatch(method, params, false);
+}
+int ExtensionsController::dispatch(const QString &method, const QVariantMap &params, bool reportError) {
     const int id = m_nextId++;
     // Deliver even disconnected errors after QML has registered its completion listener.
-    QTimer::singleShot(0, this, [this, id, method, params] {
+    QTimer::singleShot(0, this, [this, id, method, params, reportError] {
         if (qEnvironmentVariable("NEKOTUNE_SAFE_MODE") == "1" &&
             (method == "extensions.enable" || method == "extensions.reload")) {
-            m_error = "Restart without --safe-mode to enable extensions";
-            emit errorChanged();
-            emit completed(id, {}, m_error);
+            const QString error = "Restart without --safe-mode to enable extensions";
+            if (reportError) {
+                m_error = error;
+                emit errorChanged();
+            }
+            emit completed(id, {}, error);
             return;
         }
         auto normalized = params;
@@ -96,15 +105,17 @@ int ExtensionsController::request(const QString &method, const QVariantMap &para
             normalized.insert("path", IpcClient::normalizePath(params.value("path").toString()));
         send(
             method, QJsonObject::fromVariantMap(normalized),
-            [this, id](const QJsonObject &data, const QString &error) {
+            [this, id, reportError](const QJsonObject &data, const QString &error) {
                 if (error.isEmpty() && data.contains("extensions")) apply(data);
                 if (error.isEmpty() && data.contains("selections")) {
                     m_selections = data.value("selections").toObject().toVariantMap();
                     m_appearanceLoaded = true;
                     emit changed();
                 }
-                m_error = error;
-                emit errorChanged();
+                if (reportError) {
+                    m_error = error;
+                    emit errorChanged();
+                }
                 emit completed(id, data.toVariantMap(), error);
             },
             false);

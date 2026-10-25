@@ -190,6 +190,32 @@ class WallpaperTest final : public QObject {
         m_manager->shutdown();
         QVERIFY(!m_manager->setOption("enabled", true));
     }
+    void backgroundDecodeTracksOutputAndReleasesArtwork() {
+        setup();
+        auto message = snapshot();
+        auto data = message.value("data").toObject();
+        auto song = data.value("song").toObject();
+        song["cover_url"] = "qrc:/artwork/default-cover.png";
+        data["song"] = song;
+        message["data"] = data;
+        send(message);
+        QTRY_VERIFY(m_manager->dataReady());
+        QVERIFY(m_manager->setOptions({{"enabled", true}, {"coverBackground", true}}));
+        QTRY_COMPARE(m_manager->runningCount(), 1);
+        QPointer<QQuickItem> image;
+        QTRY_VERIFY(image = window()->findChild<QQuickItem *>("wallpaperBackgroundImage"));
+        QTRY_COMPARE(image->property("status").toInt(), 1);
+        const auto expectedSize = [&] {
+            const auto scale = window()->screen()->devicePixelRatio();
+            return QSize(qCeil(window()->width() * scale), qCeil(window()->height() * scale));
+        };
+        QCOMPARE(image->property("sourceSize").toSize(), expectedSize());
+        QVERIFY(!image->property("cache").toBool());
+        window()->resize(360, 240);
+        QTRY_COMPARE(image->property("sourceSize").toSize(), expectedSize());
+        QVERIFY(m_manager->setOption("coverBackground", false));
+        QTRY_VERIFY(image.isNull());
+    }
     void preferencesValidatePersistAndFailHonestly() {
         QVERIFY(nekotune::AppPaths::saveSetting("language", "en"));
         QVERIFY(nekotune::AppPaths::saveSetting("wallpaper", QJsonObject{{"target", "invalid"},

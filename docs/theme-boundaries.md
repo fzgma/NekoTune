@@ -128,7 +128,9 @@
 
 ### 3.2 重建时机
 
-【现状】每个主题 QML 入口由一个 `ExtensionView` 承载，并使用**独立的 `QQmlEngine`**。入口描述（descriptor）一旦变化，就会销毁旧根对象和旧引擎，再新建引擎加载新入口。
+【现状】每个主题 QML 入口由一个 `ExtensionView` 承载。同一宿主引擎及控制器／翻译器内，同一扩展及 generation 的入口**共用 `QQmlEngine`**，各视图使用独立 `QQmlContext` 注入窗口等属性；根上下文向主题单例提供公共宿主属性。不同扩展及重载代次保留独立引擎，避免目录导入、JS 库及单例相互污染；最后一个视图卸载时释放引擎与缓存。没有 extensionId 的入口按所在目录分组。
+
+descriptor 的 `source`、`extensionId` 或 `generation` 变化会重建根对象。标题等展示元数据变化、窗口／壁纸上下文对象替换只更新属性，保留视图局部状态。generation 变化使用全新引擎与组件缓存；同一扩展中尚未切换代次的其他视图可继续使用旧引擎。宿主控制器或翻译器实例替换也会切换引擎，避免其他视图的公共上下文被覆盖。
 
 | 事件 | 是否重建主题 QML | 主题应怎样应对 |
 | --- | --- | --- |
@@ -165,7 +167,7 @@
 | `event` 信号 | 当前实现转发收到的 IPC 事件 | 有限公开 | 过滤完整事件名；独立功能扩展可提供主题所需数据 |
 | `window` | 宿主主窗口的根 QML 对象 | **内部** | 【现状】暴露的属性很多；其属性、页面树和 JavaScript 函数**都不是**主题接口 |
 
-【现状】`ExtensionView` 还向引擎注入了上下文属性 `controllers`、`i18n`、`extensionBridge`、`extensionId`、`hostWindow` 和 `wallpaperContext`。除 §4.4 中复用组件要求传入的 `i18n` 外，主题**应当**只通过 `ExtensionApi` 访问它们。
+【现状】`ExtensionView` 还向各视图的独立上下文注入了属性 `controllers`、`i18n`、`extensionBridge`、`extensionId`、`hostWindow` 和 `wallpaperContext`。除 §4.4 中复用组件要求传入的 `i18n` 外，主题**应当**只通过 `ExtensionApi` 访问它们。
 
 ### 4.3 宿主调用主题
 
@@ -354,7 +356,7 @@
 
 【现状】本文的边界是**产品和开发职责**，不是权限隔离：
 
-- 主题 QML 与宿主共用 GUI 线程，独立 `QQmlEngine` 不隔离死循环、阻塞或恶意脚本。
+- 主题 QML 与宿主共用 GUI 线程，按扩展隔离的 `QQmlEngine` 不隔离死循环、阻塞或恶意脚本。
 - `api.call` 可以转发任意 IPC 方法（§4.2），`api.app` 暴露完整的控制器集合。
 - 清单和包文件校验只检查格式、路径、资源和大小，**无法**证明代码只做界面工作。
 

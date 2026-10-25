@@ -291,7 +291,7 @@ SQLite 连接只能在创建它的线程使用。导入线程返回 `ImportedFil
 
 音乐来源以来源 ID 和来源曲目 ID 保存稳定身份，`songs.hash` 对在线记录为空。`ISourceResolver` 将在线引用异步解析成 `AudioProxy` 提供的回环代理 URL（扩展返回 `file://` 时为其数据目录内的文件），再交给当前播放后端；网络地址、鉴权头和有效期只存在于运行时。解析代次与播放意图隔离迟到结果。下载复用托管资源分配、文件校验与曲库入库。远程资源的歌词、封面使用独立资源键，不进行本地配套文件探测或清理。
 
-前端 `ExtensionsController` 消费后台注册快照。`PageHost` 保留原页面，并按用户选择加载替代项；`ExtensionView` 使用独立 QML 引擎管理视图和重载生命周期。默认 Shell 仍由 `Main.qml` 组织，完整 Shell 扩展接管窗口内容。恢复窗口由宿主独立加载，并强制使用内置主题。QML 故障不能实现进程级隔离，安全模式用于重启恢复。
+前端 `ExtensionsController` 消费后台注册快照。`PageHost` 保留原页面，并按用户选择加载替代项；同一宿主引擎及控制器／翻译器中，同一扩展及 generation 的 `ExtensionView` 共用 QML 引擎，每个视图通过独立 `QQmlContext` 注入窗口等属性，根上下文向主题单例提供公共宿主属性。不同扩展及重载代次保留独立引擎，最后一个视图卸载时释放引擎与缓存；描述符仅展示元数据或窗口上下文变化时保留根对象及局部状态。默认 Shell 仍由 `Main.qml` 组织，完整 Shell 扩展接管窗口内容。恢复窗口由宿主独立加载，并强制使用内置主题。QML 故障不能实现进程级隔离，安全模式用于重启恢复。
 
 `ThemeController` 消费扩展目录与独立的外观选择快照，与后端共用 `nekotune_theme_resolution`，按 `catalog.json` 中的变量归属合成外观与界面。`AppearanceService` 通过能力层的 `ContributionCatalog` 校验选择，外观和界面分别保存在 `config/extensions/appearance.json` 的 `selections.theme`、`selections.themeLayout`；旧注册表中的选择只在外观文件缺失时迁移。旧配置缺少后者时继续跟随外观，前端新的选择操作通过批量 `appearance.select` 原子保存两项。显示模式和用户的减少动态效果偏好由 `AppPaths` 保存，主题无法覆盖后者。`ThemeSlot` 按界面选择、独立扩展、内置界面的顺序回退，不改写独立插槽选择；静态背景来自外观选择，主题页面按实际显示加载。壁纸来源独立保存在 `wallpaper.themeWallpaper`，未指定时先取界面、再取外观的壁纸入口。深浅切换只更新变量与静态背景，保持 QML 入口实例和宿主播放、队列控制器。主题包校验与导出由 `theme_package` 完成，卡片与导入流程不实例化主题 QML。格式、信任、限制与恢复方法见 [主题文档](themes.md)。
 

@@ -2,8 +2,8 @@
 #include "domain/playback/playback_backend.h"
 #include <atomic>
 #include <condition_variable>
-#include <deque>
 #include <mutex>
+#include <span>
 #include <thread>
 #include <vector>
 namespace nekotune {
@@ -23,7 +23,8 @@ struct DecodedAudioInfo {
 // buffered so the render side can preserve one resampler across gapless sources.
 class PcmDecoder final {
   public:
-    PcmDecoder(QUrl source, qint64 seekMs = 0, size_t capacityBytes = 24 * 1024 * 1024);
+    // Zero selects the local-file (3 MiB) or network (8 MiB) buffer budget.
+    PcmDecoder(QUrl source, qint64 seekMs = 0, size_t capacityBytes = 0);
     ~PcmDecoder();
     PcmDecoder(const PcmDecoder &) = delete;
     PcmDecoder &operator=(const PcmDecoder &) = delete;
@@ -36,7 +37,7 @@ class PcmDecoder final {
 
   private:
     void decode(qint64 seekMs);
-    bool append(std::vector<float> samples);
+    bool append(std::span<const float> samples);
     static int interrupted(void *self);
     std::atomic_bool m_cancelled{false};
     std::atomic<qint64> m_deadline{0};
@@ -44,9 +45,9 @@ class PcmDecoder final {
     std::condition_variable m_space;
     DecodedAudioInfo m_info;
     std::optional<ReplayGainData> m_analysis;
-    std::deque<std::vector<float>> m_blocks;
+    // Allocated before starting the decoder; neither thread reallocates PCM blocks.
+    std::vector<float> m_buffer;
     size_t m_offset = 0, m_samples = 0;
-    const size_t m_capacity;
     std::thread m_thread;
 };
 } // namespace nekotune

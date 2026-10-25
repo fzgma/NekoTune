@@ -31,7 +31,9 @@ QString tag(AVDictionary *tags, const char *name) {
 }
 } // namespace
 PcmDecoder::PcmDecoder(QUrl url, qint64 seekMs, size_t capacityBytes)
-    : source(std::move(url)), m_capacity(std::max<size_t>(capacityBytes / sizeof(float), 8192) & ~size_t(1)) {
+    : source(std::move(url)),
+      m_buffer(std::max<size_t>((capacityBytes ? capacityBytes : (source.isLocalFile() ? 3 : 8) * 1024 * 1024) /
+                                   sizeof(float), 8192) & ~size_t(1)) {
     static std::once_flag networkInitialization;
     std::call_once(networkInitialization, [] { avformat_network_init(); });
     m_thread = std::thread([this, seekMs] { decode(seekMs); });
@@ -42,7 +44,10 @@ PcmDecoder::~PcmDecoder() {
         m_thread.join();
 }
 void PcmDecoder::cancel() {
-    m_cancelled = true;
+    {
+        std::lock_guard lock(m_mutex);
+        m_cancelled = true;
+    }
     m_space.notify_all();
 }
 int PcmDecoder::interrupted(void *opaque) {
@@ -64,42 +69,32 @@ size_t PcmDecoder::available() const {
 }
 size_t PcmDecoder::read(float *out, size_t frames) {
     std::unique_lock lock(m_mutex);
-    size_t count = std::min(frames * 2, m_samples), copied = 0;
-    while (copied < count) {
-        auto &block = m_blocks.front();
-        const size_t n = std::min(count - copied, block.size() - m_offset);
-        std::memcpy(out + copied, block.data() + m_offset, n * sizeof(float));
-        copied += n;
-        m_offset += n;
-        if (m_offset == block.size()) {
-            m_blocks.pop_front();
-            m_offset = 0;
-        }
-    }
-    m_samples -= copied;
+    const size_t count = std::min(frames, m_samples / 2) * 2;
+    if (!count)
+        return 0;
+    const size_t first = std::min(count, m_buffer.size() - m_offset);
+    std::memcpy(out, m_buffer.data() + m_offset, first * sizeof(float));
+    if (first < count)
+        std::memcpy(out + first, m_buffer.data(), (count - first) * sizeof(float));
+    m_offset = (m_offset + count) % m_buffer.size();
+    m_samples -= count;
     lock.unlock();
     m_space.notify_one();
-    return copied / 2;
+    return count / 2;
 }
-bool PcmDecoder::append(std::vector<float> samples) {
-    if (samples.empty())
-        return true;
-    if (samples.size() > m_capacity) {
-        for (size_t offset = 0; offset < samples.size(); offset += m_capacity) {
-            const size_t count = std::min(m_capacity, samples.size() - offset);
-            if (!append(std::vector<float>(samples.begin() + std::ptrdiff_t(offset),
-                                           samples.begin() + std::ptrdiff_t(offset + count))))
-                return false;
-        }
-        return true;
-    }
+bool PcmDecoder::append(std::span<const float> samples) {
     std::unique_lock lock(m_mutex);
-    m_space.wait(lock, [&] { return m_cancelled || m_samples + samples.size() <= m_capacity; });
-    if (m_cancelled)
-        return false;
-    m_info.decodedFrames += qint64(samples.size() / 2);
-    m_samples += samples.size();
-    m_blocks.push_back(std::move(samples));
+    while (!samples.empty()) {
+        m_space.wait(lock, [&] { return m_cancelled || m_samples < m_buffer.size(); });
+        if (m_cancelled)
+            return false;
+        const size_t offset = (m_offset + m_samples) % m_buffer.size();
+        const size_t count = std::min({samples.size(), m_buffer.size() - m_samples, m_buffer.size() - offset});
+        std::memcpy(m_buffer.data() + offset, samples.data(), count * sizeof(float));
+        m_samples += count;
+        m_info.decodedFrames += qint64(count / 2);
+        samples = samples.subspan(count);
+    }
     return true;
 }
 void PcmDecoder::decode(qint64 seekMs) {
@@ -225,6 +220,8 @@ void PcmDecoder::decode(qint64 seekMs) {
     }
     bool flushing = false;
     qint64 fallbackPosition = 0;
+    std::vector<const uint8_t *> inputs(size_t(codec->ch_layout.nb_channels));
+    std::vector<float> samples;
     while (!m_cancelled) {
         m_deadline = nowMs() + 15000;
         result = avcodec_receive_frame(codec, frame);
@@ -286,12 +283,11 @@ void PcmDecoder::decode(qint64 seekMs) {
         }
         const int count = frame->nb_samples - skip - discard;
         if (count > 0) {
-            std::vector<const uint8_t *> inputs(size_t(codec->ch_layout.nb_channels));
             const int planar = av_sample_fmt_is_planar(codec->sample_fmt);
             const int stride = av_get_bytes_per_sample(codec->sample_fmt) * (planar ? 1 : codec->ch_layout.nb_channels);
             for (size_t i = 0; i < (planar ? inputs.size() : 1); ++i)
                 inputs[i] = frame->extended_data[i] + skip * stride;
-            std::vector<float> samples(size_t(swr_get_out_samples(converter, count)) * 2);
+            samples.resize(size_t(swr_get_out_samples(converter, count)) * 2);
             uint8_t *out = reinterpret_cast<uint8_t *>(samples.data());
             result = swr_convert(converter, &out, int(samples.size() / 2), inputs.data(), count);
             if (result < 0) {
@@ -304,7 +300,7 @@ void PcmDecoder::decode(qint64 seekMs) {
                 break;
             }
             m_deadline = 0; // Backpressure is not an input timeout.
-            if (!append(std::move(samples)))
+            if (!append(samples))
                 break;
         }
         av_frame_unref(frame);

@@ -27,10 +27,8 @@ struct Reader {
     }
     std::vector<float> buffer;
     size_t offset = 0;
-    static constexpr size_t CapacitySamples = 12 * 1024 * 1024 / sizeof(float);
-    explicit Reader(std::shared_ptr<PcmDecoder> source, int sampleRate) : decoder(std::move(source)), rate(sampleRate) {
-        buffer.reserve(CapacitySamples);
-    }
+    static constexpr size_t MaxCapacitySamples = 12 * 1024 * 1024 / sizeof(float);
+    explicit Reader(std::shared_ptr<PcmDecoder> source, int sampleRate) : decoder(std::move(source)), rate(sampleRate) {}
     ~Reader() { swr_free(&resampler); }
     size_t available() const { return (buffer.size() - offset) / 2; }
     qint64 expected() const {
@@ -41,7 +39,7 @@ struct Reader {
                av_rescale_rnd(nativeOrigin, rate, inputRate, AV_ROUND_NEAR_INF);
     }
     void append(std::span<const float> samples) {
-        if (offset && (offset >= buffer.size() / 2 || buffer.size() + samples.size() > CapacitySamples)) {
+        if (offset && (offset >= buffer.size() / 2 || buffer.size() + samples.size() > buffer.capacity())) {
             buffer.erase(buffer.begin(), buffer.begin() + std::ptrdiff_t(offset));
             offset = 0;
         }
@@ -52,6 +50,8 @@ struct Reader {
         const auto info = decoder->info();
         if (!info.ready || !info.error.isEmpty() || drained || available() >= target)
             return;
+        // Reserve only the active lookahead plus one conversion block.
+        buffer.reserve(std::min(MaxCapacitySamples, target * 2 + 8192));
         if (!resampler) {
             AVChannelLayout stereo = AV_CHANNEL_LAYOUT_STEREO;
             if (swr_alloc_set_opts2(&resampler, &stereo, AV_SAMPLE_FMT_FLT, rate, &stereo, AV_SAMPLE_FMT_FLT,
@@ -126,7 +126,7 @@ struct PcmRenderer::Impl {
     void prepare(size_t requested) {
         const bool crossfade = next && authorized && request.strategy == TransitionStrategy::Crossfade;
         const size_t lookahead =
-            std::min(Reader::CapacitySamples / 2 - 65536,
+            std::min(Reader::MaxCapacitySamples / 2 - 65536,
                      crossfade ? size_t((request.crossfadeSeconds * 2 + 1) * rate) : size_t(rate * 2));
         const bool continuous = sameRateGapless();
         current->fill(std::max(requested, lookahead), !continuous && !awaitingPlan);

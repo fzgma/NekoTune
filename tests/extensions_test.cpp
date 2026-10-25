@@ -497,6 +497,70 @@ class ExtensionsTest final : public QObject {
         QTRY_VERIFY(view->ready());
         QCOMPARE(view->item()->property("title").toString(), names[1]);
     }
+    void sharedQmlViewsKeepContextsStateAndReloadIsolation() {
+        QTemporaryDir directory;
+        const auto path = directory.filePath("Page.qml");
+        auto writePage = [&](int version) {
+            QFile file(path);
+            const auto contents = QByteArray("import QtQuick\nItem { property int version: ") +
+                QByteArray::number(version) + "; property int localState: 0; "
+                "property string packageId: extensionId; property var contextWindow: hostWindow; "
+                "property var contextWallpaper: wallpaperContext }";
+            return file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();
+        };
+        QVERIFY(writePage(1));
+        QQmlEngine host;
+        QQmlComponent component(&host);
+        component.setData("import QtQuick; import NekoTune 1.0; ExtensionView {}", QUrl());
+        auto first = std::unique_ptr<ExtensionView>(qobject_cast<ExtensionView *>(component.create()));
+        auto second = std::unique_ptr<ExtensionView>(qobject_cast<ExtensionView *>(component.create()));
+        QVERIFY2(first && second, qPrintable(component.errorString()));
+        QObject windowA, windowB, wallpaper;
+        first->hostWindow = &windowA;
+        second->hostWindow = &windowB;
+        first->wallpaperContext = &wallpaper;
+        const QVariantMap descriptor{{"source", path}, {"extensionId", "test.shared"}, {"generation", 1}};
+        first->setDescriptor(descriptor);
+        second->setDescriptor(descriptor);
+        QTRY_VERIFY(first->ready() && second->ready());
+        auto *engine = qmlEngine(first->item());
+        QVERIFY(engine && engine != &host);
+        QCOMPARE(qmlEngine(second->item()), engine);
+        QCOMPARE(first->item()->property("packageId").toString(), "test.shared");
+        QCOMPARE(first->item()->property("contextWindow").value<QObject *>(), &windowA);
+        QCOMPARE(second->item()->property("contextWindow").value<QObject *>(), &windowB);
+        QCOMPARE(first->item()->property("contextWallpaper").value<QObject *>(), &wallpaper);
+        QVERIFY(!second->item()->property("contextWallpaper").value<QObject *>());
+        QPointer<QQuickItem> original(first->item());
+        original->setProperty("localState", 42);
+        auto metadata = descriptor;
+        metadata.insert("title", "Updated title");
+        first->setDescriptor(metadata);
+        first->hostWindow = &windowB;
+        emit first->contextChanged();
+        QTRY_COMPARE(first->item()->property("contextWindow").value<QObject *>(), &windowB);
+        QCOMPARE(first->item(), original.data());
+        QCOMPARE(first->item()->property("localState").toInt(), 42);
+        QVERIFY(writePage(2));
+        metadata.insert("generation", 2);
+        first->setDescriptor(metadata);
+        QTRY_VERIFY(original.isNull());
+        QTRY_VERIFY(first->ready());
+        QCOMPARE(first->item()->property("version").toInt(), 2);
+        QCOMPARE(second->item()->property("version").toInt(), 1);
+        QVERIFY(qmlEngine(first->item()) != engine);
+        QPointer<QQmlEngine> previous(engine), replacement(qmlEngine(first->item()));
+        second->setDescriptor(metadata);
+        QTRY_COMPARE(qmlEngine(second->item()), replacement.data());
+        QVERIFY(previous.isNull());
+        QCOMPARE(second->item()->property("version").toInt(), 2);
+        first.reset();
+        QVERIFY(second->ready());
+        QCOMPARE(second->item()->property("contextWindow").value<QObject *>(), &windowB);
+        second->setDescriptor({});
+        QTRY_VERIFY(!second->ready());
+        QVERIFY(replacement.isNull());
+    }
     void isolatedQmlViewsReloadAndRecover() {
         IpcClient client;
         AppControllers controllers(client);

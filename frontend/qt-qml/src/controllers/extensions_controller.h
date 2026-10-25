@@ -34,6 +34,8 @@ class ExtensionsController final : public FeatureController {
     QString error() const { return m_error; }
     bool appearanceReady() const;
     Q_INVOKABLE int request(const QString &method, const QVariantMap &params = {});
+    /// Requests from extension views: their failures belong to the view, not the manager error.
+    Q_INVOKABLE int viewRequest(const QString &method, const QVariantMap &params = {});
     Q_INVOKABLE void refresh();
     Q_INVOKABLE QVariantList contributions(const QString &kind) const;
     Q_INVOKABLE QVariantMap selected(const QString &slot) const;
@@ -51,6 +53,7 @@ class ExtensionsController final : public FeatureController {
 
   private:
     void apply(const QJsonObject &data);
+    int dispatch(const QString &method, const QVariantMap &params, bool reportError);
     QVariantList m_items, m_themes, m_commands;
     QVariantMap m_contributions, m_sources, m_runtime;
     QVariantMap m_selections;

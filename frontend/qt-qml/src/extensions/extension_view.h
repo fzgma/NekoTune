@@ -2,6 +2,8 @@
 #include <QPointer>
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <memory>
+class QQmlContext;
 class ExtensionView : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(QVariantMap descriptor READ descriptor WRITE setDescriptor NOTIFY descriptorChanged)
@@ -38,8 +40,11 @@ class ExtensionView : public QQuickItem {
   private:
     void schedule();
     void rebuild();
+    void updateContext();
     QVariantMap m_descriptor;
-    QQmlEngine *m_engine = nullptr;
+    QVariantMap m_loadedDescriptor;
+    std::shared_ptr<QQmlEngine> m_engine;
+    std::unique_ptr<QQmlContext> m_context;
     QPointer<QQuickItem> m_item;
     QString m_error;
     bool m_scheduled = false;

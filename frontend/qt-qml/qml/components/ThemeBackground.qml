@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Window
 import QtQuick.Effects
 
 Item {
@@ -19,10 +20,11 @@ Item {
         Image {
             id: backdrop; anchors.fill: parent
             objectName: "themeStaticBackgroundImage"
-            source: root.config.source || ""
+            source: root.visible && !custom.ready && root.width > 0 && root.height > 0 ? root.config.source || "" : ""
             asynchronous: true
-            sourceSize.width: Math.min(4096, Math.ceil(root.width))
-            sourceSize.height: Math.min(4096, Math.ceil(root.height))
+            cache: false
+            sourceSize.width: Math.max(1, Math.ceil(width * Screen.devicePixelRatio))
+            sourceSize.height: Math.max(1, Math.ceil(height * Screen.devicePixelRatio))
             fillMode: Image.PreserveAspectCrop
             visible: !effect.active
         }

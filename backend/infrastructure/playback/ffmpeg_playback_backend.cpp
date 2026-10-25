@@ -85,7 +85,7 @@ class PcmOutputWorker final : public QObject {
             timer->stop();
             return;
         }
-        loaded = std::make_shared<PcmDecoder>(url, seekMs, 15 * 1024 * 1024);
+        loaded = std::make_shared<PcmDecoder>(url, seekMs);
         if (rate > 0)
             createRenderer();
         timer->start();
@@ -139,7 +139,7 @@ class PcmOutputWorker final : public QObject {
             deferred = request;
             return;
         }
-        nextDecoder = std::make_shared<PcmDecoder>(request.source, 0, 15 * 1024 * 1024);
+        nextDecoder = std::make_shared<PcmDecoder>(request.source);
         nextRequest = request;
         reportedNext = false;
         reportedNextFailure = false;

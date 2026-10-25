@@ -147,6 +147,65 @@ class TransitionAudio : public TestAudioBackend {
 class AudioPipelineTest : public QObject {
     Q_OBJECT
   private slots:
+    void decoderRingPreservesSamples_data() {
+        QTest::addColumn<quint64>("capacityBytes");
+        QTest::addColumn<quint64>("expectedBytes");
+        QTest::newRow("small-ring") << quint64(32 * 1024) << quint64(32 * 1024);
+        QTest::newRow("default-local") << quint64(0) << quint64(3 * 1024 * 1024);
+    }
+    void decoderRingPreservesSamples() {
+        QFETCH(quint64, capacityBytes);
+        QFETCH(quint64, expectedBytes);
+        QTemporaryDir directory;
+        const size_t capacityFrames = size_t(expectedBytes) / (2 * sizeof(float));
+        const auto samples = wave(int(capacityFrames * 3 + 17), 48000);
+        const auto path = directory.filePath("ring.wav");
+        QVERIFY(wav(path, 48000, samples));
+        PcmDecoder decoder(QUrl::fromLocalFile(path), 0, size_t(capacityBytes));
+        QTRY_COMPARE_WITH_TIMEOUT(decoder.available(), capacityFrames, 3000);
+        QVERIFY(!decoder.info().eof);
+        std::vector<float> chunk(4093 * 2);
+        size_t offset = 0;
+        QElapsedTimer timer;
+        timer.start();
+        while (offset < samples.size() && timer.elapsed() < 5000) {
+            QVERIFY(decoder.available() <= capacityFrames);
+            const auto count = decoder.read(chunk.data(), chunk.size() / 2) * 2;
+            if (!count) {
+                QTest::qSleep(1);
+                continue;
+            }
+            QVERIFY(offset + count <= samples.size());
+            QVERIFY(std::equal(chunk.begin(), chunk.begin() + std::ptrdiff_t(count),
+                               samples.begin() + std::ptrdiff_t(offset)));
+            offset += count;
+        }
+        QCOMPARE(offset, samples.size());
+        QTRY_VERIFY_WITH_TIMEOUT(decoder.info().eof, 3000);
+        QVERIFY2(decoder.info().error.isEmpty(), qPrintable(decoder.info().error));
+        QCOMPARE(decoder.info().decodedFrames, qint64(samples.size() / 2));
+        QCOMPARE(decoder.available(), size_t(0));
+    }
+    void decoderBackpressureCancellation() {
+        QTemporaryDir directory;
+        const auto path = directory.filePath("cancel.wav");
+        QVERIFY(wav(path, 48000, wave(48000, 48000)));
+        for (int i = 0; i < 50; ++i) {
+            auto decoder = std::make_unique<PcmDecoder>(QUrl::fromLocalFile(path), 0, 32 * 1024);
+            QTRY_COMPARE_WITH_TIMEOUT(decoder->available(), size_t(4096), 3000);
+            QVERIFY(!decoder->info().eof);
+            // Alternate full-buffer cancellation and cancellation just after a wakeup.
+            float sample[2];
+            if (i % 2)
+                QCOMPARE(decoder->read(sample, 1), size_t(1));
+            QElapsedTimer timer;
+            timer.start();
+            decoder->cancel();
+            decoder->cancel();
+            decoder.reset();
+            QVERIFY(timer.elapsed() < 1000);
+        }
+    }
     void compressedPadding_data() {
         QTest::addColumn<QString>("name");
         for (const auto &name : {"trim.flac", "trim.mp3", "trim.m4a", "trim.opus"})
